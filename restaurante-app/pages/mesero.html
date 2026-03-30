@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mesero - Sistema Restaurante</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/estilos.css">
+</head>
+<body>
+    <div class="container">
+        <header style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="text-align: left;">
+                <a href="/pages/index.html" class="btn btn-primary" style="margin-bottom: 10px;">🏠 Volver</a>
+                <h1>Panel de Mesero</h1>
+            </div>
+            <div id="user-display" style="color: var(--text-secondary); font-size: 0.8rem; display: flex; align-items: center; gap: 8px;">
+                <span id="icon-user"></span> <span id="username-text"></span>
+            </div>
+        </header>
+
+        <div class="mesero-layout">
+            <!-- Sección Izquierda: Productos -->
+            <section class="card">
+                <h2 style="margin-bottom: 20px; border-bottom: 2px solid var(--primary); padding-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+                    <span id="icon-add"></span> Productos Disponibles
+                </h2>
+                <div id="productos-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px;">
+                    <!-- Los productos se cargarán aquí -->
+                    <div class="loader"></div>
+                </div>
+            </section>
+
+            <!-- Sección Derecha: Pedido Actual -->
+            <section class="card pedido-actual">
+                <h2 style="margin-bottom: 20px; border-bottom: 2px solid var(--success); padding-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+                    <span id="icon-note"></span> Tu Pedido
+                </h2>
+                
+                <div class="input-group">
+                    <label for="mesa">Mesa #</label>
+                    <input type="number" id="mesa" placeholder="Ej: 1" min="1">
+                </div>
+
+                <div id="pedido-items-container" style="max-height: 40vh; overflow-y: auto; margin-bottom: 20px;">
+                    <p style="color: var(--text-secondary); text-align: center; padding: 20px;">Agrega productos al pedido</p>
+                </div>
+
+                <div id="total-pedido" style="font-size: 1.2rem; font-weight: bold; margin-bottom: 20px; display: none;">
+                    Total: <span id="total-monto" style="color: var(--success);">$0</span>
+                </div>
+
+                <button id="btn-enviar-pedido" class="btn btn-success" style="width: 100%; font-size: 1.2rem; padding: 20px;" disabled>
+                    <span id="icon-send"></span> Enviar Pedido
+                </button>
+                <button id="btn-limpiar-pedido" class="btn btn-danger" style="width: 100%; margin-top: 10px; opacity: 0.7; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                    <span id="icon-delete"></span> Limpiar Todo
+                </button>
+            </section>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/js/icons.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/ui.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/mesero.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            window.auth.checkAuth();
+            const user = window.auth.getUser();
+            if (user) {
+                document.getElementById('username-text').textContent = user.username;
+            }
+
+            // Renderizar SVGs
+            document.getElementById('icon-user').innerHTML = window.icons.user;
+            document.getElementById('icon-add').innerHTML = window.icons.add;
+            document.getElementById('icon-note').innerHTML = window.icons.note;
+            document.getElementById('icon-send').innerHTML = window.icons.send;
+            document.getElementById('icon-delete').innerHTML = window.icons.delete;
+        });
+    </script>
+</body>
+</html>

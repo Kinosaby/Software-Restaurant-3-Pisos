@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Sistema Restaurante</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/estilos.css">
+</head>
+<body>
+    <div class="container">
+        <header style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="text-align: left;">
+                <a href="/pages/index.html" class="btn btn-primary" style="margin-bottom: 10px;">🏠 Volver</a>
+                <h1>⚙️ Administración</h1>
+            </div>
+            <div id="user-display" style="color: var(--text-secondary);"></div>
+        </header>
+
+        <!-- Stats Dashboard -->
+        <div class="grid" style="margin-bottom: 40px;">
+            <div class="card" style="text-align: center;">
+                <div id="total-ventas" style="font-size: 2rem; font-weight: 800; color: var(--success);">$0</div>
+                <div style="color: var(--text-secondary);">Ventas Totales</div>
+            </div>
+            <div class="card" style="text-align: center;">
+                <div id="num-pedidos" style="font-size: 2rem; font-weight: 800; color: var(--primary);">0</div>
+                <div style="color: var(--text-secondary);">Pedidos Realizados</div>
+            </div>
+            <div class="card" style="text-align: center;">
+                <div id="num-meseros" style="font-size: 2rem; font-weight: 800; color: var(--accent);">0</div>
+                <div style="color: var(--text-secondary);">Meseros Registrados</div>
+            </div>
+            <div class="card" style="text-align: center;">
+                <div id="num-productos" style="font-size: 2rem; font-weight: 800; color: var(--warning);">0</div>
+                <div style="color: var(--text-secondary);">Productos en Carta</div>
+            </div>
+        </div>
+
+        <div class="grid">
+            <!-- Usuarios -->
+            <section class="card">
+                <h2>👥 Gestión de Usuarios</h2>
+                <button class="btn btn-primary" style="width: 100%; margin: 20px 0;" onclick="showAddUserModal()">Crear Usuario</button>
+                <div id="users-list">
+                    <!-- JS -->
+                </div>
+            </section>
+
+            <!-- Productos -->
+            <section class="card">
+                <h2>🍔 Gestión de Productos</h2>
+                <button class="btn btn-success" style="width: 100%; margin: 20px 0;" onclick="showAddProductModal()">Crear Producto</button>
+                <div id="products-list">
+                    <!-- JS -->
+                </div>
+            </section>
+
+            <!-- Pedidos Recientes -->
+            <section class="card" style="grid-column: 1 / -1;">
+                <h2>📦 Todos los Pedidos</h2>
+                <div id="orders-list" style="margin-top: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px;">
+                    <!-- JS -->
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/js/icons.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/ui.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/admin.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const user = window.auth.getUser();
+            if (user) document.getElementById('user-display').textContent = `Admin: ${user.username}`;
+        });
+
+        async function showAddUserModal() {
+            const username = prompt('Nombre de usuario:');
+            const password = prompt('Contraseña:');
+            const role = prompt('Rol (admin/mesero/cocina):', 'mesero');
+            if (username && password && role) {
+                try {
+                    await window.api.crearUsuario({ username, password, role });
+                    window.ui.showToast('Usuario creado');
+                    loadUsers();
+                    loadDashboard();
+                } catch (error) { window.ui.showToast(error.message, 'error'); }
+            }
+        }
+
+        async function showAddProductModal() {
+            const nombre = prompt('Nombre del producto:');
+            const precio = prompt('Precio:');
+            if (nombre && precio) {
+                try {
+                    await window.api.crearProducto({ nombre, precio: parseFloat(precio) });
+                    window.ui.showToast('Producto creado');
+                    loadProducts();
+                    loadDashboard();
+                } catch (error) { window.ui.showToast(error.message, 'error'); }
+            }
+        }
+    </script>
+</body>
+</html>

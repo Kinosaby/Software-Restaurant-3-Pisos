@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cocina - Sistema Restaurante</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/estilos.css">
+</head>
+<body>
+    <div class="container">
+        <header style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="text-align: left;">
+                <a href="/pages/index.html" class="btn btn-primary" style="margin-bottom: 10px;">🏠 Volver</a>
+                <h1>Panel de Cocina</h1>
+            </div>
+            <div id="refresh-indicator" style="color: var(--text-secondary); font-size: 0.8rem;">
+                Actualizando en 3s...
+            </div>
+        </header>
+
+        <div id="pedidos-container" class="grid">
+            <!-- Los pedidos se renderizarán aquí -->
+            <div class="loader"></div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/js/icons.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/ui.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/cocina.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            window.auth.checkAuth();
+            const user = window.auth.getUser();
+            if (user.role !== 'cocina' && user.role !== 'admin') {
+                window.location.href = '/pages/index.html';
+            }
+        });
+    </script>
+</body>
+</html>

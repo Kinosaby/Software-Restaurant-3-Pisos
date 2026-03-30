@@ -1,0 +1,377 @@
+/* =============================================
+   3 PISOS POS — Design System v2
+   Dark Amber/Gold theme, premium feel
+   ============================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;900&family=Outfit:wght@300;400;500;600;700&display=swap');
+
+/* ── Variables ─────────────────────────────── */
+:root {
+  --bg:        #070401;
+  --bg2:       #0f0a04;
+  --card:      #110e07;
+  --card2:     #1a1308;
+  --border:    rgba(255,149,0,.18);
+  --border2:   rgba(255,149,0,.08);
+  --accent:    #ff9500;
+  --accent2:   #e05500;
+  --gold:      #ffc84a;
+  --gold2:     #ffde7a;
+  --cream:     #f5ead8;
+  --muted:     #8a7060;
+  --success:   #4ade80;
+  --warning:   #facc15;
+  --danger:    #f87171;
+  --blue:      #60a5fa;
+  --glow:      0 0 30px rgba(255,149,0,.3);
+  --glow2:     0 0 20px rgba(224,85,0,.25);
+  --radius:    14px;
+  --radius-sm: 8px;
+  --shadow:    0 24px 60px rgba(0,0,0,.7);
+  --font:      'Outfit', sans-serif;
+  --font-h:    'Cinzel', serif;
+  --trans:     .2s ease;
+}
+
+/* ── Reset ─────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;font-size:16px}
+body{
+  background:var(--bg);
+  color:var(--cream);
+  font-family:var(--font);
+  min-height:100vh;
+  overflow-x:hidden;
+  background-image:
+    radial-gradient(ellipse 90% 55% at 50% 0%,rgba(255,120,0,.06),transparent 65%),
+    radial-gradient(ellipse 60% 40% at 0% 100%,rgba(224,85,0,.05),transparent 60%),
+    linear-gradient(rgba(255,149,0,.025) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,149,0,.025) 1px,transparent 1px);
+  background-size:100% 100%,100% 100%,52px 52px,52px 52px;
+  background-attachment:fixed;
+}
+img{display:block;max-width:100%}
+button{cursor:pointer;font-family:var(--font)}
+input,select,textarea{font-family:var(--font)}
+a{color:inherit;text-decoration:none}
+
+/* ── Scrollbar ─────────────────────────────── */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:var(--bg2)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:10px}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,149,0,.3)}
+
+/* ── Animations ────────────────────────────── */
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes slideIn{from{opacity:0;transform:translateX(-20px)}to{opacity:1;transform:none}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes glow-pulse{0%,100%{box-shadow:0 0 15px rgba(255,149,0,.3)}50%{box-shadow:0 0 35px rgba(255,149,0,.6)}}
+@keyframes badge-in{from{transform:scale(.5);opacity:0}to{transform:scale(1);opacity:1}}
+
+/* ── Typography ────────────────────────────── */
+.brand{font-family:var(--font-h);font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:var(--gold);text-shadow:0 0 20px rgba(255,200,74,.5)}
+.brand-lg{font-size:clamp(1.6rem,4vw,3rem)}
+.brand-md{font-size:clamp(1rem,2.5vw,1.7rem)}
+.brand-sm{font-size:.88rem}
+.sub{color:var(--muted);font-size:.78rem;letter-spacing:.18em;text-transform:uppercase}
+.muted{color:var(--muted)}
+.text-accent{color:var(--accent)}
+.text-gold{color:var(--gold)}
+.text-success{color:var(--success)}
+.text-danger{color:var(--danger)}
+.text-warning{color:var(--warning)}
+.text-blue{color:var(--blue)}
+.text-sm{font-size:.82rem}
+.text-xs{font-size:.72rem}
+.fw600{font-weight:600}
+.fw700{font-weight:700}
+
+/* ── Card ──────────────────────────────────── */
+.card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  position:relative;
+  overflow:hidden;
+}
+.card::before{
+  content:'';position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(135deg,rgba(255,149,0,.04),transparent 60%);
+}
+.card-pad{padding:22px}
+.card-glow{box-shadow:var(--glow)}
+
+/* ── Buttons ───────────────────────────────── */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  font-size:.76rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;
+  border:none;border-radius:var(--radius-sm);padding:11px 18px;
+  transition:var(--trans);white-space:nowrap;
+}
+.btn-primary{
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  color:#fff;box-shadow:0 6px 22px rgba(255,100,0,.35);width:100%;
+}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 10px 30px rgba(255,100,0,.5)}
+.btn-primary:active{transform:translateY(0)}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed;transform:none}
+
+.btn-outline{background:transparent;border:1px solid var(--accent);color:var(--accent)}
+.btn-outline:hover{background:rgba(255,149,0,.1);box-shadow:var(--glow2)}
+
+.btn-gold{background:transparent;border:1px solid var(--gold);color:var(--gold)}
+.btn-gold:hover{background:rgba(255,200,74,.08)}
+
+.btn-ghost{background:transparent;border:1px solid rgba(255,255,255,.1);color:var(--muted)}
+.btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+
+.btn-danger{background:transparent;border:1px solid var(--danger);color:var(--danger)}
+.btn-danger:hover{background:rgba(248,113,113,.1)}
+
+.btn-success{background:rgba(74,222,128,.15);border:1px solid rgba(74,222,128,.3);color:var(--success)}
+.btn-success:hover{background:rgba(74,222,128,.25)}
+
+.btn-sm{padding:7px 12px;font-size:.68rem}
+.btn-icon{padding:8px;border-radius:var(--radius-sm);min-width:34px;min-height:34px}
+
+/* ── Inputs ────────────────────────────────── */
+.field{display:flex;flex-direction:column;gap:7px}
+.field label{font-size:.67rem;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--accent)}
+.field input,.field select,.field textarea{
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,149,0,.18);
+  border-radius:var(--radius-sm);
+  padding:11px 14px;color:var(--cream);
+  font-size:.9rem;outline:none;
+  transition:var(--trans);
+}
+.field input:focus,.field select:focus,.field textarea:focus{
+  border-color:var(--accent);background:rgba(255,149,0,.05);
+  box-shadow:0 0 0 3px rgba(255,149,0,.1);
+}
+.field input::placeholder,.field textarea::placeholder{color:var(--muted)}
+.field select option{background:var(--card2);color:var(--cream)}
+
+/* ── Topbar ────────────────────────────────── */
+.topbar{
+  position:sticky;top:0;z-index:100;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 24px;
+  background:rgba(7,4,1,.92);backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--border);
+}
+.topbar-logo{display:flex;align-items:center;gap:10px;cursor:pointer}
+.topbar-logo img{width:34px;height:34px;object-fit:cover;border-radius:8px;border:1px solid rgba(255,149,0,.3)}
+.topbar-right{display:flex;align-items:center;gap:10px}
+.avatar{
+  width:30px;height:30px;border-radius:50%;font-size:.72rem;font-weight:700;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  display:grid;place-items:center;color:#fff;
+}
+
+/* ── Chip/Badge ────────────────────────────── */
+.chip{
+  display:inline-flex;align-items:center;gap:4px;
+  font-size:.62rem;padding:3px 9px;border-radius:20px;font-weight:600;border:1px solid;
+}
+.chip-admin {background:rgba(255,149,0,.15);color:var(--accent);border-color:rgba(255,149,0,.3)}
+.chip-mesero{background:rgba(96,165,250,.12);color:var(--blue);border-color:rgba(96,165,250,.25)}
+.chip-cocina{background:rgba(74,222,128,.1);color:var(--success);border-color:rgba(74,222,128,.25)}
+
+/* State badges */
+.badge{display:inline-block;font-size:.62rem;font-weight:600;padding:3px 9px;border-radius:20px;letter-spacing:.06em;text-transform:uppercase}
+.badge-pendiente {background:rgba(250,204,21,.15);color:var(--warning);border:1px solid rgba(250,204,21,.3)}
+.badge-preparando{background:rgba(255,149,0,.15);color:var(--accent);border:1px solid rgba(255,149,0,.3)}
+.badge-listo     {background:rgba(74,222,128,.12);color:var(--success);border:1px solid rgba(74,222,128,.3)}
+.badge-entregado {background:rgba(96,165,250,.12);color:var(--blue);border:1px solid rgba(96,165,250,.3)}
+.badge-cancelado {background:rgba(248,113,113,.12);color:var(--danger);border:1px solid rgba(248,113,113,.3)}
+
+/* ── Screens ───────────────────────────────── */
+.screen{display:none;min-height:100vh;animation:fadeIn .3s ease}
+.screen.active{display:block}
+.vcenter{min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:24px}
+.container{max-width:1100px;margin:0 auto;padding:24px 20px 56px}
+
+/* ── Divider ───────────────────────────────── */
+.divider{width:100%;height:1px;background:linear-gradient(90deg,transparent,var(--border),transparent)}
+
+/* ── Login ─────────────────────────────────── */
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.login-card{width:100%;max-width:420px;padding:44px 36px;display:flex;flex-direction:column;gap:22px;align-items:center;box-shadow:var(--shadow),var(--glow)}
+.logo-big{width:120px;height:120px;object-fit:cover;border-radius:16px;border:2px solid rgba(255,149,0,.4);box-shadow:0 0 36px rgba(255,149,0,.4),0 0 72px rgba(255,100,0,.18)}
+.login-form{width:100%;display:flex;flex-direction:column;gap:14px}
+.login-error{background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.3);border-radius:var(--radius-sm);padding:10px 14px;color:var(--danger);font-size:.82rem;display:none}
+.login-error.show{display:block}
+
+/* ── Role Selector ─────────────────────────── */
+.roles-section{min-height:calc(100vh - 56px);display:flex;align-items:center;justify-content:center;padding:24px}
+.roles-inner{width:100%;max-width:860px;display:flex;flex-direction:column;gap:28px;align-items:center}
+.roles-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;width:100%}
+.role-card{
+  background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  padding:44px 20px;display:flex;flex-direction:column;align-items:center;gap:14px;
+  cursor:pointer;transition:.22s;position:relative;overflow:hidden;
+}
+.role-card::after{
+  content:'';position:absolute;bottom:0;left:0;right:0;height:3px;
+  background:linear-gradient(90deg,var(--accent),var(--gold));
+  transform:scaleX(0);transition:.25s;transform-origin:left;
+}
+.role-card:hover{border-color:var(--accent);transform:translateY(-5px);box-shadow:0 18px 45px rgba(0,0,0,.5),var(--glow)}
+.role-card:hover::after{transform:scaleX(1)}
+.role-icon{font-size:2.5rem;line-height:1}
+.role-title{font-family:var(--font-h);font-size:.85rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--gold)}
+.role-desc{font-size:.74rem;color:var(--muted);text-align:center;line-height:1.5}
+
+/* ── Admin Panel ───────────────────────────── */
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.stat-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px 16px;display:flex;flex-direction:column;gap:6px;transition:.18s}
+.stat-card:hover{border-color:var(--accent);box-shadow:var(--glow)}
+.stat-label{font-size:.63rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.stat-value{font-family:var(--font-h);font-size:1.65rem;font-weight:700;color:var(--gold)}
+.stat-sub{font-size:.7rem;color:var(--muted)}
+
+/* Tabs */
+.tabs-header{display:flex;gap:2px;border-bottom:1px solid var(--border);padding:0 20px;background:rgba(0,0,0,.2)}
+.tab-btn{
+  background:transparent;border:none;color:var(--muted);
+  font-size:.74rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;
+  padding:14px 18px;position:relative;transition:var(--trans);
+}
+.tab-btn::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:2px;background:var(--accent);transform:scaleX(0);transition:.2s}
+.tab-btn:hover{color:var(--cream)}
+.tab-btn.active{color:var(--accent)}
+.tab-btn.active::after{transform:scaleX(1)}
+.tab-pane{display:none;padding:20px;animation:fadeIn .25s ease}
+.tab-pane.active{display:block}
+
+/* Table */
+.table-wrap{overflow-x:auto;border-radius:var(--radius-sm)}
+table{width:100%;border-collapse:collapse;font-size:.83rem}
+thead{background:rgba(0,0,0,.3)}
+thead th{padding:11px 14px;text-align:left;font-size:.64rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+tbody tr{border-bottom:1px solid var(--border2);transition:var(--trans)}
+tbody tr:hover{background:rgba(255,149,0,.04)}
+tbody td{padding:12px 14px;vertical-align:middle}
+.empty-row td{text-align:center;padding:32px;color:var(--muted)}
+
+/* Panel header */
+.pane-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px}
+.pane-title{font-family:var(--font-h);font-size:.95rem;font-weight:700;letter-spacing:.06em;color:var(--gold)}
+
+/* ── Mesero Panel ──────────────────────────── */
+.mesero-grid{display:grid;grid-template-columns:1fr 380px;gap:18px;align-items:start}
+.productos-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
+.producto-card{
+  background:var(--card2);border:1px solid var(--border2);border-radius:var(--radius-sm);
+  padding:16px;cursor:pointer;transition:var(--trans);display:flex;flex-direction:column;gap:6px;
+}
+.producto-card:hover{border-color:var(--accent);box-shadow:var(--glow2);transform:translateY(-2px)}
+.producto-card.selected{border-color:var(--accent);background:rgba(255,149,0,.07)}
+.prod-nom{font-weight:600;font-size:.88rem;line-height:1.3}
+.prod-precio{font-family:var(--font-h);font-size:1.1rem;color:var(--gold)}
+.prod-cat{font-size:.67rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
+
+/* Carrito */
+.carrito-panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;position:sticky;top:74px}
+.carrito-header{padding:16px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.carrito-body{padding:16px;display:flex;flex-direction:column;gap:10px;min-height:120px;max-height:380px;overflow-y:auto}
+.carrito-item{display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.03);border-radius:var(--radius-sm);padding:10px 12px}
+.carrito-item-name{flex:1;font-size:.84rem;font-weight:500}
+.carrito-qty{display:flex;align-items:center;gap:6px}
+.qty-btn{background:rgba(255,149,0,.15);border:none;color:var(--accent);width:26px;height:26px;border-radius:5px;font-size:1rem;display:grid;place-items:center;cursor:pointer;transition:var(--trans)}
+.qty-btn:hover{background:rgba(255,149,0,.3)}
+.carrito-footer{padding:14px 18px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:12px}
+.total-row{display:flex;justify-content:space-between;align-items:center}
+.total-label{font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.total-value{font-family:var(--font-h);font-size:1.4rem;color:var(--gold)}
+
+/* ── Cocina Panel ──────────────────────────── */
+.cocina-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.pedido-card{
+  background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  overflow:hidden;transition:var(--trans);
+}
+.pedido-card:hover{box-shadow:var(--glow)}
+.pedido-card.urgente{border-color:rgba(248,113,113,.4);box-shadow:0 0 20px rgba(248,113,113,.15)}
+.pedido-header{padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border2)}
+.mesa-num{font-family:var(--font-h);font-size:1.1rem;font-weight:700;color:var(--gold)}
+.pedido-body{padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+.pedido-item{display:flex;align-items:center;gap:8px;font-size:.84rem}
+.pedido-item-qty{background:rgba(255,149,0,.15);color:var(--accent);border-radius:4px;padding:2px 7px;font-weight:700;font-size:.76rem;white-space:nowrap}
+.pedido-footer{padding:12px 16px;border-top:1px solid var(--border2);display:flex;gap:8px}
+.pedido-time{font-size:.68rem;color:var(--muted);display:flex;align-items:center;gap:4px}
+.dot-live{width:7px;height:7px;border-radius:50%;background:var(--success);animation:pulse 1.5s infinite}
+
+/* ── Modals ────────────────────────────────── */
+.overlay{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);display:none;align-items:center;justify-content:center;padding:20px}
+.overlay.open{display:flex}
+.modal{
+  background:var(--card2);border:1px solid var(--border);border-radius:var(--radius);
+  padding:30px;width:100%;max-width:440px;display:flex;flex-direction:column;gap:16px;
+  box-shadow:0 40px 80px rgba(0,0,0,.7),var(--glow);
+  animation:fadeIn .22s ease;
+}
+.modal-title{font-family:var(--font-h);font-size:.92rem;font-weight:700;letter-spacing:.06em;color:var(--gold)}
+.modal-body{display:flex;flex-direction:column;gap:14px}
+.modal-actions{display:flex;gap:9px;justify-content:flex-end;flex-wrap:wrap}
+
+/* ── Toast Notifications ───────────────────── */
+.toast-container{position:fixed;bottom:24px;right:24px;z-index:999;display:flex;flex-direction:column;gap:10px;pointer-events:none}
+.toast{
+  background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:14px 18px;min-width:260px;max-width:340px;
+  display:flex;align-items:center;gap:10px;font-size:.84rem;
+  animation:slideIn .25s ease;pointer-events:all;
+  box-shadow:0 8px 30px rgba(0,0,0,.5);
+}
+.toast-success{border-color:rgba(74,222,128,.35)}
+.toast-error  {border-color:rgba(248,113,113,.35)}
+.toast-info   {border-color:rgba(255,149,0,.35)}
+.toast-icon   {font-size:1.1rem;flex-shrink:0}
+.toast.out    {animation:fadeIn .25s ease reverse;opacity:0}
+
+/* ── Spinner ───────────────────────────────── */
+.spinner{width:22px;height:22px;border:2px solid rgba(255,149,0,.25);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+.loading-overlay{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;display:none}
+.loading-overlay.show{display:flex}
+
+/* ── Pedidos list (mesero view) ────────────── */
+.pedidos-list{display:flex;flex-direction:column;gap:10px;margin-top:16px}
+.pedido-row{
+  background:var(--card2);border:1px solid var(--border2);border-radius:var(--radius-sm);
+  padding:14px 16px;display:flex;align-items:center;gap:12px;cursor:pointer;
+  transition:var(--trans);
+}
+.pedido-row:hover{border-color:var(--accent);box-shadow:var(--glow2)}
+.pedido-row-info{flex:1}
+
+/* ── Socket indicator ──────────────────────── */
+.socket-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);transition:.3s}
+.socket-dot.connected{background:var(--success);animation:glow-pulse 2s infinite}
+.socket-dot.disconnected{background:var(--danger)}
+
+/* ── Nota input in carrito ─────────────────── */
+.nota-input{
+  background:rgba(255,255,255,.03);border:1px solid rgba(255,149,0,.12);border-radius:5px;
+  padding:5px 8px;color:var(--cream);font-size:.78rem;width:100%;outline:none;
+  transition:var(--trans);
+}
+.nota-input:focus{border-color:rgba(255,149,0,.4)}
+
+/* ── Media Queries ─────────────────────────── */
+@media(max-width:900px){
+  .mesero-grid{grid-template-columns:1fr}
+  .carrito-panel{position:static}
+  .stats-grid{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:640px){
+  .roles-grid{grid-template-columns:1fr}
+  .stats-grid{grid-template-columns:repeat(2,1fr)}
+  .topbar{padding:10px 14px}
+  .login-card{padding:32px 20px}
+  thead{display:none}
+  tbody td{display:block;padding:6px 14px}
+  tbody td::before{content:attr(data-label)' ';font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;display:block}
+}

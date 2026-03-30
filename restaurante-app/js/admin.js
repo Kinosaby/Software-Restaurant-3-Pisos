@@ -1,0 +1,191 @@
+/**
+ * admin.js — Panel de administración
+ */
+
+/* ── Carga de datos ─────────────────────────── */
+async function loadAdminData() {
+  loading(true);
+  try {
+    const [metricas, productos, usuarios, pedidos] = await Promise.all([
+      api.metricas.resumen(),
+      api.productos.listar(),
+      api.auth.listarUsuarios(),
+      api.pedidos.listar(),
+    ]);
+    State.productos = productos.productos || [];
+    State.usuarios  = usuarios.usuarios  || [];
+    State.pedidos   = pedidos.pedidos    || [];
+    renderAdminStats(metricas);
+    renderAdminUsers();
+    renderAdminProducts();
+    renderAdminPedidos();
+  } catch(e) { toastErr(e.message); }
+  finally { loading(false); }
+}
+
+function renderAdminStats(m) {
+  const dia = m.dia || {};
+  document.getElementById('stat-pedidos').textContent  = dia.total_pedidos || 0;
+  document.getElementById('stat-ventas').textContent   = fmt.currency(dia.total_ventas || 0);
+  document.getElementById('stat-semana').textContent   = fmt.currency(m.semana || 0);
+  document.getElementById('stat-productos').textContent = State.productos.length;
+  document.getElementById('stat-usuarios').textContent  = State.usuarios.length;
+}
+
+/* ── Usuarios ───────────────────────────────── */
+function renderAdminUsers() {
+  const tbody = document.querySelector('#table-users tbody');
+  if (!tbody) return;
+  if (!State.usuarios.length) { tbody.innerHTML = '<tr class="empty-row"><td colspan="4">Sin usuarios</td></tr>'; return; }
+  tbody.innerHTML = State.usuarios.map(u => `
+    <tr>
+      <td data-label="ID">${u.id}</td>
+      <td data-label="Usuario"><strong>${u.username}</strong></td>
+      <td data-label="Rol">${chipRole(u.role)}</td>
+      <td data-label="Acciones" style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="editUser(${u.id})"><i class="fa-solid fa-pen"></i></button>
+        <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${u.username}')"><i class="fa-solid fa-trash"></i></button>
+      </td>
+    </tr>`).join('');
+}
+
+function openNewUser()  { State.editId=null; document.getElementById('modal-user-title').textContent='Nuevo Usuario'; document.getElementById('form-user').reset(); openModal('modal-user'); }
+function editUser(id) {
+  const u = State.usuarios.find(x=>x.id===id);
+  if (!u) return;
+  State.editId = id;
+  document.getElementById('modal-user-title').textContent = 'Editar Usuario';
+  document.getElementById('u-id').value   = u.id;
+  document.getElementById('u-name').value = u.username;
+  document.getElementById('u-role').value = u.role;
+  document.getElementById('u-pass').value = '';
+  openModal('modal-user');
+}
+
+async function submitUser() {
+  const body = {
+    username: document.getElementById('u-name').value.trim(),
+    role:     document.getElementById('u-role').value,
+    password: document.getElementById('u-pass').value,
+  };
+  if (!body.username) { toastErr('El nombre es requerido'); return; }
+  try {
+    loading(true);
+    if (State.editId) {
+      await api.auth.actualizar(State.editId, body);
+      toastOk('Usuario actualizado');
+    } else {
+      if (!body.password) { toastErr('La contraseña es requerida'); loading(false); return; }
+      await api.auth.registrar(body);
+      toastOk('Usuario creado');
+    }
+    closeModal();
+    await loadAdminData();
+  } catch(e) { toastErr(e.message); }
+  finally { loading(false); }
+}
+
+async function deleteUser(id, name) {
+  if (!confirm(`¿Eliminar usuario "${name}"?`)) return;
+  try {
+    loading(true);
+    await api.auth.eliminar(id);
+    toastOk('Usuario eliminado');
+    await loadAdminData();
+  } catch(e) { toastErr(e.message); }
+  finally { loading(false); }
+}
+
+/* ── Productos ──────────────────────────────── */
+function renderAdminProducts() {
+  const tbody = document.querySelector('#table-products tbody');
+  if (!tbody) return;
+  if (!State.productos.length) { tbody.innerHTML = '<tr class="empty-row"><td colspan="4">Sin productos</td></tr>'; return; }
+  tbody.innerHTML = State.productos.map(p => `
+    <tr>
+      <td data-label="ID">${p.id}</td>
+      <td data-label="Nombre"><strong>${p.nombre}</strong></td>
+      <td data-label="Precio" class="text-gold fw600">${fmt.currency(p.precio)}</td>
+      <td data-label="Activo" style="text-align:center">${p.activo ? '<i class="fa-solid fa-check" style="color:var(--success)"></i>' : '<i class="fa-solid fa-xmark" style="color:var(--danger)"></i>'}</td>
+      <td data-label="Acciones" style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="editProduct(${p.id})"><i class="fa-solid fa-pen"></i></button>
+        <button class="btn btn-danger btn-sm" onclick="deleteProduct(${p.id},'${p.nombre}')"><i class="fa-solid fa-trash"></i></button>
+      </td>
+    </tr>`).join('');
+}
+
+function openNewProduct() { State.editId=null; document.getElementById('modal-prod-title').textContent='Nuevo Producto'; document.getElementById('form-product').reset(); openModal('modal-product'); }
+function editProduct(id) {
+  const p = State.productos.find(x=>x.id===id);
+  if (!p) return;
+  State.editId = id;
+  document.getElementById('modal-prod-title').textContent='Editar Producto';
+  document.getElementById('p-id').value       = p.id;
+  document.getElementById('p-name').value     = p.nombre;
+  document.getElementById('p-price').value    = p.precio;
+  document.getElementById('p-cat').value      = p.categoria || '';
+  document.getElementById('p-disp').checked   = p.disponible;
+  openModal('modal-product');
+}
+
+async function submitProduct() {
+  const body = {
+    nombre: document.getElementById('p-name').value.trim(),
+    precio: parseFloat(document.getElementById('p-price').value),
+    activo: document.getElementById('p-disp').checked,
+  };
+  if (!body.nombre || isNaN(body.precio)) { toastErr('Nombre y precio son requeridos'); return; }
+  try {
+    loading(true);
+    if (State.editId) {
+      await api.productos.actualizar(State.editId, body);
+      toastOk('Producto actualizado');
+    } else {
+      await api.productos.crear(body);
+      toastOk('Producto creado');
+    }
+    closeModal();
+    await loadAdminData();
+  } catch(e) { toastErr(e.message); }
+  finally { loading(false); }
+}
+
+async function deleteProduct(id, name) {
+  if (!confirm(`¿Eliminar producto "${name}"?`)) return;
+  try {
+    loading(true);
+    await api.productos.eliminar(id);
+    toastOk('Producto eliminado');
+    await loadAdminData();
+  } catch(e) { toastErr(e.message); }
+  finally { loading(false); }
+}
+
+/* ── Pedidos Admin ──────────────────────────── */
+function renderAdminPedidos() {
+  const tbody = document.querySelector('#table-orders tbody');
+  if (!tbody) return;
+  if (!State.pedidos.length) { tbody.innerHTML = '<tr class="empty-row"><td colspan="6">Sin pedidos</td></tr>'; return; }
+  tbody.innerHTML = State.pedidos.map(p => `
+    <tr>
+      <td data-label="ID">#${p.id}</td>
+      <td data-label="Mesa">Mesa ${p.mesa}</td>
+      <td data-label="Estado">${badgeHtml(p.estado)}</td>
+      <td data-label="Total" class="text-gold fw600">${fmt.currency(p.total)}</td>
+      <td data-label="Hora">${fmt.date(p.creado_en)}</td>
+      <td data-label="Acciones" style="display:flex;gap:6px">
+        <button class="btn btn-danger btn-sm" onclick="adminDeletePedido(${p.id})"><i class="fa-solid fa-trash"></i></button>
+      </td>
+    </tr>`).join('');
+}
+
+async function adminDeletePedido(id) {
+  if (!confirm(`¿Eliminar pedido #${id}? Esta acción no se puede deshacer.`)) return;
+  try {
+    loading(true);
+    await api.pedidos.eliminar(id);
+    toastOk(`Pedido #${id} eliminado`);
+    await loadAdminData();
+  } catch(e) { toastErr(e.message); }
+  finally { loading(false); }
+}

@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Restaurante 3 Pisos | POS</title>
+<meta name="description" content="Sistema de gestión de pedidos — Restaurante 3 Pisos">
+<link rel="stylesheet" href="/css/estilos.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+
+<!-- ═══ TOPBAR ══════════════════════════════════════════════ -->
+<header id="topbar" class="topbar" style="display:none">
+  <div class="topbar-logo" onclick="go('screen-menu')">
+    <img src="/assets/logo.jpg" alt="3 Pisos" onerror="this.style.display='none'">
+    <span class="brand brand-sm">3 PISOS</span>
+  </div>
+  <div class="topbar-right">
+    <div style="width:8px;height:8px;border-radius:50%;display:flex;align-items:center">
+      <div id="socket-dot" class="socket-dot"></div>
+    </div>
+    <div id="tb-avatar" class="avatar">A</div>
+    <span id="tb-username" class="text-sm fw600" style="color:var(--cream)">Usuario</span>
+    <span id="tb-role" class="chip chip-admin">admin</span>
+    <button class="btn btn-ghost btn-sm" onclick="doLogout()">Salir</button>
+  </div>
+</header>
+
+<!-- ═══ PANTALLA: LOGIN ═══════════════════════════════════════ -->
+<div id="screen-login" class="screen active">
+  <div class="login-wrap">
+    <div class="card login-card">
+      <img class="logo-big" src="/assets/logo.jpg" alt="Restaurante 3 Pisos"
+           onerror="this.outerHTML='<div style=\'width:90px;height:90px;font-size:3rem;display:grid;place-items:center\'></div>'">
+      <div style="text-align:center">
+        <div class="brand brand-lg">3 PISOS</div>
+        <p class="sub" style="margin-top:6px">Sistema de gestión de pedidos</p>
+      </div>
+      <div class="divider"></div>
+      <form id="login-form" class="login-form">
+        <div class="field">
+          <label>Usuario</label>
+          <input id="login-user" type="text" placeholder="Nombre de usuario" autocomplete="username">
+        </div>
+        <div class="field">
+          <label>Contraseña</label>
+          <div style="position:relative; display:flex; width:100%;">
+            <input id="login-pass" type="password" placeholder="••••••••" autocomplete="current-password" style="width:100%; padding-right:40px;">
+            <button type="button" onclick="const p = document.getElementById('login-pass'); p.type = p.type === 'password' ? 'text' : 'password';" style="position:absolute; right:12px; top:50%; transform:translateY(-50%); background:none; border:none; font-size:0.9rem; cursor:pointer;" title="Mostrar/ocultar contraseña"><i class="fa-solid fa-eye"></i></button>
+          </div>
+        </div>
+        <div id="login-error" class="login-error"></div>
+        <button id="login-btn" class="btn btn-primary" type="submit"><i class="fa-solid fa-right-to-bracket"></i> INGRESAR</button>
+      </form>
+
+    </div>
+  </div>
+</div>
+
+<!-- ═══ PANTALLA: MENÚ DE ROLES ══════════════════════════════ -->
+<div id="screen-menu" class="screen">
+  <div class="roles-section">
+    <div class="roles-inner">
+      <div style="text-align:center">
+        <div class="brand brand-md">Panel de Control</div>
+        <p class="sub" style="margin-top:8px">Selecciona tu área de trabajo</p>
+      </div>
+      <div class="roles-grid">
+        <!-- Cocina -->
+        <div class="role-card" onclick="enterCocina()" id="role-cocina">
+          <div class="role-icon"><i class="fa-solid fa-fire-burner"></i></div>
+          <div class="role-title">Cocina</div>
+          <div class="role-desc">Ver pedidos entrantes y actualizar estado en tiempo real</div>
+        </div>
+        <!-- Mesero -->
+        <div class="role-card" onclick="enterMesero()" id="role-mesero">
+          <div class="role-icon"><i class="fa-solid fa-user-tie"></i></div>
+          <div class="role-title">Mesero</div>
+          <div class="role-desc">Tomar pedidos, gestionar mesas y hacer seguimiento</div>
+        </div>
+        <!-- Admin -->
+        <div class="role-card" onclick="enterAdmin()" id="role-admin">
+          <div class="role-icon"><i class="fa-solid fa-gear"></i></div>
+          <div class="role-title">Administrador</div>
+          <div class="role-desc">Gestionar usuarios, productos y ver métricas del negocio</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ PANTALLA: ADMIN ═══════════════════════════════════════ -->
+<div id="screen-admin" class="screen">
+  <div class="container">
+
+    <!-- Header con botón volver -->
+    <div style="display:flex;align-items:center;gap:15px;margin-bottom:20px">
+      <button class="btn btn-ghost btn-sm" onclick="go('screen-menu')" style="padding:4px 8px;font-size:1.2rem;border:1px solid var(--border);" title="Volver al menú"><i class="fa-solid fa-arrow-left"></i></button>
+      <div class="brand brand-md">Panel de Administración</div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card"><span class="stat-label">Pedidos hoy</span><span id="stat-pedidos" class="stat-value">—</span></div>
+      <div class="stat-card"><span class="stat-label">Ventas del día</span><span id="stat-ventas" class="stat-value">—</span></div>
+      <div class="stat-card"><span class="stat-label">Ventas Semana</span><span id="stat-semana" class="stat-value">—</span></div>
+      <div class="stat-card"><span class="stat-label">Productos</span><span id="stat-productos" class="stat-value">—</span></div>
+      <div class="stat-card"><span class="stat-label">Usuarios</span><span id="stat-usuarios" class="stat-value">—</span></div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="card">
+      <div class="tabs-header">
+        <button class="tab-btn active" onclick="showTab('admin-users')">Usuarios</button>
+        <button class="tab-btn" onclick="showTab('admin-products')">Productos</button>
+        <button class="tab-btn" onclick="showTab('admin-orders')">Pedidos</button>
+      </div>
+
+      <!-- Tab Usuarios -->
+      <div id="admin-users" class="tab-pane active">
+        <div class="pane-header">
+          <span class="pane-title">Gestión de Usuarios</span>
+          <button class="btn btn-gold btn-sm" onclick="openNewUser()">+ Nuevo</button>
+        </div>
+        <div class="table-wrap">
+          <table id="table-users">
+            <thead><tr><th>ID</th><th>Usuario</th><th>Rol</th><th>Acciones</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Tab Productos -->
+      <div id="admin-products" class="tab-pane">
+        <div class="pane-header">
+          <span class="pane-title">Gestión de Productos</span>
+          <button class="btn btn-gold btn-sm" onclick="openNewProduct()">+ Nuevo</button>
+        </div>
+        <div class="table-wrap">
+          <table id="table-products">
+            <thead><tr><th>ID</th><th>Nombre</th><th>Precio</th><th>Activo</th><th>Acciones</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Tab Pedidos -->
+      <div id="admin-orders" class="tab-pane">
+        <div class="pane-header">
+          <span class="pane-title">Lista de Pedidos</span>
+          <button class="btn btn-outline btn-sm" onclick="loadAdminData()">↻ Actualizar</button>
+        </div>
+        <div class="table-wrap">
+          <table id="table-orders">
+            <thead><tr><th>ID</th><th>Mesa</th><th>Estado</th><th>Total</th><th>Hora</th><th>Acciones</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══ PANTALLA: MESERO ══════════════════════════════════════ -->
+<div id="screen-mesero" class="screen">
+  <div class="container">
+    <div class="mesero-grid">
+
+      <!-- Catálogo izquierda -->
+      <div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div style="display:flex;align-items:center;gap:12px">
+            <button class="btn btn-ghost btn-sm admin-only" onclick="go('screen-menu')" style="padding:4px 8px;font-size:1.1rem;border:1px solid var(--border);" title="Volver al menú"><i class="fa-solid fa-arrow-left"></i></button>
+            <span class="brand brand-sm" style="font-family:var(--font-h)">Menú</span>
+          </div>
+          <div class="field" style="max-width:160px">
+            <label>Mesa #</label>
+            <input id="mesa-num" type="number" min="1" placeholder="Nº mesa" style="padding:8px 12px">
+          </div>
+        </div>
+        <div id="catalogo-grid" class="productos-grid"></div>
+
+        <!-- Pedidos activos -->
+        <div style="margin-top:28px">
+          <div class="brand brand-sm" style="font-family:var(--font-h);margin-bottom:12px">Pedidos activos</div>
+          <div id="mesero-pedidos-list" class="pedidos-list"></div>
+        </div>
+      </div>
+
+      <!-- Carrito derecha -->
+      <div class="carrito-panel">
+        <div class="carrito-header">
+          <span class="brand-sm fw600" style="font-family:var(--font-h)"><i class="fa-solid fa-cart-shopping"></i> Carrito <span id="carrito-count" class="text-accent">(0)</span></span>
+          <button class="btn btn-ghost btn-sm" onclick="clearCarrito()">Limpiar</button>
+        </div>
+        <div id="carrito-body" class="carrito-body">
+          <p class="muted text-sm" style="text-align:center;padding:24px 0">El carrito está vacío</p>
+        </div>
+        <div class="carrito-footer">
+          <div class="total-row">
+            <span class="total-label">Total</span>
+            <span id="carrito-total" class="total-value">$0.00</span>
+          </div>
+          <form id="form-pedido">
+            <button id="btn-enviar-pedido" class="btn btn-primary" type="submit">
+               <i class="fa-solid fa-paper-plane"></i> Enviar Pedido a Cocina
+            </button>
+          </form>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ═══ PANTALLA: COCINA ══════════════════════════════════════ -->
+<div id="screen-cocina" class="screen">
+  <div class="container">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+      <div style="display:flex;align-items:center;gap:15px">
+        <button class="btn btn-ghost btn-sm admin-only" onclick="go('screen-menu')" style="padding:4px 8px;font-size:1.2rem;border:1px solid var(--border);height:fit-content" title="Volver al menú"><i class="fa-solid fa-arrow-left"></i></button>
+        <div>
+          <div class="brand brand-md"><i class="fa-solid fa-utensils"></i> Cocina</div>
+          <p class="sub">Pedidos en tiempo real</p>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <span class="muted text-sm"><span id="cocina-count" class="text-accent fw600">0</span> pedidos activos</span>
+        <button class="btn btn-outline btn-sm" onclick="loadCocinaData()">↻ Actualizar</button>
+      </div>
+    </div>
+    <div id="cocina-grid" class="cocina-grid"></div>
+  </div>
+</div>
+
+<!-- ═══ MODALES ═══════════════════════════════════════════════ -->
+
+<!-- Modal Usuario -->
+<div class="overlay" id="overlay-user" onclick="closeModal()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title" id="modal-user-title">Usuario</div>
+    <form id="form-user" class="modal-body">
+      <input type="hidden" id="u-id">
+      <div class="field"><label>Nombre</label><input id="u-name" type="text" placeholder="nombre_usuario" required></div>
+      <div class="field">
+        <label>Contraseña</label>
+        <div style="position:relative; display:flex; width:100%;">
+          <input id="u-pass" type="password" placeholder="Dejar vacío para no cambiar" style="width:100%; padding-right:40px;">
+          <button type="button" onclick="const p = document.getElementById('u-pass'); p.type = p.type === 'password' ? 'text' : 'password';" style="position:absolute; right:12px; top:50%; transform:translateY(-50%); background:none; border:none; font-size:0.9rem; cursor:pointer;" title="Mostrar/ocultar contraseña"><i class="fa-solid fa-eye"></i></button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Rol</label>
+        <select id="u-role">
+          <option value="admin">Administrador</option>
+          <option value="mesero" selected>Mesero</option>
+          <option value="cocina">Cocina</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="closeModal()">Cancelar</button>
+        <button type="submit" class="btn btn-primary btn-sm" style="width:auto">Guardar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal Producto -->
+<div class="overlay" id="overlay-product" onclick="closeModal()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title" id="modal-prod-title">Producto</div>
+    <form id="form-product" class="modal-body">
+      <input type="hidden" id="p-id">
+      <div class="field"><label>Nombre</label><input id="p-name" type="text" placeholder="Nombre del producto" required></div>
+      <div class="field"><label>Precio</label><input id="p-price" type="number" step="0.01" min="0.01" placeholder="0.00" required></div>
+      <div class="field" style="flex-direction:row;align-items:center;gap:10px">
+        <input id="p-disp" type="checkbox" checked style="width:18px;height:18px">
+        <label style="text-transform:none;letter-spacing:0;font-size:.85rem">Activo</label>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="closeModal()">Cancelar</button>
+        <button type="submit" class="btn btn-primary btn-sm" style="width:auto">Guardar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal Detalle Pedido -->
+<div class="overlay" id="overlay-detalle" onclick="closeModal()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title">Detalle del Pedido</div>
+    <div id="detalle-content" class="modal-body"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ LOADING OVERLAY ═══════════════════════════════════════ -->
+<div id="loading-overlay" class="loading-overlay">
+  <div class="spinner" style="width:36px;height:36px;border-width:3px"></div>
+</div>
+
+<!-- ═══ TOAST CONTAINER ══════════════════════════════════════= -->
+<div id="toast-container" class="toast-container"></div>
+
+<!-- ═══ SCRIPTS ══════════════════════════════════════════════ -->
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/main.js"></script>
+<script src="/js/admin.js"></script>
+<script src="/js/mesero.js"></script>
+<script src="/js/cocina.js"></script>
+
+<script>
+/* Parches de compatibilidad con IDs de modales */
+function openModal(id) {
+  const overlayId = 'overlay-' + id.replace('modal-','');
+  const el = document.getElementById(overlayId) || document.getElementById(id)?.closest?.('.overlay');
+  if (el) el.classList.add('open');
+}
+function closeModal() {
+  document.querySelectorAll('.overlay').forEach(o => o.classList.remove('open'));
+  clearModalState?.();
+}
+</script>
+</body>
+</html>
