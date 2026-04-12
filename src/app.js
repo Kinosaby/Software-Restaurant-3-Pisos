@@ -69,17 +69,19 @@ app.use('/api/pedidos',   pedidosRoutes);
 app.use('/api/metricas',  metricasRoutes);
 
 // ── Health check ──────────────────────────────────────────────────────────────
-app.get('/health', (req, res) => {
+const healthHandler = (req, res) => {
   res.json({
     success: true,
     status: 'ok',
     timestamp: new Date().toISOString(),
     env: env.NODE_ENV,
   });
-});
+};
+app.get('/health',      healthHandler);
+app.get('/api/health',  healthHandler);
 
 // ── SPA fallback — sirve index.html para rutas del frontend ───────────────────
-app.get('*', (req, res) => {
+app.get('*', (req, res, next) => {
   // No interceptar rutas de la API
   if (req.originalUrl.startsWith('/api/')) {
     return next(new AppError('Ruta no encontrada.', 404, 'NOT_FOUND'));
