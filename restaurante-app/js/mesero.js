@@ -3,9 +3,9 @@
  */
 
 const CATEGORIAS = [
-  'Tortas','Guajolotes','Quesadillas','Enchiladas','Pambazos',
-  'Tostadas','Volcanes','Asada Fries','Tacos','Burritos',
-  'Bebidas','Gringas','Postres','General'
+  'Tortas','Guajolotes','Pambazos','Quesadillas','Enchiladas',
+  'Tostadas','Volcanes','Tacos','Asada Fries','Burritos',
+  'Gringas','Bebidas','Postres','General'
 ];
 
 /* ── Carga de datos ─────────────────────────── */
