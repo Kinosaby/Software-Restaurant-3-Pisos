@@ -12,6 +12,13 @@ const path          = require('path');
 const env           = require('./config/env');
 const logger        = require('./utils/logger');
 
+// Inicializar base de datos
+const { initializeDatabase } = require('./config/initDb');
+initializeDatabase().catch(err => {
+  logger.error('Fallo crítico al inicializar BD', { error: err.message });
+  process.exit(1);
+});
+
 // Rutas
 const authRoutes     = require('./routes/auth');
 const pedidosRoutes  = require('./routes/pedidos');
