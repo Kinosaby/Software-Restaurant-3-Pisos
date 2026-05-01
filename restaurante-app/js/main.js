@@ -180,8 +180,11 @@ function initSocket() {
   });
 
   s.on('nuevo_pedido', (pedido) => {
-    State.pedidos.unshift(pedido);
-    toastInfo(`Pedido #${pedido.id} — Mesa ${pedido.mesa}`);
+    // FIFO: nuevo pedido al FINAL de la cola
+    State.pedidos = [...State.pedidos, pedido];
+    if (getRole() === 'mesero' || getRole() === 'admin') {
+      toastInfo(`Pedido #${pedido.id} registrado — Mesa ${pedido.mesa}`);
+    }
     renderCocina();
     renderMeseroPedidos();
     renderAdminPedidos();
@@ -189,8 +192,18 @@ function initSocket() {
 
   s.on('pedido_actualizado', (pedido) => {
     const i = State.pedidos.findIndex(p => p.id === pedido.id);
-    if (i >= 0) State.pedidos[i] = pedido; else State.pedidos.unshift(pedido);
-    toastInfo(`Pedido #${pedido.id} → ${pedido.estado}`);
+    if (i >= 0) State.pedidos[i] = pedido; else State.pedidos.push(pedido);
+
+    // Avisos inteligentes por rol
+    const role = getRole();
+    if (pedido.estado === 'listo' && role === 'mesero') {
+      toastOk(`Mesa ${pedido.mesa} lista para cobrar — ${fmt.currency(pedido.total)}`);
+    } else if (pedido.estado === 'listo' && role === 'admin') {
+      toastInfo(`Pedido #${pedido.id} listo — Mesa ${pedido.mesa}`);
+    } else if (pedido._accion === 'productos_agregados' && role === 'cocina') {
+      toastInfo(`Pedido #${pedido.id} actualizado — nuevos items en Mesa ${pedido.mesa}`);
+    }
+
     renderCocina();
     renderMeseroPedidos();
     renderAdminPedidos();

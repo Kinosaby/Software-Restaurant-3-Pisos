@@ -42,6 +42,13 @@ exports.cancelar = asyncHandler(async (req, res) => {
   res.json({ success: true, mensaje: 'Pedido cancelado', pedido });
 });
 
+/** PATCH /api/pedidos/:id/agregar  (mesero, admin) */
+exports.agregar = asyncHandler(async (req, res) => {
+  const io     = getIo(req);
+  const pedido = await pedidosService.agregarProductos(req.params.id, req.body, io);
+  res.json({ success: true, mensaje: 'Productos agregados al pedido', pedido });
+});
+
 /** DELETE /api/pedidos/:id  (admin) */
 exports.eliminar = asyncHandler(async (req, res) => {
   const pedido = await pedidosService.eliminar(req.params.id);

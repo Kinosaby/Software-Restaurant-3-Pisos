@@ -100,12 +100,13 @@ async function deleteUser(id, name) {
 function renderAdminProducts() {
   const tbody = document.querySelector('#table-products tbody');
   if (!tbody) return;
-  if (!State.productos.length) { tbody.innerHTML = '<tr class="empty-row"><td colspan="4">Sin productos</td></tr>'; return; }
+  if (!State.productos.length) { tbody.innerHTML = '<tr class="empty-row"><td colspan="6">Sin productos</td></tr>'; return; }
   tbody.innerHTML = State.productos.map(p => `
     <tr>
       <td data-label="ID">${p.id}</td>
       <td data-label="Nombre"><strong>${p.nombre}</strong></td>
       <td data-label="Precio" class="text-gold fw600">${fmt.currency(p.precio)}</td>
+      <td data-label="Categoria" class="text-xs muted">${p.categoria || '—'}</td>
       <td data-label="Activo" style="text-align:center">${p.activo ? '<i class="fa-solid fa-check" style="color:var(--success)"></i>' : '<i class="fa-solid fa-xmark" style="color:var(--danger)"></i>'}</td>
       <td data-label="Acciones" style="display:flex;gap:6px">
         <button class="btn btn-ghost btn-sm" onclick="editProduct(${p.id})"><i class="fa-solid fa-pen"></i></button>
@@ -123,15 +124,17 @@ function editProduct(id) {
   document.getElementById('p-id').value       = p.id;
   document.getElementById('p-name').value     = p.nombre;
   document.getElementById('p-price').value    = p.precio;
+  document.getElementById('p-cat').value      = p.categoria || '';
   document.getElementById('p-disp').checked   = !!p.activo;
   openModal('modal-product');
 }
 
 async function submitProduct() {
   const body = {
-    nombre: document.getElementById('p-name').value.trim(),
-    precio: parseFloat(document.getElementById('p-price').value),
-    activo: document.getElementById('p-disp').checked,
+    nombre:    document.getElementById('p-name').value.trim(),
+    precio:    parseFloat(document.getElementById('p-price').value),
+    categoria: document.getElementById('p-cat').value || 'General',
+    activo:    document.getElementById('p-disp').checked,
   };
   if (!body.nombre || isNaN(body.precio)) { toastErr('Nombre y precio son requeridos'); return; }
   try {

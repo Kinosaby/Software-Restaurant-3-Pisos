@@ -74,6 +74,23 @@ router.patch('/:id/cancelar',
   ctrl.cancelar
 );
 
+/** Agregar productos a pedido activo (mesero/admin) */
+const agregarProductosRules = [
+  param('id').isInt({ min: 1 }).withMessage('ID inválido.'),
+  body('productos').isArray({ min: 1 }).withMessage('Debe incluir al menos un producto.'),
+  body('productos.*.producto_id').isInt({ min: 1 }).withMessage('producto_id inválido.'),
+  body('productos.*.cantidad').isInt({ min: 1 }).withMessage('Cantidad mínima: 1.'),
+  body('productos.*.nota').optional().isString().isLength({ max: 200 }),
+];
+
+router.patch('/:id/agregar',
+  authMiddleware,
+  requireRole('admin', 'mesero'),
+  agregarProductosRules,
+  validate,
+  ctrl.agregar
+);
+
 /** Eliminar pedido (admin only) */
 router.delete('/:id',
   authMiddleware,

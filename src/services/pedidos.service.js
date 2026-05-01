@@ -3,10 +3,10 @@
  * Columnas reales:
  *   pedidos:        id, mesa, estado, total, usuario_id, creado_en
  *   pedido_detalle: id, pedido_id, producto_id, cantidad, nota
- *   productos:      id, nombre, precio, activo, creado_en
+ *   productos:      id, nombre, precio, activo
  *   ventas:         id, pedido_id, total, fecha
  *
- * Estados válidos (CHECK en BD): pendiente | preparando | listo | cancelado
+ * Estados válidos: pendiente | preparando | listo | pagado | cancelado
  */
 const pool    = require('../config/db');
 const AppError = require('../utils/AppError');
@@ -35,7 +35,7 @@ const QUERY_DETALLE = `
   LEFT JOIN productos pr      ON pr.id = pd.producto_id
 `;
 
-/** Devuelve todos los pedidos con su detalle, opcionalmente filtrados por estado */
+/** Devuelve todos los pedidos con su detalle, orden FIFO (más antiguo primero) */
 async function listar({ estado } = {}) {
   let query  = QUERY_DETALLE;
   const params = [];
@@ -45,7 +45,8 @@ async function listar({ estado } = {}) {
     params.push(estado);
   }
 
-  query += ' GROUP BY p.id ORDER BY p.id DESC';
+  // FIFO: el pedido más antiguo aparece primero en cocina
+  query += ' GROUP BY p.id ORDER BY p.creado_en ASC, p.id ASC';
   const { rows } = await pool.query(query, params);
   return rows;
 }
@@ -64,7 +65,6 @@ async function obtenerPorId(id) {
 
 /**
  * Crea un nuevo pedido en una transacción atómica.
- * También registra en la tabla ventas al finalizar.
  */
 async function crear({ mesa, productos, usuario_id = null }, io = null) {
   if (!productos || productos.length === 0) {
@@ -120,7 +120,82 @@ async function crear({ mesa, productos, usuario_id = null }, io = null) {
   }
 }
 
-/** Cambia el estado del pedido. Si pasa a 'listo', registra en ventas. */
+/**
+ * Agrega productos a un pedido existente (pendiente o preparando).
+ * Cocina recibe notificación de pedido actualizado.
+ */
+async function agregarProductos(id, { productos }, io = null) {
+  if (!productos || productos.length === 0) {
+    throw new AppError('Debe incluir al menos un producto.', 400, 'EMPTY_ORDER');
+  }
+
+  const pedido = await obtenerPorId(id);
+  if (!['pendiente', 'preparando'].includes(pedido.estado)) {
+    throw new AppError(
+      `No se puede modificar un pedido en estado "${pedido.estado}". Solo pendiente o preparando.`,
+      400, 'INVALID_STATUS'
+    );
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    let totalExtra = 0;
+
+    for (const item of productos) {
+      // Verificar que el producto existe y está activo
+      const { rows: [prod] } = await client.query(
+        'SELECT id, precio FROM productos WHERE id = $1 AND activo = true',
+        [item.producto_id]
+      );
+      if (!prod) {
+        throw new AppError(`Producto ${item.producto_id} no existe o está inactivo.`, 400, 'PRODUCT_NOT_FOUND');
+      }
+
+      totalExtra += parseFloat(prod.precio) * item.cantidad;
+
+      // Si ya existe el producto en el detalle, aumentar cantidad; si no, insertar
+      const { rows: existing } = await client.query(
+        'SELECT id, cantidad FROM pedido_detalle WHERE pedido_id = $1 AND producto_id = $2',
+        [id, item.producto_id]
+      );
+
+      if (existing.length > 0) {
+        await client.query(
+          'UPDATE pedido_detalle SET cantidad = cantidad + $1 WHERE id = $2',
+          [item.cantidad, existing[0].id]
+        );
+      } else {
+        await client.query(
+          'INSERT INTO pedido_detalle (pedido_id, producto_id, cantidad, nota) VALUES ($1, $2, $3, $4)',
+          [id, item.producto_id, item.cantidad, item.nota || null]
+        );
+      }
+    }
+
+    // Recalcular total del pedido
+    await client.query(
+      'UPDATE pedidos SET total = total + $1 WHERE id = $2',
+      [totalExtra, id]
+    );
+
+    await client.query('COMMIT');
+    logger.info('Productos agregados al pedido', { pedidoId: id, totalExtra });
+
+    const actualizado = await obtenerPorId(id);
+    if (io) io.emit('pedido_actualizado', { ...actualizado, _accion: 'productos_agregados' });
+    return actualizado;
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** Cambia el estado del pedido. Socket se emite SIEMPRE; ventas en try/catch propio. */
 async function cambiarEstado(id, estado, io = null) {
   if (!ESTADOS_VALIDOS.includes(estado)) {
     throw new AppError(
@@ -139,18 +214,24 @@ async function cambiarEstado(id, estado, io = null) {
 
   logger.info('Estado actualizado', { pedidoId: id, estado });
 
-  // Si pasó a 'listo', registrar en tabla ventas
-  if (estado === 'listo') {
-    await pool.query(
-      `INSERT INTO ventas (pedido_id, total, fecha)
-       VALUES ($1, $2, NOW())
-       ON CONFLICT (pedido_id) DO NOTHING`,
-      [id, rows[0].total]
-    );
-  }
-
+  // Emitir socket PRIMERO — antes de intentar registrar la venta
   const actualizado = await obtenerPorId(id);
   if (io) io.emit('pedido_actualizado', actualizado);
+
+  // Registrar en ventas en try/catch propio — no bloquea la respuesta
+  if (estado === 'listo') {
+    try {
+      await pool.query(
+        `INSERT INTO ventas (pedido_id, total, fecha)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (pedido_id) DO NOTHING`,
+        [id, rows[0].total]
+      );
+    } catch (e) {
+      logger.error('Error registrando venta (no critico)', { pedidoId: id, error: e.message });
+    }
+  }
+
   return actualizado;
 }
 
@@ -159,7 +240,7 @@ async function cancelar(id, io = null) {
   return cambiarEstado(id, 'cancelado', io);
 }
 
-/** Elimina un pedido (admin). Usa CASCADE en BD (pedido_detalle se borra automáticamente). */
+/** Elimina un pedido (admin). Usa CASCADE en BD. */
 async function eliminar(id) {
   const { rows } = await pool.query(
     'DELETE FROM pedidos WHERE id = $1 RETURNING *',
@@ -171,4 +252,4 @@ async function eliminar(id) {
   return rows[0];
 }
 
-module.exports = { listar, obtenerPorId, crear, cambiarEstado, cancelar, eliminar, ESTADOS_VALIDOS };
+module.exports = { listar, obtenerPorId, crear, agregarProductos, cambiarEstado, cancelar, eliminar, ESTADOS_VALIDOS };
