@@ -1,6 +1,6 @@
 /**
  * auth.service.js — Lógica de negocio para autenticación y usuarios.
- * Columnas reales de la BD: id, nombre, usuario, password, rol, creado_en
+ * Columnas reales de la BD: id, username, password, role, created_at
  */
 const bcrypt   = require('bcryptjs');
 const jwt      = require('jsonwebtoken');
@@ -13,17 +13,15 @@ function normalizar(row) {
   if (!row) return null;
   return {
     id:       row.id,
-    username: row.usuario  || row.username,
-    nombre:   row.nombre   || row.usuario  || row.username,
-    role:     row.rol      || row.role,
+    username: row.username,
+    role:     row.role,
   };
 }
 
 /** Intenta hacer login; devuelve { token, user } o lanza AppError */
 async function login(username, password) {
-  // La columna real en la BD es 'usuario'
   const result = await pool.query(
-    'SELECT * FROM usuarios WHERE usuario = $1',
+    'SELECT * FROM usuarios WHERE username = $1',
     [username]
   );
 
@@ -53,8 +51,8 @@ async function crearUsuario(username, password, role = 'mesero') {
   const hashedPass = await bcrypt.hash(password, 12);
   try {
     const result = await pool.query(
-      'INSERT INTO usuarios (nombre, usuario, password, rol) VALUES ($1, $2, $3, $4) RETURNING id, nombre, usuario, rol',
-      [username, username, hashedPass, role]
+      'INSERT INTO usuarios (username, password, role) VALUES ($1, $2, $3) RETURNING id, username, role',
+      [username, hashedPass, role]
     );
     return normalizar(result.rows[0]);
   } catch (err) {
@@ -68,22 +66,22 @@ async function crearUsuario(username, password, role = 'mesero') {
 /** Lista todos los usuarios (sin contraseña) */
 async function listarUsuarios() {
   const result = await pool.query(
-    'SELECT id, nombre, usuario, rol, creado_en FROM usuarios ORDER BY id ASC'
+    'SELECT id, username, role, created_at FROM usuarios ORDER BY id ASC'
   );
   return result.rows.map(normalizar);
 }
 
 /** Actualiza usuario; opcionalmente cambia contraseña */
 async function actualizarUsuario(id, { username, password, role }) {
-  let query  = 'UPDATE usuarios SET nombre = $1, usuario = $2, rol = $3';
-  let params = [username, username, role];
+  let query  = 'UPDATE usuarios SET username = $1, role = $2';
+  let params = [username, role];
 
   if (password) {
     const hashed = await bcrypt.hash(password, 12);
-    query  += ', password = $4 WHERE id = $5 RETURNING id, nombre, usuario, rol';
+    query  += ', password = $3 WHERE id = $4 RETURNING id, username, role';
     params.push(hashed, id);
   } else {
-    query  += ' WHERE id = $4 RETURNING id, nombre, usuario, rol';
+    query  += ' WHERE id = $3 RETURNING id, username, role';
     params.push(id);
   }
 
@@ -97,7 +95,7 @@ async function actualizarUsuario(id, { username, password, role }) {
 /** Elimina un usuario */
 async function eliminarUsuario(id) {
   const result = await pool.query(
-    'DELETE FROM usuarios WHERE id = $1 RETURNING id, nombre, usuario, rol',
+    'DELETE FROM usuarios WHERE id = $1 RETURNING id, username, role',
     [id]
   );
   if (result.rows.length === 0) {
