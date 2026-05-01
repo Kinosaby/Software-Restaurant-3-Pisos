@@ -315,15 +315,19 @@
 <script src="/js/cocina.js"></script>
 
 <script>
-/* Parches de compatibilidad con IDs de modales */
+/* Modal helpers — centralizados aqui para que admin.js/main.js puedan llamarlos */
 function openModal(id) {
-  const overlayId = 'overlay-' + id.replace('modal-','');
-  const el = document.getElementById(overlayId) || document.getElementById(id)?.closest?.('.overlay');
-  if (el) el.classList.add('open');
+  // Intenta: overlay-user, overlay-product, overlay-detalle
+  const overlayId = 'overlay-' + id.replace('modal-', '');
+  const el = document.getElementById(overlayId);
+  if (el) { el.classList.add('open'); return; }
+  // Fallback: el elemento mismo si ya es un overlay
+  const direct = document.getElementById(id);
+  if (direct) direct.classList.add('open');
 }
 function closeModal() {
   document.querySelectorAll('.overlay').forEach(o => o.classList.remove('open'));
-  clearModalState?.();
+  if (typeof clearModalState === 'function') clearModalState();
 }
 </script>
 </body>

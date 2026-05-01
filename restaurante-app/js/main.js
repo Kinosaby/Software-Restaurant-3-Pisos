@@ -38,8 +38,6 @@ function loading(show) {
   document.getElementById('loading-overlay').classList.toggle('show', show);
 }
 
-function openModal(id)  { document.getElementById(id).parentElement.classList.add('open');  }
-function closeModal()   { document.querySelectorAll('.overlay').forEach(o=>o.classList.remove('open')); clearModalState(); }
 function clearModalState() { State.editId = null; }
 
 function showTab(id) {
@@ -144,16 +142,18 @@ function goToRolePanel() {
   else { go('screen-menu'); }
 }
 
+function getRole() {
+  return Auth.user?.role || Auth.user?.rol || '';
+}
+
 function enterAdmin() {
-  const role = Auth.user?.role;
-  if (role !== 'admin') { toastErr('Acceso denegado. Solo admin.'); return; }
+  if (getRole() !== 'admin') { toastErr('Acceso denegado. Solo admin.'); return; }
   show('screen-admin');
   loadAdminData();
 }
 
 function enterMesero() {
-  const role = Auth.user?.role;
-  if (role === 'cocina') { toastErr('Acceso denegado.'); return; }
+  if (getRole() === 'cocina') { toastErr('Acceso denegado.'); return; }
   show('screen-mesero');
   loadMeseroData();
 }

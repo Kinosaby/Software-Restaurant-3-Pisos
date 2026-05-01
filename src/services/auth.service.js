@@ -1,6 +1,6 @@
 /**
  * auth.service.js — Lógica de negocio para autenticación y usuarios.
- * Columnas reales de la BD: id, username, password, role, created_at
+ * Columnas de la BD: id, username, password, role, created_at
  */
 const bcrypt   = require('bcryptjs');
 const jwt      = require('jsonwebtoken');

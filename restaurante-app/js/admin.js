@@ -123,8 +123,7 @@ function editProduct(id) {
   document.getElementById('p-id').value       = p.id;
   document.getElementById('p-name').value     = p.nombre;
   document.getElementById('p-price').value    = p.precio;
-  document.getElementById('p-cat').value      = p.categoria || '';
-  document.getElementById('p-disp').checked   = p.disponible;
+  document.getElementById('p-disp').checked   = !!p.activo;
   openModal('modal-product');
 }
 

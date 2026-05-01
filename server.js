@@ -19,7 +19,7 @@ app.set('io', io);
 
 // Iniciar servidor
 httpServer.listen(env.PORT, () => {
-  logger.info(`🚀 Servidor corriendo en http://localhost:${env.PORT}`, {
+  logger.info(` Servidor corriendo en http://localhost:${env.PORT}`, {
     env:  env.NODE_ENV,
     port: env.PORT,
   });

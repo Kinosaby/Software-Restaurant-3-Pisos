@@ -2,7 +2,7 @@ async function testFlow() {
   const BASE_URL = 'http://localhost:3000/api';
   
   try {
-    console.log('--- 🧪 Iniciando Pruebas de Integración ---');
+    console.log('---  Iniciando Pruebas de Integración ---');
 
     // 1. Obtener productos
     console.log('1. Obteniendo productos...');
@@ -28,7 +28,7 @@ async function testFlow() {
       body: JSON.stringify(pedidoPayload)
     });
     const nuevoPedido = await resCrear.json();
-    console.log('✅ Pedido creado:', nuevoPedido.pedido);
+    console.log(' Pedido creado:', nuevoPedido.pedido);
     const pedidoId = nuevoPedido.pedido.id;
 
     // 3. Verificar en cocina (Obtener todos los pedidos)
@@ -38,7 +38,7 @@ async function testFlow() {
     const pedidoEncontrado = todosLosPedidos.find(p => p.id === pedidoId);
     
     if (pedidoEncontrado) {
-      console.log(`✅ Pedido #${pedidoId} encontrado en cocina.`);
+      console.log(` Pedido #${pedidoId} encontrado en cocina.`);
       console.log(`   Estado: ${pedidoEncontrado.estado}`);
       console.log(`   Items: ${pedidoEncontrado.productos.length}`);
     } else {
