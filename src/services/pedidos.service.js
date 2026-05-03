@@ -1,12 +1,13 @@
 /**
  * pedidos.service.js — CRUD de pedidos con transacciones.
  * Columnas reales:
- *   pedidos:        id, mesa, estado, total, usuario_id, creado_en
+ *   pedidos:        id, mesa, estado, total, tipo, usuario_id, creado_en
  *   pedido_detalle: id, pedido_id, producto_id, cantidad, nota
  *   productos:      id, nombre, precio, activo
  *   ventas:         id, pedido_id, total, fecha
  *
  * Estados válidos: pendiente | preparando | listo | pagado | cancelado
+ * Tipos:           aqui | llevar
  */
 const pool    = require('../config/db');
 const AppError = require('../utils/AppError');
@@ -66,7 +67,7 @@ async function obtenerPorId(id) {
 /**
  * Crea un nuevo pedido en una transacción atómica.
  */
-async function crear({ mesa, productos, usuario_id = null }, io = null) {
+async function crear({ mesa, productos, tipo = 'aqui', usuario_id = null }, io = null) {
   if (!productos || productos.length === 0) {
     throw new AppError('El pedido debe tener al menos un producto.', 400, 'EMPTY_ORDER');
   }
@@ -90,10 +91,10 @@ async function crear({ mesa, productos, usuario_id = null }, io = null) {
 
     // Insertar pedido
     const { rows: [pedido] } = await client.query(
-      `INSERT INTO pedidos (mesa, estado, total, usuario_id, creado_en)
-       VALUES ($1, 'pendiente', $2, $3, NOW())
+      `INSERT INTO pedidos (mesa, estado, total, tipo, usuario_id, creado_en)
+       VALUES ($1, 'pendiente', $2, $3, $4, NOW())
        RETURNING *`,
-      [mesa, total, usuario_id]
+      [mesa, total, tipo || 'aqui', usuario_id]
     );
 
     // Insertar detalle

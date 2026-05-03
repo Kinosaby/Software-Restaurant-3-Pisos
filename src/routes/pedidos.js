@@ -13,6 +13,8 @@ const { validate } = require('../middlewares/validate.middleware');
 const crearPedidoRules = [
   body('mesa')
     .isInt({ min: 1 }).withMessage('La mesa debe ser un número entero positivo.'),
+  body('tipo')
+    .optional().isIn(['aqui','llevar']).withMessage('Tipo inválido. Valores: aqui, llevar.'),
   body('productos')
     .isArray({ min: 1 }).withMessage('Debe incluir al menos un producto.'),
   body('productos.*.producto_id')

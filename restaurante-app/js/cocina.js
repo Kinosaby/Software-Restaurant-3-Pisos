@@ -120,6 +120,10 @@ function renderCocina() {
 
     const todosListos = marcados >= totalItems && totalItems > 0;
 
+    const tipoBadge = p.tipo === 'llevar'
+      ? `<span class="badge badge-llevar" style="font-size:.85rem;padding:4px 10px"><i class="fa-solid fa-bag-shopping"></i> PARA LLEVAR</span>`
+      : `<span class="badge badge-aqui"   style="font-size:.82rem;padding:3px 8px"><i class="fa-solid fa-utensils"></i> Aqui</span>`;
+
     return `
       <div class="pedido-card${urgente ? ' urgente' : ''}">
         <div class="pedido-header">
@@ -129,6 +133,7 @@ function renderCocina() {
             <div class="cocina-pedido-id">#${p.id}</div>
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+            ${tipoBadge}
             ${badgeHtml(p.estado)}
             <div class="pedido-time">
               <span class="dot-live"></span>

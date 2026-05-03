@@ -8,6 +8,15 @@ const CATEGORIAS = [
   'Gringas','Bebidas','Postres','General'
 ];
 
+// Tipo de pedido: 'aqui' o 'llevar'
+let _tipoPedido = 'aqui';
+
+function setTipoPedido(tipo) {
+  _tipoPedido = tipo;
+  document.getElementById('btn-tipo-aqui')?.classList.toggle('active', tipo === 'aqui');
+  document.getElementById('btn-tipo-llevar')?.classList.toggle('active', tipo === 'llevar');
+}
+
 /* ── Carga de datos ─────────────────────────── */
 async function loadMeseroData() {
   loading(true);
@@ -172,6 +181,7 @@ async function submitPedido() {
 
   const body = {
     mesa,
+    tipo: _tipoPedido,
     productos: State.carrito.map(i => ({
       producto_id: i.producto_id,
       cantidad:    i.cantidad,

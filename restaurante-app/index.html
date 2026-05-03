@@ -54,7 +54,35 @@
   gap: 8px;
 }
 
-/* ── Checkboxes de items en cocina ──────────────────────────── */
+/* ── Tipo de pedido (aqui / llevar) ─────────────────────────── */
+.tipo-toggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.tipo-btn {
+  flex: 1;
+  padding: 9px 8px;
+  font-size: .8rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  background: var(--surface2);
+  color: var(--muted);
+  border: none;
+  cursor: pointer;
+  transition: all .18s;
+}
+.tipo-btn.active {
+  background: var(--accent);
+  color: #000;
+}
+.badge-aqui   { background: rgba(255,255,255,.08); color: var(--cream); }
+.badge-llevar { background: var(--accent); color: #000; font-weight:700; }
+
 .item-cb {
   width: 20px;
   height: 20px;
@@ -345,6 +373,15 @@
           <p class="muted text-sm" style="text-align:center;padding:24px 0">El carrito está vacío</p>
         </div>
         <div class="carrito-footer">
+          <!-- Tipo: Aqui / Para llevar -->
+          <div class="tipo-toggle">
+            <button id="btn-tipo-aqui" class="tipo-btn active" onclick="setTipoPedido('aqui')">
+              <i class="fa-solid fa-utensils"></i> Comer aqui
+            </button>
+            <button id="btn-tipo-llevar" class="tipo-btn" onclick="setTipoPedido('llevar')">
+              <i class="fa-solid fa-bag-shopping"></i> Para llevar
+            </button>
+          </div>
           <div class="total-row">
             <span class="total-label">Total</span>
             <span id="carrito-total" class="total-value">$0.00</span>
