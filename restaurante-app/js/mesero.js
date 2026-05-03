@@ -207,11 +207,11 @@ function renderMeseroPedidos() {
           <span class="fw600">Mesa ${p.mesa}</span>
           ${badgeHtml(p.estado)}
         </div>
-        <div class="text-xs muted">#${p.id} · ${fmt.relTime(p.creado_en)}</div>
+        <div class="text-xs muted">#${p.id} &middot; ${fmt.relTime(p.creado_en)}</div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
         ${editable ? `<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();abrirAgregarProductos(${p.id})"><i class="fa-solid fa-plus"></i> Agregar</button>` : ''}
-        ${p.estado === 'listo' ? `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();cobrarPedido(${p.id})"><i class="fa-solid fa-credit-card"></i> Cobrar</button>` : ''}
+        ${p.estado === 'listo' ? `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();abrirCobro(${p.id})"><i class="fa-solid fa-credit-card"></i> Cobrar</button>` : ''}
         <span class="text-gold fw600">${fmt.currency(p.total)}</span>
         <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();cancelarPedido(${p.id})"><i class="fa-solid fa-xmark"></i></button>
       </div>
@@ -219,14 +219,80 @@ function renderMeseroPedidos() {
   }).join('');
 }
 
-async function cobrarPedido(id) {
+/* ── Cobro con cambio ──────────────────────── */
+let _pedidoCobrarId  = null;
+let _pedidoCobrarTotal = 0;
+
+function abrirCobro(pedidoId) {
+  const p = State.pedidos.find(x => x.id === pedidoId);
+  if (!p) return;
+  _pedidoCobrarId    = pedidoId;
+  _pedidoCobrarTotal = parseFloat(p.total);
+
+  const content = document.getElementById('cobro-content');
+  if (!content) return;
+
+  content.innerHTML = `
+    <div class="cobro-resumen">
+      <div class="cobro-mesa">Mesa ${p.mesa} &nbsp;&nbsp; <span class="text-xs muted">#${p.id}</span></div>
+      <div class="cobro-row">
+        <span>Total a pagar</span>
+        <span class="cobro-total">${fmt.currency(p.total)}</span>
+      </div>
+    </div>
+    <div class="field" style="margin-top:16px">
+      <label style="font-size:1rem">Con cu\u00e1nto paga el cliente</label>
+      <input id="cobro-pago" type="number" step="0.50" min="0"
+        placeholder="0.00"
+        oninput="calcularCambio()"
+        style="font-size:1.4rem;text-align:right;padding:12px 16px;letter-spacing:.05em">
+    </div>
+    <div class="cobro-cambio-wrap" id="cobro-cambio-wrap" style="display:none">
+      <div class="cobro-row">
+        <span>Cambio</span>
+        <span id="cobro-cambio" class="cobro-cambio-val">$0.00</span>
+      </div>
+    </div>`;
+
+  document.getElementById('btn-confirmar-cobro').disabled = true;
+  openModal('modal-cobro');
+  setTimeout(() => document.getElementById('cobro-pago')?.focus(), 120);
+}
+
+function calcularCambio() {
+  const pago   = parseFloat(document.getElementById('cobro-pago')?.value) || 0;
+  const cambio = pago - _pedidoCobrarTotal;
+  const wrap   = document.getElementById('cobro-cambio-wrap');
+  const val    = document.getElementById('cobro-cambio');
+  const btn    = document.getElementById('btn-confirmar-cobro');
+
+  if (!wrap || !val || !btn) return;
+
+  if (pago <= 0) {
+    wrap.style.display = 'none';
+    btn.disabled = true;
+    return;
+  }
+
+  wrap.style.display = 'block';
+  val.textContent = fmt.currency(Math.max(0, cambio));
+  val.className   = 'cobro-cambio-val ' + (cambio >= 0 ? 'cambio-ok' : 'cambio-err');
+  btn.disabled    = cambio < 0;
+}
+
+async function confirmarCobro() {
+  const btn = document.getElementById('btn-confirmar-cobro');
+  if (btn) btn.disabled = true;
   try {
     loading(true);
-    await api.pedidos.cambiarEstado(id, 'pagado');
-    toastOk('Pedido cobrado exitosamente');
+    await api.pedidos.cambiarEstado(_pedidoCobrarId, 'pagado');
+    const pago   = parseFloat(document.getElementById('cobro-pago')?.value) || 0;
+    const cambio = pago - _pedidoCobrarTotal;
+    toastOk(`Cobrado exitosamente. Cambio: ${fmt.currency(Math.max(0, cambio))}`);
+    closeModal();
     await loadMeseroData();
   } catch(e) { toastErr(e.message); }
-  finally { loading(false); }
+  finally { if (btn) btn.disabled = false; loading(false); }
 }
 
 async function cancelarPedido(id) {
@@ -311,6 +377,11 @@ function changeQtyAgregar(productoId, delta) {
   renderAgregarCarrito();
 }
 
+function setNotaAgregar(productoId, nota) {
+  const item = _carritoAgregar.find(i => i.producto_id === productoId);
+  if (item) item.nota = nota;
+}
+
 function renderAgregarCarrito() {
   const el = document.getElementById('agregar-carrito');
   if (!el) return;
@@ -320,14 +391,19 @@ function renderAgregarCarrito() {
     <div class="divider" style="margin:8px 0"></div>
     <div class="fw600 text-sm" style="margin-bottom:6px">A agregar:</div>
     ${_carritoAgregar.map(item => `
-      <div class="carrito-item">
-        <div style="flex:1;font-size:.83rem;font-weight:600">${item.nombre}</div>
-        <div class="carrito-qty">
-          <button class="qty-btn" onclick="changeQtyAgregar(${item.producto_id},-1)">−</button>
-          <span style="min-width:20px;text-align:center;font-weight:600">${item.cantidad}</span>
-          <button class="qty-btn" onclick="changeQtyAgregar(${item.producto_id},1)">+</button>
+      <div class="carrito-item" style="flex-direction:column;align-items:stretch;gap:6px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1;font-size:.83rem;font-weight:600">${item.nombre}</div>
+          <div class="carrito-qty">
+            <button class="qty-btn" onclick="changeQtyAgregar(${item.producto_id},-1)">−</button>
+            <span style="min-width:20px;text-align:center;font-weight:600">${item.cantidad}</span>
+            <button class="qty-btn" onclick="changeQtyAgregar(${item.producto_id},1)">+</button>
+          </div>
+          <span class="text-gold" style="font-size:.83rem;min-width:52px;text-align:right">${fmt.currency(item.precio * item.cantidad)}</span>
         </div>
-        <span class="text-gold" style="font-size:.83rem;margin-left:8px">${fmt.currency(item.precio * item.cantidad)}</span>
+        <input class="nota-input" placeholder="Indicaciones: sin cebolla, extra salsa..."
+          value="${item.nota || ''}"
+          oninput="setNotaAgregar(${item.producto_id}, this.value)">
       </div>`).join('')}
     <div class="total-row" style="margin-top:8px">
       <span class="total-label">Subtotal a agregar</span>

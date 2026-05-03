@@ -54,7 +54,75 @@
   gap: 8px;
 }
 
-/* ── Cocina: letra grande ────────────────────────────────────── */
+/* ── Checkboxes de items en cocina ──────────────────────────── */
+.item-cb {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  accent-color: var(--success);
+  cursor: pointer;
+  margin-right: 4px;
+}
+.item-done .pedido-item-nom {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.item-done .pedido-item-qty { color: var(--muted); }
+.items-counter {
+  font-size: .82rem;
+  color: var(--muted);
+  text-align: right;
+  padding: 4px 8px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+
+/* ── Detalle cocina modal ────────────────────────────────────── */
+.detalle-cocina-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.detalle-cocina-item:last-child { border-bottom: none; }
+.detalle-cocina-qty  { font-size:1.3rem; font-weight:800; color:var(--accent); min-width:36px; }
+.detalle-cocina-nom  { font-size:1rem;   font-weight:600; color:var(--cream); }
+.detalle-cocina-nota { font-size:.82rem; color:var(--accent); margin-top:3px; }
+.detalle-cocina-precio { font-size:.9rem; font-weight:600; color:var(--gold,#d4a843); white-space:nowrap; margin-top:2px; }
+.detalle-cocina-time { font-size:.82rem; color:var(--muted); display:flex; align-items:center; gap:6px; }
+
+/* ── Modal cobro con cambio ──────────────────────────────────── */
+.cobro-resumen {
+  background: var(--surface2);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.cobro-mesa {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--cream);
+  margin-bottom: 8px;
+}
+.cobro-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: .95rem;
+  padding: 4px 0;
+}
+.cobro-total  { font-size: 1.5rem; font-weight: 800; color: var(--accent); }
+.cobro-cambio-wrap {
+  background: var(--surface2);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-top: 12px;
+}
+.cobro-cambio-val { font-size: 1.6rem; font-weight: 800; }
+.cambio-ok  { color: var(--success); }
+.cambio-err { color: var(--danger); }
+#overlay-cobro .modal { max-width: 400px; }
+
 .cocina-turno {
   font-size: 1rem;
   font-weight: 700;
@@ -385,13 +453,38 @@
   </div>
 </div>
 
-<!-- Modal Detalle Pedido -->
+<!-- Modal Detalle Pedido (Mesero) -->
 <div class="overlay" id="overlay-detalle" onclick="closeModal()">
   <div class="modal" onclick="event.stopPropagation()">
     <div class="modal-title">Detalle del Pedido</div>
     <div id="detalle-content" class="modal-body"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Detalle Pedido (Cocina) -->
+<div class="overlay" id="overlay-detalle-cocina" onclick="closeModal()">
+  <div class="modal" onclick="event.stopPropagation()" style="max-width:500px">
+    <div class="modal-title"><i class="fa-solid fa-receipt"></i> Detalle del Pedido</div>
+    <div id="detalle-cocina-content" class="modal-body"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Cobro con Cambio -->
+<div class="overlay" id="overlay-cobro" onclick="closeModal()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title"><i class="fa-solid fa-cash-register"></i> Cobrar Pedido</div>
+    <div id="cobro-content" class="modal-body"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancelar</button>
+      <button id="btn-confirmar-cobro" class="btn btn-primary btn-sm" style="width:auto" onclick="confirmarCobro()" disabled>
+        <i class="fa-solid fa-check"></i> Confirmar Pago
+      </button>
     </div>
   </div>
 </div>
