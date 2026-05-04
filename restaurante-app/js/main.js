@@ -194,7 +194,6 @@ function initSocket() {
     const i = State.pedidos.findIndex(p => p.id === pedido.id);
     if (i >= 0) State.pedidos[i] = pedido; else State.pedidos.push(pedido);
 
-    // Avisos inteligentes por rol
     const role = getRole();
     if (pedido.estado === 'listo' && role === 'mesero') {
       toastOk(`Mesa ${pedido.mesa} lista para cobrar — ${fmt.currency(pedido.total)}`);
@@ -207,6 +206,20 @@ function initSocket() {
     renderCocina();
     renderMeseroPedidos();
     renderAdminPedidos();
+  });
+
+  // Productos extra pedidos sobre un pedido ya completado (listo/pagado)
+  s.on('extra_pedido', (extra) => {
+    const role = getRole();
+    if (role === 'cocina') {
+      // Agregar al listado local de extras y re-renderizar
+      if (!State.extras) State.extras = [];
+      State.extras.push({ ...extra, _id: Date.now() });
+      renderCocinaExtras();
+      toastInfo(`⚡ Extra — Mesa ${extra.mesa}: ${extra.items.length} producto(s) nuevo(s)`);
+    } else if (role === 'mesero') {
+      toastOk(`Extra enviado a cocina — Mesa ${extra.mesa}`);
+    }
   });
 }
 

@@ -202,14 +202,24 @@ async function submitPedido() {
   finally { btn.disabled = false; loading(false); }
 }
 
-/* ── Lista de pedidos del mesero ────────────── */
+/* ── Lista de pedidos del mesero ─────────────────── */
 function renderMeseroPedidos() {
   const list = document.getElementById('mesero-pedidos-list');
   if (!list) return;
-  const activos = State.pedidos.filter(p => p.estado !== 'pagado' && p.estado !== 'cancelado');
-  if (!activos.length) { list.innerHTML = '<p class="muted text-sm" style="padding:16px">Sin pedidos activos</p>'; return; }
-  list.innerHTML = activos.map(p => {
-    const editable = ['pendiente','preparando'].includes(p.estado);
+
+  // Separar activos y pagados del día
+  const activos  = State.pedidos.filter(p => !['pagado','cancelado'].includes(p.estado));
+  const pagados  = State.pedidos.filter(p => p.estado === 'pagado');
+
+  if (!activos.length && !pagados.length) {
+    list.innerHTML = '<p class="muted text-sm" style="padding:16px">Sin pedidos activos</p>';
+    return;
+  }
+
+  const renderRow = (p) => {
+    // El botón Agregar aparece en TODOS los estados menos cancelado
+    const puedeAgregar = p.estado !== 'cancelado';
+    const esCompletado = ['listo','pagado'].includes(p.estado);
     return `
     <div class="pedido-row" onclick="verDetallePedido(${p.id})">
       <div class="pedido-row-info">
@@ -220,13 +230,30 @@ function renderMeseroPedidos() {
         <div class="text-xs muted">#${p.id} &middot; ${fmt.relTime(p.creado_en)}</div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-        ${editable ? `<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();abrirAgregarProductos(${p.id})"><i class="fa-solid fa-plus"></i> Agregar</button>` : ''}
+        ${puedeAgregar ? `
+          <button class="btn btn-sm ${esCompletado ? 'btn-amber' : 'btn-outline'}"
+            onclick="event.stopPropagation();abrirAgregarProductos(${p.id})">
+            <i class="fa-solid fa-plus"></i> ${esCompletado ? 'Piden más' : 'Agregar'}
+          </button>` : ''}
         ${p.estado === 'listo' ? `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();abrirCobro(${p.id})"><i class="fa-solid fa-credit-card"></i> Cobrar</button>` : ''}
         <span class="text-gold fw600">${fmt.currency(p.total)}</span>
-        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();cancelarPedido(${p.id})"><i class="fa-solid fa-xmark"></i></button>
+        ${p.estado !== 'pagado' ? `<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();cancelarPedido(${p.id})"><i class="fa-solid fa-xmark"></i></button>` : ''}
       </div>
     </div>`;
-  }).join('');
+  };
+
+  let html = '';
+
+  if (activos.length) {
+    html += activos.map(renderRow).join('');
+  }
+
+  if (pagados.length) {
+    html += `<div class="seccion-pagados-header">Cobrados hoy <span class="muted text-xs">(piden más?)</span></div>`;
+    html += pagados.map(renderRow).join('');
+  }
+
+  list.innerHTML = html;
 }
 
 /* ── Cobro con cambio ──────────────────────── */

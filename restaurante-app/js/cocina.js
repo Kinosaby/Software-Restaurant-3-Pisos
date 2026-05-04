@@ -10,7 +10,9 @@ async function loadCocinaData() {
   try {
     const res = await api.pedidos.listar();
     State.pedidos = res.pedidos || [];
+    if (!State.extras) State.extras = [];
     renderCocina();
+    renderCocinaExtras();
   } catch(e) { toastErr(e.message); }
   finally { loading(false); }
 }
@@ -167,6 +169,101 @@ function renderCocina() {
 
   const el = document.getElementById('cocina-count');
   if (el) el.textContent = activos.length;
+}
+
+/* ── Seción de EXTRAS (pedidos sobre pedidos completados) ──── */
+function renderCocinaExtras() {
+  const container = document.getElementById('cocina-extras');
+  if (!container) return;
+
+  const extras = State.extras || [];
+  if (!extras.length) {
+    container.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+
+  container.style.display = 'block';
+  container.innerHTML = `
+    <div class="extras-header">
+      <i class="fa-solid fa-bolt"></i>
+      Extras (piden más) — <span class="text-accent">${extras.length}</span>
+    </div>
+    <div class="extras-grid">
+      ${extras.map(ex => {
+        const prods = ex.items.map((i, idx) => `
+          <div class="pedido-item${ex._done?.[idx] ? ' item-done' : ''}" id="xitem-${ex._id}-${idx}">
+            <input type="checkbox" class="item-cb" id="xcb-${ex._id}-${idx}"
+              ${ex._done?.[idx] ? 'checked' : ''}
+              onclick="toggleExtraItem(${ex._id}, ${idx}, ${ex.items.length})">
+            <span class="pedido-item-qty">${i.cantidad}×</span>
+            <div style="flex:1">
+              <span class="pedido-item-nom">${i.nombre}</span>
+              ${i.nota ? `<div class="pedido-item-nota"><i class="fa-solid fa-note-sticky"></i> ${i.nota}</div>` : ''}
+            </div>
+          </div>`).join('');
+
+        const doneCnt  = Object.values(ex._done || {}).filter(Boolean).length;
+        const allDone  = doneCnt >= ex.items.length;
+
+        const tipoBadge = ex.tipo === 'llevar'
+          ? `<span class="badge badge-llevar" style="font-size:.78rem"><i class="fa-solid fa-bag-shopping"></i> LLEVAR</span>`
+          : '';
+
+        return `
+          <div class="extra-card">
+            <div class="extra-card-header">
+              <div>
+                <div class="extra-label"><i class="fa-solid fa-bolt"></i> EXTRA</div>
+                <div class="cocina-mesa" style="font-size:1.4rem">Mesa ${ex.mesa}</div>
+                <div class="cocina-pedido-id">Pedido #${ex.pedido_id}</div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+                ${tipoBadge}
+                <div class="extra-time"><span class="dot-live"></span> Ahora</div>
+              </div>
+            </div>
+            <div class="pedido-body cocina-body">${prods}</div>
+            <div class="items-counter" id="xcount-${ex._id}">${doneCnt}/${ex.items.length} listos</div>
+            <div class="pedido-footer">
+              <button class="btn ${allDone ? 'btn-success' : 'btn-outline'} cocina-btn" style="flex:1"
+                id="xbtn-${ex._id}" onclick="terminarExtra(${ex._id})">
+                <i class="fa-solid fa-${allDone ? 'check-double' : 'check'}"></i>
+                ${allDone ? 'Extra Listo' : 'Listo'}
+              </button>
+            </div>
+          </div>`;
+      }).join('')}
+    </div>`;
+}
+
+function toggleExtraItem(extraId, idx, total) {
+  const ex = (State.extras || []).find(e => e._id === extraId);
+  if (!ex) return;
+  if (!ex._done) ex._done = {};
+  ex._done[idx] = !ex._done[idx];
+
+  const cb  = document.getElementById(`xcb-${extraId}-${idx}`);
+  const row = document.getElementById(`xitem-${extraId}-${idx}`);
+  const cnt = document.getElementById(`xcount-${extraId}`);
+  const btn = document.getElementById(`xbtn-${extraId}`);
+
+  if (cb)  cb.checked = ex._done[idx];
+  if (row) row.classList.toggle('item-done', ex._done[idx]);
+
+  const doneCnt = Object.values(ex._done).filter(Boolean).length;
+  const allDone = doneCnt >= total;
+  if (cnt) cnt.textContent = `${doneCnt}/${total} listos`;
+  if (btn) {
+    btn.className = `btn ${allDone ? 'btn-success' : 'btn-outline'} cocina-btn`;
+    btn.innerHTML = `<i class="fa-solid fa-${allDone ? 'check-double' : 'check'}"></i> ${allDone ? 'Extra Listo' : 'Listo'}`;
+  }
+}
+
+function terminarExtra(extraId) {
+  State.extras = (State.extras || []).filter(e => e._id !== extraId);
+  toastOk('Extra marcado como listo');
+  renderCocinaExtras();
 }
 
 async function avanzarEstado(id, estado) {

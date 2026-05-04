@@ -122,8 +122,9 @@ async function crear({ mesa, productos, tipo = 'aqui', usuario_id = null }, io =
 }
 
 /**
- * Agrega productos a un pedido existente (pendiente o preparando).
- * Cocina recibe notificación de pedido actualizado.
+ * Agrega productos a un pedido existente (cualquier estado activo).
+ * Si el pedido está en listo/pagado, emite 'extra_pedido' con SOLO los items nuevos.
+ * Si está en pendiente/preparando, emite 'pedido_actualizado' normal.
  */
 async function agregarProductos(id, { productos }, io = null) {
   if (!productos || productos.length === 0) {
@@ -131,23 +132,24 @@ async function agregarProductos(id, { productos }, io = null) {
   }
 
   const pedido = await obtenerPorId(id);
-  if (!['pendiente', 'preparando'].includes(pedido.estado)) {
-    throw new AppError(
-      `No se puede modificar un pedido en estado "${pedido.estado}". Solo pendiente o preparando.`,
-      400, 'INVALID_STATUS'
-    );
+  // Permitir agregar a cualquier estado excepto cancelado
+  if (pedido.estado === 'cancelado') {
+    throw new AppError('No se puede modificar un pedido cancelado.', 400, 'INVALID_STATUS');
   }
+
+  const esExtra = ['listo', 'pagado'].includes(pedido.estado);
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     let totalExtra = 0;
+    // Guardar los items nuevos con nombre para el evento extra
+    const itemsNuevos = [];
 
     for (const item of productos) {
-      // Verificar que el producto existe y está activo
       const { rows: [prod] } = await client.query(
-        'SELECT id, precio FROM productos WHERE id = $1 AND activo = true',
+        'SELECT id, nombre, precio FROM productos WHERE id = $1 AND activo = true',
         [item.producto_id]
       );
       if (!prod) {
@@ -155,8 +157,13 @@ async function agregarProductos(id, { productos }, io = null) {
       }
 
       totalExtra += parseFloat(prod.precio) * item.cantidad;
+      itemsNuevos.push({
+        nombre:   prod.nombre,
+        cantidad: item.cantidad,
+        nota:     item.nota || null,
+        precio:   prod.precio,
+      });
 
-      // Si ya existe el producto en el detalle, aumentar cantidad; si no, insertar
       const { rows: existing } = await client.query(
         'SELECT id, cantidad FROM pedido_detalle WHERE pedido_id = $1 AND producto_id = $2',
         [id, item.producto_id]
@@ -175,18 +182,34 @@ async function agregarProductos(id, { productos }, io = null) {
       }
     }
 
-    // Recalcular total del pedido
+    // Actualizar total
     await client.query(
       'UPDATE pedidos SET total = total + $1 WHERE id = $2',
       [totalExtra, id]
     );
 
     await client.query('COMMIT');
-    logger.info('Productos agregados al pedido', { pedidoId: id, totalExtra });
+    logger.info('Productos agregados al pedido', { pedidoId: id, totalExtra, esExtra });
 
     const actualizado = await obtenerPorId(id);
-    if (io) io.emit('pedido_actualizado', { ...actualizado, _accion: 'productos_agregados' });
-    return actualizado;
+
+    if (io) {
+      if (esExtra) {
+        // Emitir SOLO los items nuevos — cocina no ve el pedido completo
+        io.emit('extra_pedido', {
+          pedido_id: id,
+          mesa:      pedido.mesa,
+          tipo:      pedido.tipo || 'aqui',
+          items:     itemsNuevos,
+          total_extra: totalExtra,
+        });
+      } else {
+        // Pedido activo — emitir pedido completo actualizado
+        io.emit('pedido_actualizado', { ...actualizado, _accion: 'productos_agregados' });
+      }
+    }
+
+    return { ...actualizado, _items_nuevos: itemsNuevos, _es_extra: esExtra };
 
   } catch (err) {
     await client.query('ROLLBACK');
