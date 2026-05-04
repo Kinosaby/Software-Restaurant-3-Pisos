@@ -81,9 +81,12 @@ function renderCocina() {
   const grid = document.getElementById('cocina-grid');
   if (!grid) return;
 
-  const activos = State.pedidos.filter(p => p.estado === 'pendiente' || p.estado === 'preparando');
+  // Pendiente + preparando en la cola FIFO; listo para cobrar
+  const enCola   = State.pedidos.filter(p => p.estado === 'pendiente' || p.estado === 'preparando');
+  const paraCobrar = State.pedidos.filter(p => p.estado === 'listo');
+  const todos    = [...enCola, ...paraCobrar];
 
-  if (!activos.length) {
+  if (!todos.length) {
     grid.innerHTML = `
       <div style="grid-column:1/-1;display:flex;flex-direction:column;align-items:center;gap:16px;padding:60px;color:var(--muted)">
         <i class="fa-solid fa-utensils" style="font-size:3rem;color:var(--muted)"></i>
@@ -92,19 +95,17 @@ function renderCocina() {
     return;
   }
 
-  grid.innerHTML = activos.map((p, idx) => {
+  // Renderizar cola FIFO (pendiente + preparando)
+  const colaHtml = enCola.map((p, idx) => {
     const turno     = idx + 1;
     const isPrimero = turno === 1;
     const isPendiente = p.estado === 'pendiente';
-    const nextEstado  = isPendiente ? 'preparando' : 'listo';
-    const btnClass    = isPendiente ? 'btn-outline' : 'btn-outline';
     const mins        = Math.floor((Date.now() - new Date(p.creado_en).getTime()) / 60000);
     const urgente     = mins >= 15 && p.estado === 'pendiente';
 
-    const marcados  = _itemsListos[p.id]?.size || 0;
+    const marcados   = _itemsListos[p.id]?.size || 0;
     const totalItems = (p.productos || []).length;
 
-    // Items con checkboxes
     const prods = (p.productos || []).map((i, iIdx) => {
       const done = _itemsListos[p.id]?.has(iIdx) || false;
       return `
@@ -121,7 +122,6 @@ function renderCocina() {
     }).join('');
 
     const todosListos = marcados >= totalItems && totalItems > 0;
-
     const tipoBadge = p.tipo === 'llevar'
       ? `<span class="badge badge-llevar" style="font-size:.85rem;padding:4px 10px"><i class="fa-solid fa-bag-shopping"></i> PARA LLEVAR</span>`
       : `<span class="badge badge-aqui"   style="font-size:.82rem;padding:3px 8px"><i class="fa-solid fa-utensils"></i> Aqui</span>`;
@@ -167,8 +167,56 @@ function renderCocina() {
       </div>`;
   }).join('');
 
+  // Renderizar pedidos LISTOS para cobrar
+  const cobrarHtml = paraCobrar.map(p => {
+    const tipoBadge = p.tipo === 'llevar'
+      ? `<span class="badge badge-llevar" style="font-size:.82rem"><i class="fa-solid fa-bag-shopping"></i> LLEVAR</span>`
+      : `<span class="badge badge-aqui" style="font-size:.78rem"><i class="fa-solid fa-utensils"></i> Aqui</span>`;
+
+    const prods = (p.productos || []).map(i => `
+      <div class="pedido-item item-done">
+        <span class="pedido-item-qty">${i.cantidad}×</span>
+        <div style="flex:1">
+          <span class="pedido-item-nom">${i.nombre}</span>
+          ${i.nota ? `<div class="pedido-item-nota"><i class="fa-solid fa-note-sticky"></i> ${i.nota}</div>` : ''}
+        </div>
+        <span style="font-size:.82rem;color:var(--gold,#d4a843)">${fmt.currency(parseFloat(i.precio)*i.cantidad)}</span>
+      </div>`).join('');
+
+    return `
+      <div class="pedido-card cobrar-card">
+        <div class="pedido-header">
+          <div>
+            <div class="cocina-turno" style="color:#22c55e;font-size:.85rem">LISTO PARA COBRAR</div>
+            <div class="cocina-mesa">Mesa ${p.mesa}</div>
+            <div class="cocina-pedido-id">#${p.id}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+            ${tipoBadge}
+            ${badgeHtml(p.estado)}
+            <button class="btn btn-ghost btn-sm" style="font-size:.75rem;padding:3px 8px"
+              onclick="verDetalleCocina(${p.id})">
+              <i class="fa-solid fa-eye"></i> Ver
+            </button>
+          </div>
+        </div>
+        <div class="pedido-body cocina-body">${prods}</div>
+        <div class="cobrar-total-row">
+          <span>Total</span>
+          <span class="cobrar-total-val">${fmt.currency(p.total)}</span>
+        </div>
+        <div class="pedido-footer">
+          <button class="btn btn-primary cocina-btn" style="flex:1" onclick="abrirCobro(${p.id})">
+            <i class="fa-solid fa-cash-register"></i> Cobrar
+          </button>
+        </div>
+      </div>`;
+  }).join('');
+
+  grid.innerHTML = colaHtml + cobrarHtml;
+
   const el = document.getElementById('cocina-count');
-  if (el) el.textContent = activos.length;
+  if (el) el.textContent = enCola.length;
 }
 
 /* ── Seción de EXTRAS (pedidos sobre pedidos completados) ──── */
