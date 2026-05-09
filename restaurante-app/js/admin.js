@@ -2,8 +2,28 @@
  * admin.js — Panel de administración
  */
 
-/* ── Carga de datos ─────────────────────────── */
-let _soloHoyAdmin = true;  // Por defecto muestra solo pedidos de hoy
+/* ── Carga de datos ─────────────────────────────────── */
+let _soloHoyAdmin   = true;   // Por defecto muestra solo pedidos de hoy
+let _adminRefreshTimer = null; // Timer de auto-refresh
+let _metricasDebounce  = null; // Debounce para el refresh de métricas
+
+/** Recarga SOLO las métricas (sin recargar todo). Llamada desde socket en main.js */
+async function loadAdminMetrics() {
+  try {
+    const m = await api.metricas.resumen();
+    renderAdminStats(m);
+  } catch(e) { /* silencioso, no crítico */ }
+}
+
+/**
+ * Programa un refresh de métricas con debounce de 2s.
+ * Se llama desde los socket handlers cuando el rol es admin.
+ */
+function scheduleMetricasRefresh() {
+  if (getRole() !== 'admin') return;
+  clearTimeout(_metricasDebounce);
+  _metricasDebounce = setTimeout(loadAdminMetrics, 2000);
+}
 
 async function loadAdminData() {
   loading(true);
@@ -21,6 +41,9 @@ async function loadAdminData() {
     renderAdminUsers();
     renderAdminProducts();
     renderAdminPedidos();
+    // Auto-refresh de métricas cada 60s mientras el panel está abierto
+    clearInterval(_adminRefreshTimer);
+    _adminRefreshTimer = setInterval(loadAdminMetrics, 60_000);
   } catch(e) { toastErr(e.message); }
   finally { loading(false); }
 }

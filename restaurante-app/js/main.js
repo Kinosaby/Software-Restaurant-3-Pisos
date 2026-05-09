@@ -188,6 +188,8 @@ function initSocket() {
     renderCocina();
     renderMeseroPedidos();
     renderAdminPedidos();
+    // Actualizar métricas del admin automáticamente
+    if (typeof scheduleMetricasRefresh === 'function') scheduleMetricasRefresh();
   });
 
   s.on('pedido_actualizado', (pedido) => {
@@ -206,6 +208,8 @@ function initSocket() {
     renderCocina();
     renderMeseroPedidos();
     renderAdminPedidos();
+    // Actualizar métricas del admin cuando cambia estado (especialmente pagado/listo)
+    if (typeof scheduleMetricasRefresh === 'function') scheduleMetricasRefresh();
   });
 
   // Productos extra pedidos sobre un pedido ya completado (listo/pagado)

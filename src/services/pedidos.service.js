@@ -243,12 +243,14 @@ async function cambiarEstado(id, estado, io = null) {
   if (io) io.emit('pedido_actualizado', actualizado);
 
   // Registrar en ventas en try/catch propio — no bloquea la respuesta
-  if (estado === 'listo') {
+  // Se registra en listo Y en pagado para cubrir todos los flujos.
+  // DO UPDATE garantiza que el total final siempre sea correcto.
+  if (estado === 'listo' || estado === 'pagado') {
     try {
       await pool.query(
         `INSERT INTO ventas (pedido_id, total, fecha)
          VALUES ($1, $2, NOW())
-         ON CONFLICT (pedido_id) DO NOTHING`,
+         ON CONFLICT (pedido_id) DO UPDATE SET total = EXCLUDED.total`,
         [id, rows[0].total]
       );
     } catch (e) {
