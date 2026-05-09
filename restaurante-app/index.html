@@ -458,8 +458,11 @@
       </div>
       <div id="admin-orders" class="tab-pane">
         <div class="pane-header">
-          <span class="pane-title">Lista de Pedidos</span>
-          <button class="btn btn-outline btn-sm" onclick="loadAdminData()">↻ Actualizar</button>
+          <span class="pane-title">Pedidos de Hoy</span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-outline btn-sm" onclick="loadAdminData()">↻ Actualizar</button>
+            <button id="btn-toggle-historial" class="btn btn-ghost btn-sm" onclick="toggleHistorialPedidos()">📋 Ver historial</button>
+          </div>
         </div>
         <div class="table-wrap">
           <table id="table-orders">

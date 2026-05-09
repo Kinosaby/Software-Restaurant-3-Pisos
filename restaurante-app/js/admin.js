@@ -3,6 +3,8 @@
  */
 
 /* ── Carga de datos ─────────────────────────── */
+let _soloHoyAdmin = true;  // Por defecto muestra solo pedidos de hoy
+
 async function loadAdminData() {
   loading(true);
   try {
@@ -30,6 +32,15 @@ function renderAdminStats(m) {
   document.getElementById('stat-semana').textContent   = fmt.currency(m.semana || 0);
   document.getElementById('stat-productos').textContent = State.productos.length;
   document.getElementById('stat-usuarios').textContent  = State.usuarios.length;
+}
+
+/** Devuelve true si el pedido es de hoy (en hora local del navegador) */
+function _esPedidoDeHoy(p) {
+  const d = new Date(p.creado_en);
+  const hoy = new Date();
+  return d.getFullYear() === hoy.getFullYear()
+      && d.getMonth()    === hoy.getMonth()
+      && d.getDate()     === hoy.getDate();
 }
 
 /* ── Usuarios ───────────────────────────────── */
@@ -167,8 +178,24 @@ async function deleteProduct(id, name) {
 function renderAdminPedidos() {
   const tbody = document.querySelector('#table-orders tbody');
   if (!tbody) return;
-  if (!State.pedidos.length) { tbody.innerHTML = '<tr class="empty-row"><td colspan="6">Sin pedidos</td></tr>'; return; }
-  tbody.innerHTML = State.pedidos.map(p => `
+
+  // Filtrar por hoy o mostrar todo según el toggle
+  const pedidos = _soloHoyAdmin
+    ? State.pedidos.filter(_esPedidoDeHoy)
+    : State.pedidos;
+
+  // Actualizar label del botón toggle
+  const btnToggle = document.getElementById('btn-toggle-historial');
+  if (btnToggle) {
+    btnToggle.textContent = _soloHoyAdmin ? '📋 Ver historial' : '📅 Solo hoy';
+  }
+
+  if (!pedidos.length) {
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="6">${_soloHoyAdmin ? 'Sin pedidos hoy' : 'Sin pedidos'}</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = pedidos.map(p => `
     <tr>
       <td data-label="ID">#${p.id}</td>
       <td data-label="Mesa">Mesa ${p.mesa}</td>
@@ -179,6 +206,11 @@ function renderAdminPedidos() {
         <button class="btn btn-danger btn-sm" onclick="adminDeletePedido(${p.id})"><i class="fa-solid fa-trash"></i></button>
       </td>
     </tr>`).join('');
+}
+
+function toggleHistorialPedidos() {
+  _soloHoyAdmin = !_soloHoyAdmin;
+  renderAdminPedidos();
 }
 
 async function adminDeletePedido(id) {
