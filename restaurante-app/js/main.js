@@ -215,6 +215,8 @@ function initSocket() {
       // Agregar al listado local de extras y re-renderizar
       if (!State.extras) State.extras = [];
       State.extras.push({ ...extra, _id: Date.now() });
+      // Guardar en localStorage para que persista si la pantalla se recarga
+      if (typeof _saveExtras === 'function') _saveExtras();
       renderCocinaExtras();
       toastInfo(`⚡ Extra — Mesa ${extra.mesa}: ${extra.items.length} producto(s) nuevo(s)`);
     } else if (role === 'mesero') {

@@ -5,12 +5,29 @@
 // Estado local de checkboxes: { pedidoId: Set<productoDetalleIndex> }
 const _itemsListos = {};
 
+/* ── Persistencia de extras en localStorage ────────────────── */
+function _saveExtras() {
+  try {
+    localStorage.setItem('cocina_extras', JSON.stringify(State.extras || []));
+  } catch(e) { /* localStorage lleno o privado */ }
+}
+
+function _loadExtras() {
+  try {
+    const raw = localStorage.getItem('cocina_extras');
+    return raw ? JSON.parse(raw) : [];
+  } catch(e) { return []; }
+}
+
 async function loadCocinaData() {
   loading(true);
   try {
     const res = await api.pedidos.listar();
     State.pedidos = res.pedidos || [];
-    if (!State.extras) State.extras = [];
+    // Restaurar extras desde localStorage si no hay nada en memoria
+    if (!State.extras || State.extras.length === 0) {
+      State.extras = _loadExtras();
+    }
     renderCocina();
     renderCocinaExtras();
   } catch(e) { toastErr(e.message); }
@@ -306,10 +323,12 @@ function toggleExtraItem(extraId, idx, total) {
     btn.className = `btn ${allDone ? 'btn-success' : 'btn-outline'} cocina-btn`;
     btn.innerHTML = `<i class="fa-solid fa-${allDone ? 'check-double' : 'check'}"></i> ${allDone ? 'Extra Listo' : 'Listo'}`;
   }
+  _saveExtras();   // Persistir estado de checkboxes
 }
 
 function terminarExtra(extraId) {
   State.extras = (State.extras || []).filter(e => e._id !== extraId);
+  _saveExtras();   // Persistir el cambio
   toastOk('Extra marcado como listo');
   renderCocinaExtras();
 }
