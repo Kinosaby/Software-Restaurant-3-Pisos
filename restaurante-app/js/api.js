@@ -75,6 +75,7 @@ const api = {
     cambiarEstado: (id, estado)=> put(`/api/pedidos/${id}/estado`, { estado }),
     cancelar:      (id)        => patch(`/api/pedidos/${id}/cancelar`),
     agregar:       (id, body)  => patch(`/api/pedidos/${id}/agregar`, body),
+    editar:        (id, body)  => patch(`/api/pedidos/${id}/editar`,  body),
     eliminar:      (id)        => del(`/api/pedidos/${id}`),
   },
 

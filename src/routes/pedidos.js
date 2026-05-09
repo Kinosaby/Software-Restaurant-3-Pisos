@@ -93,6 +93,23 @@ router.patch('/:id/agregar',
   ctrl.agregar
 );
 
+/** Editar items de un pedido (quitar o cambiar cantidad) */
+const editarPedidoRules = [
+  param('id').isInt({ min: 1 }).withMessage('ID inválido.'),
+  body('items').isArray({ min: 1 }).withMessage('Debe enviar al menos un item.'),
+  body('items.*.detalle_id').isInt({ min: 1 }).withMessage('detalle_id inválido.'),
+  body('items.*.cantidad').isInt({ min: 0 }).withMessage('Cantidad debe ser 0 o mayor.'),
+  body('items.*.nota').optional({ nullable: true }).isString().isLength({ max: 200 }),
+];
+
+router.patch('/:id/editar',
+  authMiddleware,
+  requireRole('admin', 'mesero'),
+  editarPedidoRules,
+  validate,
+  ctrl.editar
+);
+
 /** Eliminar pedido (admin only) */
 router.delete('/:id',
   authMiddleware,

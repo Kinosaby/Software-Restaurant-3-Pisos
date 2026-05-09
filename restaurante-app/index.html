@@ -275,12 +275,63 @@
 .cocina-body .pedido-item-nota { font-size: .9rem; color: var(--muted); }
 .cocina-btn { font-size: 1rem; padding: 10px 16px; }
 
-/* ── Modal agregar productos ─────────────────────────────────── */
+/* ── Modal agregar productos ──────────────────────────────── */
 #overlay-agregar .modal {
   max-width: 540px;
   max-height: 90vh;
   overflow-y: auto;
 }
+
+/* ── Modal editar pedido ─────────────────────────────────── */
+#overlay-editar .modal {
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.editar-item-row {
+  background: var(--surface2);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.editar-item-info {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.editar-item-nom   { font-size: .92rem; font-weight: 700; color: var(--cream); }
+.editar-item-precio { font-size: .78rem; }
+.editar-item-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.editar-qty {
+  font-size: 1.1rem;
+  font-weight: 700;
+  min-width: 28px;
+  text-align: center;
+  color: var(--accent);
+}
+.editar-item-subtotal {
+  text-align: right;
+  font-weight: 600;
+}
+.btn-xs {
+  padding: 4px 8px;
+  font-size: .75rem;
+  border-radius: 6px;
+}
+/* Botón Editar (lápiz) */
+.btn-edit {
+  background: rgba(99,102,241,.15);
+  color: #818cf8;
+  border: 1px solid #818cf8;
+}
+.btn-edit:hover { background: rgba(99,102,241,.3); }
 </style>
 </head>
 <body>
@@ -627,6 +678,20 @@
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancelar</button>
       <button id="btn-confirmar-agregar" class="btn btn-primary btn-sm" style="width:auto" onclick="confirmarAgregarProductos()">
         <i class="fa-solid fa-paper-plane"></i> Confirmar
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Editar Pedido -->
+<div class="overlay" id="overlay-editar" onclick="closeModal()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title"><i class="fa-solid fa-pen-to-square"></i> Editar Pedido</div>
+    <div id="editar-content" class="modal-body"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancelar</button>
+      <button id="btn-confirmar-editar" class="btn btn-primary btn-sm" style="width:auto" onclick="guardarEdicion()">
+        <i class="fa-solid fa-floppy-disk"></i> Guardar Cambios
       </button>
     </div>
   </div>

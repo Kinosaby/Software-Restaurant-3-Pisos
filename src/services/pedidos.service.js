@@ -276,4 +276,82 @@ async function eliminar(id) {
   return rows[0];
 }
 
-module.exports = { listar, obtenerPorId, crear, agregarProductos, cambiarEstado, cancelar, eliminar, ESTADOS_VALIDOS };
+/**
+ * Edita los items de un pedido existente (pendiente o preparando).
+ * items: [{ detalle_id, cantidad, nota }]
+ *   cantidad = 0 → elimina ese item
+ *   cantidad > 0 → actualiza cantidad y nota
+ * Recalcula el total y emite pedido_actualizado via socket.
+ */
+async function editarPedido(id, { items }, io = null) {
+  if (!items || items.length === 0) {
+    throw new AppError('Debe enviar al menos un item.', 400, 'EMPTY_ITEMS');
+  }
+
+  const pedido = await obtenerPorId(id);
+  if (!['pendiente', 'preparando'].includes(pedido.estado)) {
+    throw new AppError(
+      `Solo se pueden editar pedidos pendientes o en preparación.`,
+      400, 'INVALID_STATUS'
+    );
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    for (const item of items) {
+      if (item.cantidad <= 0) {
+        // Eliminar el item del detalle
+        await client.query(
+          'DELETE FROM pedido_detalle WHERE id = $1 AND pedido_id = $2',
+          [item.detalle_id, id]
+        );
+      } else {
+        // Actualizar cantidad y nota
+        await client.query(
+          'UPDATE pedido_detalle SET cantidad = $1, nota = $2 WHERE id = $3 AND pedido_id = $4',
+          [item.cantidad, item.nota ?? null, item.detalle_id, id]
+        );
+      }
+    }
+
+    // Recalcular total desde cero sumando precio * cantidad del detalle actual
+    const { rows: detalles } = await client.query(
+      `SELECT pd.cantidad, pr.precio
+       FROM pedido_detalle pd
+       JOIN productos pr ON pr.id = pd.producto_id
+       WHERE pd.pedido_id = $1`,
+      [id]
+    );
+
+    if (detalles.length === 0) {
+      await client.query('ROLLBACK');
+      throw new AppError('El pedido no puede quedar sin productos.', 400, 'EMPTY_ORDER');
+    }
+
+    const nuevoTotal = detalles.reduce(
+      (acc, r) => acc + parseFloat(r.precio) * r.cantidad, 0
+    );
+
+    await client.query(
+      'UPDATE pedidos SET total = $1 WHERE id = $2',
+      [nuevoTotal, id]
+    );
+
+    await client.query('COMMIT');
+    logger.info('Pedido editado', { pedidoId: id, nuevoTotal });
+
+    const actualizado = await obtenerPorId(id);
+    if (io) io.emit('pedido_actualizado', { ...actualizado, _accion: 'pedido_editado' });
+    return actualizado;
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+module.exports = { listar, obtenerPorId, crear, agregarProductos, editarPedido, cambiarEstado, cancelar, eliminar, ESTADOS_VALIDOS };

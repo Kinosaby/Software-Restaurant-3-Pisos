@@ -49,6 +49,13 @@ exports.agregar = asyncHandler(async (req, res) => {
   res.json({ success: true, mensaje: 'Productos agregados al pedido', pedido });
 });
 
+/** PATCH /api/pedidos/:id/editar  (mesero, admin) */
+exports.editar = asyncHandler(async (req, res) => {
+  const io     = getIo(req);
+  const pedido = await pedidosService.editarPedido(req.params.id, req.body, io);
+  res.json({ success: true, mensaje: 'Pedido editado', pedido });
+});
+
 /** DELETE /api/pedidos/:id  (admin) */
 exports.eliminar = asyncHandler(async (req, res) => {
   const pedido = await pedidosService.eliminar(req.params.id);

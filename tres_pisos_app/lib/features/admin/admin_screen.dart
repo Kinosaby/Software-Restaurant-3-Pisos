@@ -286,8 +286,9 @@ class _UsuariosTab extends ConsumerWidget {
                         'username': nameCtrl.text.trim(),
                         'role': role
                       };
-                      if (passCtrl.text.isNotEmpty)
+                      if (passCtrl.text.isNotEmpty) {
                         body['password'] = passCtrl.text;
+                      }
                       try {
                         if (user == null) {
                           body['password'] = passCtrl.text;

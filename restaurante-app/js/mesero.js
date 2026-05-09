@@ -217,8 +217,8 @@ function renderMeseroPedidos() {
   }
 
   const renderRow = (p) => {
-    // El botón Agregar aparece en TODOS los estados menos cancelado
     const puedeAgregar = p.estado !== 'cancelado';
+    const puedeEditar  = ['pendiente','preparando'].includes(p.estado);
     const esCompletado = ['listo','pagado'].includes(p.estado);
     return `
     <div class="pedido-row" onclick="verDetallePedido(${p.id})">
@@ -230,6 +230,11 @@ function renderMeseroPedidos() {
         <div class="text-xs muted">#${p.id} &middot; ${fmt.relTime(p.creado_en)}</div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+        ${puedeEditar ? `
+          <button class="btn btn-sm btn-edit"
+            onclick="event.stopPropagation();abrirEditarPedido(${p.id})">
+            <i class="fa-solid fa-pen-to-square"></i> Editar
+          </button>` : ''}
         ${puedeAgregar ? `
           <button class="btn btn-sm ${esCompletado ? 'btn-amber' : 'btn-outline'}"
             onclick="event.stopPropagation();abrirAgregarProductos(${p.id})">
@@ -468,3 +473,127 @@ async function confirmarAgregarProductos() {
   } catch(e) { toastErr(e.message); }
   finally { if (btn) btn.disabled = false; loading(false); }
 }
+
+/* ── Editar pedido (quitar / cambiar cantidad) ──────────────── */
+let _pedidoEditarId = null;
+let _edicionItems   = [];   // [{ detalle_id, producto_id, nombre, precio, cantidad, nota }]
+
+function abrirEditarPedido(pedidoId) {
+  const p = State.pedidos.find(x => x.id === pedidoId);
+  if (!p) return;
+  _pedidoEditarId = pedidoId;
+  // Clonar items actuales del pedido
+  _edicionItems = (p.productos || []).map(i => ({
+    detalle_id:  i.id,
+    producto_id: i.producto_id,
+    nombre:      i.nombre,
+    precio:      parseFloat(i.precio),
+    cantidad:    i.cantidad,
+    nota:        i.nota || '',
+  }));
+
+  renderEdicionModal(p);
+  openModal('modal-editar');
+}
+
+function renderEdicionModal(p) {
+  const content = document.getElementById('editar-content');
+  if (!content) return;
+
+  const total = _edicionItems.reduce((s, i) => s + i.precio * i.cantidad, 0);
+  const hayItems = _edicionItems.length > 0;
+
+  content.innerHTML = `
+    <div class="cobro-resumen" style="margin-bottom:14px">
+      <div class="cobro-mesa">Mesa ${p.mesa} &nbsp;<span class="text-xs muted">#${p.id}</span></div>
+    </div>
+    ${!hayItems ? '<p class="muted text-sm" style="text-align:center;padding:16px">Sin productos — guarda para cancelar el pedido.</p>' : ''}
+    <div style="display:flex;flex-direction:column;gap:10px">
+      ${_edicionItems.map((item, idx) => `
+        <div class="editar-item-row" id="edit-row-${idx}">
+          <div class="editar-item-info">
+            <span class="editar-item-nom">${item.nombre}</span>
+            <span class="editar-item-precio muted text-xs">${fmt.currency(item.precio)} c/u</span>
+          </div>
+          <div class="editar-item-controls">
+            <button class="qty-btn" onclick="editarCantidad(${idx},-1)">-</button>
+            <span class="editar-qty" id="edit-qty-${idx}">${item.cantidad}</span>
+            <button class="qty-btn" onclick="editarCantidad(${idx},1)">+</button>
+            <button class="btn btn-danger btn-xs" onclick="quitarItemEdicion(${idx})" title="Quitar">
+              <i class="fa-solid fa-trash"></i>
+            </button>
+          </div>
+          <input class="nota-input" style="width:100%;margin-top:6px"
+            placeholder="Nota: sin cebolla..."
+            value="${item.nota}"
+            oninput="editarNota(${idx}, this.value)">
+          <div class="editar-item-subtotal text-gold text-xs" id="edit-sub-${idx}">${fmt.currency(item.precio * item.cantidad)}</div>
+        </div>`).join('')}
+    </div>
+    <div class="divider" style="margin:14px 0"></div>
+    <div class="total-row">
+      <span class="total-label">Nuevo total</span>
+      <span class="total-value" id="editar-total">${fmt.currency(total)}</span>
+    </div>`;
+
+  // Actualizar estado del botón guardar
+  const btn = document.getElementById('btn-confirmar-editar');
+  if (btn) btn.disabled = !hayItems;
+}
+
+function editarCantidad(idx, delta) {
+  const item = _edicionItems[idx];
+  if (!item) return;
+  item.cantidad = Math.max(1, item.cantidad + delta);
+  // Actualizar UI sin re-renderizar todo
+  const qtyEl = document.getElementById(`edit-qty-${idx}`);
+  const subEl = document.getElementById(`edit-sub-${idx}`);
+  const totEl = document.getElementById('editar-total');
+  if (qtyEl) qtyEl.textContent = item.cantidad;
+  if (subEl) subEl.textContent = fmt.currency(item.precio * item.cantidad);
+  if (totEl) totEl.textContent = fmt.currency(_edicionItems.reduce((s,i) => s + i.precio * i.cantidad, 0));
+}
+
+function quitarItemEdicion(idx) {
+  _edicionItems.splice(idx, 1);
+  const p = State.pedidos.find(x => x.id === _pedidoEditarId);
+  renderEdicionModal(p || { mesa: '?', id: _pedidoEditarId });
+}
+
+function editarNota(idx, nota) {
+  if (_edicionItems[idx]) _edicionItems[idx].nota = nota;
+}
+
+async function guardarEdicion() {
+  if (!_edicionItems.length) { toastErr('El pedido debe tener al menos un producto'); return; }
+  const btn = document.getElementById('btn-confirmar-editar');
+  if (btn) btn.disabled = true;
+  try {
+    loading(true);
+
+    // Items que quedaron activos (con cantidad/nota actualizados)
+    const itemsActivos = _edicionItems.map(i => ({
+      detalle_id: i.detalle_id,
+      cantidad:   i.cantidad,
+      nota:       i.nota,
+    }));
+
+    // Items que fueron quitados → enviar cantidad=0 para que el backend los elimine
+    const pedidoOriginal  = State.pedidos.find(x => x.id === _pedidoEditarId);
+    const idsActuales     = new Set(_edicionItems.map(i => i.detalle_id));
+    const itemsEliminados = (pedidoOriginal?.productos || [])
+      .filter(p => !idsActuales.has(p.id))
+      .map(p => ({ detalle_id: p.id, cantidad: 0, nota: '' }));
+
+    // Una sola llamada con todos los cambios
+    await api.pedidos.editar(_pedidoEditarId, {
+      items: [...itemsActivos, ...itemsEliminados],
+    });
+
+    toastOk(`Pedido #${_pedidoEditarId} actualizado`);
+    closeModal();
+    await loadMeseroData();
+  } catch(e) { toastErr(e.message); }
+  finally { if (btn) btn.disabled = false; loading(false); }
+}
+
