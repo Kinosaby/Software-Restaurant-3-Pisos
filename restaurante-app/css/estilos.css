@@ -375,3 +375,83 @@ tbody td{padding:12px 14px;vertical-align:middle}
   tbody td{display:block;padding:6px 14px}
   tbody td::before{content:attr(data-label)' ';font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;display:block}
 }
+
+/* ── Comensal Tabs ─────────────────────────── */
+.comensal-tabs-bar{
+  display:flex;gap:4px;padding:8px 12px;
+  border-bottom:1px solid var(--border2);
+  background:rgba(0,0,0,.2);
+  overflow-x:auto;flex-wrap:nowrap;align-items:center;
+}
+.comensal-tab{
+  display:flex;align-items:center;gap:5px;
+  padding:5px 12px;border-radius:6px;
+  background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,149,0,.15);
+  cursor:pointer;font-size:.76rem;font-weight:600;
+  transition:var(--trans);white-space:nowrap;flex-shrink:0;
+}
+.comensal-tab:hover{border-color:var(--accent);background:rgba(255,149,0,.07)}
+.comensal-tab.active{border-color:var(--accent);background:rgba(255,149,0,.12);color:var(--accent)}
+.comensal-tab-total{font-family:var(--font-h);font-size:.72rem;color:var(--gold);margin-left:3px}
+.comensal-tab-del{
+  background:transparent;border:none;color:var(--muted);
+  font-size:.9rem;line-height:1;padding:0 2px;cursor:pointer;
+  transition:var(--trans);
+}
+.comensal-tab-del:hover{color:var(--danger)}
+.comensal-tab-add{
+  background:transparent;border:1px dashed rgba(255,149,0,.3);
+  color:var(--muted);border-radius:6px;
+  padding:5px 10px;font-size:.72rem;cursor:pointer;
+  transition:var(--trans);flex-shrink:0;
+}
+.comensal-tab-add:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ── Mesa grupos (pedidos list) ────────────── */
+.mesa-grupo{
+  background:rgba(255,149,0,.03);
+  border:1px solid rgba(255,149,0,.12);
+  border-radius:var(--radius);
+  overflow:hidden;margin-bottom:10px;
+}
+.mesa-grupo-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 14px;
+  background:rgba(255,149,0,.06);
+  border-bottom:1px solid rgba(255,149,0,.1);
+  flex-wrap:wrap;gap:8px;
+}
+.mesa-grupo-titulo{
+  font-family:var(--font-h);font-size:.82rem;font-weight:700;
+  color:var(--gold);letter-spacing:.04em;
+  display:flex;align-items:center;gap:6px;
+}
+.pedido-row-sub{
+  background:rgba(0,0,0,.15);
+  border:none;border-bottom:1px solid rgba(255,149,0,.06);
+  border-radius:0;margin:0;padding:12px 14px;
+}
+.pedido-row-sub:last-child{border-bottom:none}
+.pedido-row-sub:hover{background:rgba(255,149,0,.05)}
+
+/* ── Badge comensal ────────────────────────── */
+.badge-comensal{
+  display:inline-flex;align-items:center;gap:4px;
+  font-size:.67rem;font-weight:600;padding:2px 8px;
+  border-radius:12px;
+  background:rgba(96,165,250,.12);
+  color:var(--blue);
+  border:1px solid rgba(96,165,250,.25);
+}
+
+/* ── Btn xs ────────────────────────────────── */
+.btn-xs{padding:4px 10px;font-size:.64rem;border-radius:5px;letter-spacing:.08em}
+.btn-amber{background:rgba(255,149,0,.15);border:1px solid rgba(255,149,0,.4);color:var(--accent)}
+.btn-amber:hover{background:rgba(255,149,0,.28)}
+
+/* ── Seccion pagados ───────────────────────── */
+.seccion-pagados-header{
+  font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted);padding:10px 14px 4px;
+}

@@ -514,8 +514,10 @@
           <span class="brand-sm fw600" style="font-family:var(--font-h)"><i class="fa-solid fa-cart-shopping"></i> Carrito <span id="carrito-count" class="text-accent">(0)</span></span>
           <button class="btn btn-ghost btn-sm" onclick="clearCarrito()">Limpiar</button>
         </div>
+        <!-- Tabs de comensales -->
+        <div id="comensal-tabs" class="comensal-tabs-bar"></div>
         <div id="carrito-body" class="carrito-body">
-          <p class="muted text-sm" style="text-align:center;padding:24px 0">El carrito está vacío</p>
+          <p class="muted text-sm" style="text-align:center;padding:24px 0">Sin productos para este comensal</p>
         </div>
         <div class="carrito-footer">
           <!-- Tipo: Aqui / Para llevar -->
@@ -528,12 +530,12 @@
             </button>
           </div>
           <div class="total-row">
-            <span class="total-label">Total</span>
+            <span class="total-label">Total mesa</span>
             <span id="carrito-total" class="total-value">$0.00</span>
           </div>
           <form id="form-pedido">
             <button id="btn-enviar-pedido" class="btn btn-primary" type="submit">
-               <i class="fa-solid fa-paper-plane"></i> Enviar Pedido a Cocina
+               <i class="fa-solid fa-paper-plane"></i> Enviar a Cocina
             </button>
           </form>
         </div>

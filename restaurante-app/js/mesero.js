@@ -108,31 +108,62 @@ function filtrarCategoria(cat) {
   renderCatalogo();
 }
 
-/* ── Carrito ────────────────────────────────── */
+/* ── Carrito multi-comensal ─────────────────────────────────── */
+// _comensales: [{ nombre:'C1', items:[{producto_id,nombre,precio,cantidad,nota}] }, ...]
+let _comensales     = [{ nombre: 'C1', items: [] }];
+let _comensalActivo = 0;
+
+function _carritoActivo() { return _comensales[_comensalActivo].items; }
+
 function addToCarrito(productoId) {
   const prod = State.productos.find(p => p.id === productoId);
   if (!prod) return;
-  const existing = State.carrito.find(i => i.producto_id === productoId);
+  const items    = _carritoActivo();
+  const existing = items.find(i => i.producto_id === productoId);
   if (existing) { existing.cantidad++; }
-  else { State.carrito.push({ producto_id: productoId, nombre: prod.nombre, precio: parseFloat(prod.precio), cantidad: 1, nota: '' }); }
+  else { items.push({ producto_id: productoId, nombre: prod.nombre, precio: parseFloat(prod.precio), cantidad: 1, nota: '' }); }
   renderCarrito();
 }
 
 function changeQty(productoId, delta) {
-  const item = State.carrito.find(i => i.producto_id === productoId);
+  const items = _carritoActivo();
+  const item  = items.find(i => i.producto_id === productoId);
   if (!item) return;
   item.cantidad += delta;
-  if (item.cantidad <= 0) State.carrito = State.carrito.filter(i => i.producto_id !== productoId);
+  if (item.cantidad <= 0) {
+    _comensales[_comensalActivo].items = items.filter(i => i.producto_id !== productoId);
+  }
   renderCarrito();
 }
 
 function setNota(productoId, nota) {
-  const item = State.carrito.find(i => i.producto_id === productoId);
+  const item = _carritoActivo().find(i => i.producto_id === productoId);
   if (item) item.nota = nota;
 }
 
 function clearCarrito() {
-  State.carrito = [];
+  _comensales     = [{ nombre: 'C1', items: [] }];
+  _comensalActivo = 0;
+  renderCarrito();
+}
+
+function agregarComensal() {
+  const n = _comensales.length + 1;
+  _comensales.push({ nombre: `C${n}`, items: [] });
+  _comensalActivo = _comensales.length - 1;
+  renderCarrito();
+}
+
+function cambiarComensal(idx) {
+  _comensalActivo = idx;
+  renderCarrito();
+}
+
+function quitarComensal(idx) {
+  if (_comensales.length === 1) { clearCarrito(); return; }
+  _comensales.splice(idx, 1);
+  _comensales.forEach((c, i) => { if (/^C\d+$/.test(c.nombre)) c.nombre = `C${i + 1}`; });
+  _comensalActivo = Math.min(_comensalActivo, _comensales.length - 1);
   renderCarrito();
 }
 
@@ -140,61 +171,83 @@ function renderCarrito() {
   const body   = document.getElementById('carrito-body');
   const totEl  = document.getElementById('carrito-total');
   const cntEl  = document.getElementById('carrito-count');
+  const tabsEl = document.getElementById('comensal-tabs');
   if (!body) return;
 
-  if (!State.carrito.length) {
-    body.innerHTML = '<p class="muted text-sm" style="text-align:center;padding:24px 0">El carrito está vacío</p>';
-    if (totEl) totEl.textContent = '$0.00';
-    if (cntEl) cntEl.textContent = '0';
-    return;
+  // Tabs de comensales
+  if (tabsEl) {
+    tabsEl.innerHTML = _comensales.map((c, i) => {
+      const totalC = c.items.reduce((s, it) => s + it.precio * it.cantidad, 0);
+      const active = i === _comensalActivo ? 'active' : '';
+      return `
+        <div class="comensal-tab ${active}" onclick="cambiarComensal(${i})">
+          <span>${c.nombre}</span>
+          ${c.items.length ? `<span class="comensal-tab-total">${fmt.currency(totalC)}</span>` : ''}
+          ${_comensales.length > 1 ? `<button class="comensal-tab-del" onclick="event.stopPropagation();quitarComensal(${i})" title="Quitar">&times;</button>` : ''}
+        </div>`;
+    }).join('') +
+    `<button class="comensal-tab-add" onclick="agregarComensal()" title="Nuevo comensal">
+       <i class="fa-solid fa-user-plus"></i>
+     </button>`;
   }
 
-  let total = 0;
-  body.innerHTML = State.carrito.map(item => {
-    const subtotal = item.precio * item.cantidad;
-    total += subtotal;
-    return `
-      <div class="carrito-item">
-        <div style="flex:1">
-          <div style="font-size:.84rem;font-weight:600">${item.nombre}</div>
-          <div style="font-size:.73rem;color:var(--muted)">${fmt.currency(item.precio)} c/u</div>
-          <input class="nota-input" placeholder="Nota..." value="${item.nota||''}"
-            onchange="setNota(${item.producto_id}, this.value)" style="margin-top:5px">
-        </div>
-        <div class="carrito-qty">
-          <button class="qty-btn" onclick="changeQty(${item.producto_id},-1)">−</button>
-          <span style="min-width:22px;text-align:center;font-weight:600">${item.cantidad}</span>
-          <button class="qty-btn" onclick="changeQty(${item.producto_id},1)">+</button>
-        </div>
-      </div>`;
-  }).join('');
+  const items = _carritoActivo();
 
-  if (totEl) totEl.textContent = fmt.currency(total);
-  if (cntEl) cntEl.textContent = State.carrito.reduce((a,i)=>a+i.cantidad, 0);
+  if (!items.length) {
+    body.innerHTML = '<p class="muted text-sm" style="text-align:center;padding:24px 0">Sin productos para este comensal</p>';
+  } else {
+    body.innerHTML = items.map(item => {
+      const subtotal = item.precio * item.cantidad;
+      return `
+        <div class="carrito-item">
+          <div style="flex:1">
+            <div style="font-size:.84rem;font-weight:600">${item.nombre}</div>
+            <div style="font-size:.73rem;color:var(--muted)">${fmt.currency(item.precio)} c/u &bull; <strong class="text-gold">${fmt.currency(subtotal)}</strong></div>
+            <input class="nota-input" placeholder="Nota..." value="${item.nota || ''}"
+              onchange="setNota(${item.producto_id}, this.value)" style="margin-top:5px">
+          </div>
+          <div class="carrito-qty">
+            <button class="qty-btn" onclick="changeQty(${item.producto_id},-1)">−</button>
+            <span style="min-width:22px;text-align:center;font-weight:600">${item.cantidad}</span>
+            <button class="qty-btn" onclick="changeQty(${item.producto_id},1)">+</button>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  // Total global
+  const totalGlobal = _comensales.reduce((s, c) => s + c.items.reduce((sc, it) => sc + it.precio * it.cantidad, 0), 0);
+  const cntGlobal   = _comensales.reduce((s, c) => s + c.items.reduce((sc, it) => sc + it.cantidad, 0), 0);
+  if (totEl) totEl.textContent = fmt.currency(totalGlobal);
+  if (cntEl) cntEl.textContent = cntGlobal;
 }
 
-/* ── Enviar pedido ──────────────────────────── */
+/* ── Enviar pedido(s) ───────────────────────────────────────── */
 async function submitPedido() {
-  if (!State.carrito.length) { toastErr('El carrito está vacío'); return; }
   const mesa = parseInt(document.getElementById('mesa-num').value, 10);
   if (!mesa || mesa < 1) { toastErr('Ingresa un número de mesa válido'); return; }
 
-  const body = {
-    mesa,
-    tipo: _tipoPedido,
-    productos: State.carrito.map(i => ({
-      producto_id: i.producto_id,
-      cantidad:    i.cantidad,
-      nota:        i.nota || '',
-    })),
-  };
+  const conItems = _comensales.filter(c => c.items.length > 0);
+  if (!conItems.length) { toastErr('Agrega al menos un producto'); return; }
 
   const btn = document.getElementById('btn-enviar-pedido');
   btn.disabled = true;
   try {
     loading(true);
-    await api.pedidos.crear(body);
-    toastOk(`Pedido enviado — Mesa ${mesa}`);
+    for (const c of conItems) {
+      await api.pedidos.crear({
+        mesa,
+        tipo:     _tipoPedido,
+        comensal: _comensales.length > 1 ? c.nombre : null,
+        productos: c.items.map(i => ({
+          producto_id: i.producto_id,
+          cantidad:    i.cantidad,
+          nota:        i.nota || '',
+        })),
+      });
+    }
+    const totalEnviado = conItems.reduce((s, c) => s + c.items.reduce((sc, it) => sc + it.precio * it.cantidad, 0), 0);
+    toastOk(`${conItems.length > 1 ? conItems.length + ' pedidos' : 'Pedido'} enviado(s) — Mesa ${mesa} (${fmt.currency(totalEnviado)})`);
     clearCarrito();
     document.getElementById('mesa-num').value = '';
     await loadMeseroData();
@@ -202,44 +255,43 @@ async function submitPedido() {
   finally { btn.disabled = false; loading(false); }
 }
 
-/* ── Lista de pedidos del mesero ─────────────────── */
+/* ── Lista de pedidos agrupada por mesa ─────────────────────── */
 function renderMeseroPedidos() {
   const list = document.getElementById('mesero-pedidos-list');
   if (!list) return;
 
-  // Separar activos y pagados del día
-  const activos  = State.pedidos.filter(p => !['pagado','cancelado'].includes(p.estado));
-  const pagados  = State.pedidos.filter(p => p.estado === 'pagado');
+  const activos = State.pedidos.filter(p => !['pagado','cancelado'].includes(p.estado));
+  const pagados = State.pedidos.filter(p => p.estado === 'pagado');
 
   if (!activos.length && !pagados.length) {
     list.innerHTML = '<p class="muted text-sm" style="padding:16px">Sin pedidos activos</p>';
     return;
   }
 
+  const grupos = {};
+  [...activos, ...pagados].forEach(p => {
+    if (!grupos[p.mesa]) grupos[p.mesa] = [];
+    grupos[p.mesa].push(p);
+  });
+
   const renderRow = (p) => {
     const puedeAgregar = p.estado !== 'cancelado';
     const puedeEditar  = ['pendiente','preparando'].includes(p.estado);
     const esCompletado = ['listo','pagado'].includes(p.estado);
+    const labelC = p.comensal
+      ? `<span class="badge-comensal"><i class="fa-solid fa-user"></i> ${p.comensal}</span>`
+      : '';
     return `
-    <div class="pedido-row" onclick="verDetallePedido(${p.id})">
+    <div class="pedido-row pedido-row-sub" onclick="verDetallePedido(${p.id})">
       <div class="pedido-row-info">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-          <span class="fw600">Mesa ${p.mesa}</span>
-          ${badgeHtml(p.estado)}
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px">
+          ${labelC}${badgeHtml(p.estado)}
         </div>
         <div class="text-xs muted">#${p.id} &middot; ${fmt.relTime(p.creado_en)}</div>
       </div>
-      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-        ${puedeEditar ? `
-          <button class="btn btn-sm btn-edit"
-            onclick="event.stopPropagation();abrirEditarPedido(${p.id})">
-            <i class="fa-solid fa-pen-to-square"></i> Editar
-          </button>` : ''}
-        ${puedeAgregar ? `
-          <button class="btn btn-sm ${esCompletado ? 'btn-amber' : 'btn-outline'}"
-            onclick="event.stopPropagation();abrirAgregarProductos(${p.id})">
-            <i class="fa-solid fa-plus"></i> ${esCompletado ? 'Piden más' : 'Agregar'}
-          </button>` : ''}
+      <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+        ${puedeEditar ? `<button class="btn btn-sm btn-edit" onclick="event.stopPropagation();abrirEditarPedido(${p.id})"><i class="fa-solid fa-pen-to-square"></i></button>` : ''}
+        ${puedeAgregar ? `<button class="btn btn-sm ${esCompletado ? 'btn-amber' : 'btn-outline'}" onclick="event.stopPropagation();abrirAgregarProductos(${p.id})"><i class="fa-solid fa-plus"></i></button>` : ''}
         ${p.estado === 'listo' ? `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();abrirCobro(${p.id})"><i class="fa-solid fa-credit-card"></i> Cobrar</button>` : ''}
         <span class="text-gold fw600">${fmt.currency(p.total)}</span>
         ${p.estado !== 'pagado' ? `<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();cancelarPedido(${p.id})"><i class="fa-solid fa-xmark"></i></button>` : ''}
@@ -248,17 +300,55 @@ function renderMeseroPedidos() {
   };
 
   let html = '';
+  const mesasActivas = [...new Set(activos.map(p => p.mesa))];
+  const mesasPagadas = [...new Set(pagados.map(p => p.mesa).filter(m => !mesasActivas.includes(m)))];
 
-  if (activos.length) {
-    html += activos.map(renderRow).join('');
-  }
+  mesasActivas.forEach(mesa => {
+    const peds      = grupos[mesa].filter(p => !['pagado','cancelado'].includes(p.estado));
+    const totalMesa = peds.reduce((s, p) => s + parseFloat(p.total || 0), 0);
+    const listos    = peds.filter(p => p.estado === 'listo');
+    const hayMulti  = peds.length > 1;
+    html += `
+    <div class="mesa-grupo">
+      <div class="mesa-grupo-header">
+        <span class="mesa-grupo-titulo"><i class="fa-solid fa-utensils"></i> Mesa ${mesa}${hayMulti ? ` <span class="muted text-xs">(${peds.length} cuentas)</span>` : ''}</span>
+        <div style="display:flex;gap:6px;align-items:center">
+          <span class="text-gold fw600 text-sm">${fmt.currency(totalMesa)}</span>
+          ${listos.length > 1 ? `<button class="btn btn-primary btn-xs" onclick="cobrarTodoMesa(${mesa})"><i class="fa-solid fa-cash-register"></i> Cobrar todo</button>` : ''}
+        </div>
+      </div>
+      ${peds.map(renderRow).join('')}
+    </div>`;
+  });
 
   if (pagados.length) {
-    html += `<div class="seccion-pagados-header">Cobrados hoy <span class="muted text-xs">(piden más?)</span></div>`;
-    html += pagados.map(renderRow).join('');
+    html += `<div class="seccion-pagados-header">Cobrados hoy <span class="muted text-xs">(piden mas?)</span></div>`;
+    mesasPagadas.forEach(mesa => {
+      const peds = grupos[mesa]?.filter(p => p.estado === 'pagado') || [];
+      if (!peds.length) return;
+      const totalMesa = peds.reduce((s, p) => s + parseFloat(p.total || 0), 0);
+      html += `
+      <div class="mesa-grupo">
+        <div class="mesa-grupo-header">
+          <span class="mesa-grupo-titulo"><i class="fa-solid fa-utensils"></i> Mesa ${mesa}</span>
+          <span class="text-gold fw600 text-sm">${fmt.currency(totalMesa)}</span>
+        </div>
+        ${peds.map(renderRow).join('')}
+      </div>`;
+    });
   }
 
   list.innerHTML = html;
+}
+
+let _cobroPendientesMesa = [];
+
+async function cobrarTodoMesa(mesa) {
+  const listos = State.pedidos.filter(p => p.mesa === mesa && p.estado === 'listo');
+  if (!listos.length) return;
+  if (listos.length === 1) { abrirCobro(listos[0].id); return; }
+  _cobroPendientesMesa = listos.slice(1).map(p => p.id);
+  abrirCobro(listos[0].id);
 }
 
 /* ── Cobro con cambio ──────────────────────── */

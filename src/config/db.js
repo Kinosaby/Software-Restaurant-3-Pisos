@@ -1,6 +1,8 @@
 /**
  * db.js — Pool de conexiones PostgreSQL.
  * Usa variables de entorno; exporta un pool reutilizable.
+ * TIMEZONE: configurado en America/Mexico_City para que CURRENT_DATE
+ * coincida con el día del restaurante (no UTC).
  */
 const { Pool } = require('pg');
 const env = require('./env');
@@ -28,14 +30,19 @@ const pool = new Pool(
       }
 );
 
+// Forzar zona horaria México en cada conexión nueva del pool
+pool.on('connect', (client) => {
+  client.query("SET TIME ZONE 'America/Mexico_City'").catch(() => {});
+});
+
 // Log de errores del pool (conexiones que fallan en background)
 pool.on('error', (err) => {
   logger.error('Error inesperado en cliente del pool PostgreSQL', { error: err.message });
 });
 
 // Verificar conexión al arrancar
-pool.query('SELECT NOW()')
-  .then((res) => logger.info('✅ Base de datos conectada', { tiempo: res.rows[0].now }))
+pool.query("SET TIME ZONE 'America/Mexico_City'; SELECT NOW()")
+  .then((res) => logger.info('✅ Base de datos conectada (TZ: Mexico_City)', { tiempo: res[1]?.rows[0]?.now || 'ok' }))
   .catch((err) => {
     logger.error('❌ No se pudo conectar a la base de datos', { error: err.message });
   });

@@ -15,6 +15,9 @@ const crearPedidoRules = [
     .isInt({ min: 1 }).withMessage('La mesa debe ser un número entero positivo.'),
   body('tipo')
     .optional().isIn(['aqui','llevar']).withMessage('Tipo inválido. Valores: aqui, llevar.'),
+  body('comensal')
+    .optional({ nullable: true }).isString().trim()
+    .isLength({ max: 50 }).withMessage('El comensal no puede superar 50 caracteres.'),
   body('productos')
     .isArray({ min: 1 }).withMessage('Debe incluir al menos un producto.'),
   body('productos.*.producto_id')
