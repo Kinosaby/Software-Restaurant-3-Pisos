@@ -248,17 +248,28 @@ async function adminDeletePedido(id) {
 }
 
 /* ── Ventas Semanales ──────────────────────────── */
+let _chartVentas = null;
+
 async function showWeeklySales() {
   document.getElementById('overlay-ventas-semana').style.display = 'flex';
-  const body = document.getElementById('ventas-semana-body');
-  body.innerHTML = '<p>Cargando datos...</p>';
+  const content = document.getElementById('ventas-semana-content');
+  const canvas = document.getElementById('chart-ventas');
+  
+  content.innerHTML = '<p>Cargando datos...</p>';
+  canvas.style.display = 'none';
+  
   try {
     const res = await api.metricas.ventas(7);
     const ventas = res.ventas || [];
     if (!ventas.length) {
-      body.innerHTML = '<p>No hay ventas en los últimos 7 días.</p>';
+      content.innerHTML = '<p>No hay ventas en los últimos 7 días.</p>';
       return;
     }
+    
+    // Preparar datos para gráfica
+    const labels = [];
+    const data = [];
+    let totalAcumulado = 0;
     
     let html = `
       <table style="width: 100%; text-align: left; border-collapse: collapse; margin-top: 10px;">
@@ -272,15 +283,16 @@ async function showWeeklySales() {
         <tbody>
     `;
     
-    let totalAcumulado = 0;
-    
     ventas.forEach(v => {
-      // Usar 'T12:00:00' para evitar que la conversión de huso horario cambie el día
       const dateStrFormat = v.fecha.includes('T') ? v.fecha : v.fecha + 'T12:00:00';
       const date = new Date(dateStrFormat);
       const dateStr = date.toLocaleDateString('es-MX', { weekday: 'short', day: '2-digit', month: 'short' });
       const total = parseFloat(v.total || 0);
+      
+      labels.push(dateStr);
+      data.push(total);
       totalAcumulado += total;
+      
       html += `
         <tr style="border-bottom: 1px solid var(--border);">
           <td style="padding: 10px 0; text-transform: capitalize;">${dateStr}</td>
@@ -302,8 +314,49 @@ async function showWeeklySales() {
       </table>
     `;
     
-    body.innerHTML = html;
+    content.innerHTML = html;
+    
+    // Renderizar la gráfica de barras
+    canvas.style.display = 'block';
+    if (_chartVentas) {
+      _chartVentas.destroy();
+    }
+    
+    _chartVentas = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Ventas por Día',
+          data: data,
+          backgroundColor: '#d4a843',
+          borderRadius: 4,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              color: '#9ca3af',
+              callback: function(value) { return '$' + value; }
+            },
+            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+          },
+          x: {
+            ticks: { color: '#9ca3af' },
+            grid: { display: false }
+          }
+        }
+      }
+    });
+    
   } catch (error) {
-    body.innerHTML = `<p style="color: var(--danger);">Error al cargar ventas: ${error.message}</p>`;
+    content.innerHTML = `<p style="color: var(--danger);">Error al cargar ventas: ${error.message}</p>`;
   }
 }

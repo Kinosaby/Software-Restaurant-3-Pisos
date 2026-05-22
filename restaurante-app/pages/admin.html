@@ -78,18 +78,22 @@
         <div class="card" style="width: 90%; max-width: 600px; max-height: 90vh; overflow-y: auto; position: relative;">
             <h2 style="margin-bottom: 15px; color: var(--accent);">Ventas de los últimos 7 días</h2>
             <div id="ventas-semana-body" style="margin-bottom: 20px;">
-                <p>Cargando datos...</p>
+                <canvas id="chart-ventas" style="width:100%; max-height:250px; display:none; margin-bottom: 15px;"></canvas>
+                <div id="ventas-semana-content">
+                    <p>Cargando datos...</p>
+                </div>
             </div>
             <button class="btn btn-primary" style="width: 100%;" onclick="document.getElementById('overlay-ventas-semana').style.display='none'">Cerrar</button>
         </div>
     </div>
 
     <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="/js/icons.js"></script>
     <script src="/js/api.js"></script>
     <script src="/js/ui.js"></script>
     <script src="/js/auth.js"></script>
-    <script src="/js/admin.js"></script>
+    <script src="/js/admin.js?v=2"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const user = window.auth.getUser();
