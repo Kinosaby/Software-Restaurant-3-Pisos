@@ -413,13 +413,14 @@ tbody td{padding:12px 14px;vertical-align:middle}
 .dot-live{width:7px;height:7px;border-radius:50%;background:var(--success);animation:pulse 1.5s infinite}
 
 /* ── Modals ────────────────────────────────── */
-.overlay{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);display:none;align-items:center;justify-content:center;padding:20px}
+.overlay{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);display:none;align-items:center;justify-content:center;padding:20px;overflow-y:auto}
 .overlay.open{display:flex}
 .modal{
   background:var(--card2);border:1px solid var(--border);border-radius:var(--radius);
   padding:30px;width:100%;max-width:440px;display:flex;flex-direction:column;gap:16px;
   box-shadow:0 40px 80px rgba(0,0,0,.7),var(--glow);
   animation:fadeIn .22s ease;
+  margin:auto;
 }
 .modal-title{font-family:var(--font-h);font-size:.92rem;font-weight:700;letter-spacing:.06em;color:var(--gold)}
 .modal-body{display:flex;flex-direction:column;gap:14px}
@@ -1090,10 +1091,10 @@ tbody td{padding:12px 14px;vertical-align:middle}
 .modal-agregar-responsive {
   max-width: 900px !important;
   width: 95% !important;
-  max-height: 90vh !important;
-  overflow-y: auto !important;
+  max-height: none !important;
   position: relative;
   padding: 0 !important;
+  margin: 40px auto !important;
 }
 
 .modal-agregar-responsive .modal-header {
@@ -1243,7 +1244,7 @@ tbody td{padding:12px 14px;vertical-align:middle}
 
 @media (max-width: 768px) {
   .modal-agregar-responsive {
-    max-height: 90vh !important;
+    max-height: none !important;
     border-radius: var(--radius) var(--radius) 0 0 !important;
     margin: auto 0 0 !important;
     width: 100% !important;
