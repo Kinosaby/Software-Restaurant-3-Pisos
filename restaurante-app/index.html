@@ -498,6 +498,14 @@
           <div id="catalogo-tabs"></div>
         </div>
 
+        <!-- Buscador rápido -->
+        <div class="catalogo-search-wrap">
+          <i class="fa-solid fa-magnifying-glass" style="color:var(--muted);font-size:.85rem"></i>
+          <input id="catalogo-search" type="text" placeholder="Buscar producto..."
+            oninput="buscarProducto(this.value)"
+            autocomplete="off">
+        </div>
+
         <!-- Grid de productos -->
         <div id="catalogo-grid" class="productos-grid"></div>
 

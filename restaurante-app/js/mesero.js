@@ -34,77 +34,84 @@ async function loadMeseroData() {
   finally { loading(false); }
 }
 
-/* ── Catálogo con secciones y tabs ─────────── */
+/* ── Catálogo ───────────────────────────────── */
 let _filtroCategoria = 'Todas';
+let _busqueda = '';
 
 function renderCatalogo() {
-  const grid = document.getElementById('catalogo-grid');
+  const grid   = document.getElementById('catalogo-grid');
   const tabsEl = document.getElementById('catalogo-tabs');
+  const searchEl = document.getElementById('catalogo-search');
   if (!grid) return;
 
   const activos = State.productos.filter(p => p.activo !== false);
 
-  // Construir tabs
+  // Categorías que tienen productos
   const catsConProductos = ['Todas', ...CATEGORIAS.filter(c =>
     activos.some(p => (p.categoria || 'General') === c)
   )];
 
+  // Tabs de categorías
   if (tabsEl) {
-    tabsEl.innerHTML = catsConProductos.map(c => `
-      <button class="cat-tab${c === _filtroCategoria ? ' active' : ''}"
-              onclick="filtrarCategoria('${c}')">${c}</button>
-    `).join('');
+    tabsEl.innerHTML = catsConProductos.map(c => {
+      const count = c === 'Todas' ? activos.length
+        : activos.filter(p => (p.categoria || 'General') === c).length;
+      return `<button class="cat-tab${c === _filtroCategoria ? ' active' : ''}"
+        onclick="filtrarCategoria('${c}')">
+        ${c} <span class="cat-tab-count">${count}</span>
+      </button>`;
+    }).join('');
   }
 
-  // Filtrar productos según tab activo
-  const productosFiltrados = _filtroCategoria === 'Todas'
+  // Filtrar por categoría y búsqueda
+  let filtrados = _filtroCategoria === 'Todas'
     ? activos
     : activos.filter(p => (p.categoria || 'General') === _filtroCategoria);
 
-  if (!productosFiltrados.length) {
-    grid.innerHTML = '<p class="muted text-sm" style="padding:16px">Sin productos en esta categoría.</p>';
+  if (_busqueda.trim()) {
+    const q = _busqueda.trim().toLowerCase();
+    filtrados = filtrados.filter(p => p.nombre.toLowerCase().includes(q));
+  }
+
+  if (!filtrados.length) {
+    grid.innerHTML = '<p class="muted text-sm" style="padding:24px;text-align:center">Sin productos encontrados</p>';
     return;
   }
 
-  if (_filtroCategoria !== 'Todas') {
-    // Vista de una sola categoría — grid plano
-    grid.innerHTML = productosFiltrados.map(p => renderProductoCard(p)).join('');
-  } else {
-    // Vista completa agrupada por sección
-    const grupos = {};
-    for (const p of productosFiltrados) {
-      const cat = p.categoria || 'General';
-      if (!grupos[cat]) grupos[cat] = [];
-      grupos[cat].push(p);
-    }
-
-    // Renderizar en el orden definido de categorías
-    let html = '';
-    for (const cat of CATEGORIAS) {
-      if (!grupos[cat]?.length) continue;
-      html += `
-        <div class="menu-seccion">
-          <div class="menu-seccion-header">${cat}</div>
-          <div class="productos-grid-inner">
-            ${grupos[cat].map(p => renderProductoCard(p)).join('')}
-          </div>
-        </div>`;
-    }
-    grid.innerHTML = html;
-  }
+  // Grid plano — siempre, sin agrupar en secciones
+  grid.innerHTML = filtrados.map(p => renderProductoCard(p)).join('');
 }
 
+// Colores de acento por categoría
+const CAT_COLORS = {
+  'Tortas':'#e05500','Guajolotes':'#d4a843','Pambazos':'#c084fc',
+  'Quesadillas':'#fb923c','Enchiladas':'#f87171','Tostadas':'#facc15',
+  'Volcanes':'#a78bfa','Tacos':'#ff9500','Asada Fries':'#f59e0b',
+  'Burritos':'#34d399','Gringas':'#60a5fa','Bebidas':'#38bdf8',
+  'Postres':'#f472b6','General':'#8a7060',
+};
+
 function renderProductoCard(p) {
+  const color = CAT_COLORS[p.categoria] || CAT_COLORS['General'];
   return `
     <div class="producto-card" onclick="addToCarrito(${p.id})" id="pcard-${p.id}">
-      <span class="prod-cat">${p.categoria || 'General'}</span>
-      <span class="prod-nom">${p.nombre}</span>
-      <span class="prod-precio">${fmt.currency(p.precio)}</span>
+      <div class="prod-color-bar" style="background:${color}"></div>
+      <div class="prod-body">
+        <span class="prod-cat">${p.categoria || 'General'}</span>
+        <span class="prod-nom">${p.nombre}</span>
+        <span class="prod-precio">${fmt.currency(p.precio)}</span>
+      </div>
+      <div class="prod-add-btn"><i class="fa-solid fa-plus"></i></div>
     </div>`;
 }
 
 function filtrarCategoria(cat) {
   _filtroCategoria = cat;
+  renderCatalogo();
+}
+
+function buscarProducto(val) {
+  _busqueda = val;
   renderCatalogo();
 }
 

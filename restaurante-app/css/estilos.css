@@ -261,17 +261,95 @@ tbody td{padding:12px 14px;vertical-align:middle}
 .pane-title{font-family:var(--font-h);font-size:.95rem;font-weight:700;letter-spacing:.06em;color:var(--gold)}
 
 /* ── Mesero Panel ──────────────────────────── */
-.mesero-grid{display:grid;grid-template-columns:1fr 380px;gap:18px;align-items:start}
-.productos-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
+.mesero-grid{display:grid;grid-template-columns:1fr 360px;gap:18px;align-items:start}
+
+/* Tabs de categorías */
+.catalogo-tabs-wrap{
+  position:sticky;top:58px;z-index:50;
+  background:rgba(7,4,1,.95);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border2);
+  padding:0;margin:0 -20px;
+}
+#catalogo-tabs{
+  display:flex;gap:0;overflow-x:auto;padding:0 20px;
+  scrollbar-width:none;
+}
+#catalogo-tabs::-webkit-scrollbar{display:none}
+.cat-tab{
+  background:transparent;border:none;
+  color:var(--muted);font-size:.74rem;font-weight:600;
+  letter-spacing:.08em;text-transform:uppercase;
+  padding:12px 14px;white-space:nowrap;
+  position:relative;transition:var(--trans);flex-shrink:0;
+  display:flex;align-items:center;gap:5px;
+}
+.cat-tab::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--accent);transform:scaleX(0);transition:.2s}
+.cat-tab:hover{color:var(--cream)}
+.cat-tab.active{color:var(--accent)}
+.cat-tab.active::after{transform:scaleX(1)}
+.cat-tab-count{
+  font-size:.6rem;background:rgba(255,149,0,.15);
+  color:var(--accent);border-radius:10px;
+  padding:1px 6px;font-weight:700;
+}
+.cat-tab.active .cat-tab-count{background:rgba(255,149,0,.25)}
+
+/* Buscador */
+.catalogo-search-wrap{
+  display:flex;align-items:center;gap:10px;
+  background:rgba(255,255,255,.04);
+  border:1px solid var(--border2);
+  border-radius:var(--radius-sm);
+  padding:9px 14px;margin:12px 0;
+  transition:var(--trans);
+}
+.catalogo-search-wrap:focus-within{
+  border-color:var(--accent);
+  background:rgba(255,149,0,.04);
+  box-shadow:0 0 0 3px rgba(255,149,0,.08);
+}
+#catalogo-search{
+  background:transparent;border:none;outline:none;
+  color:var(--cream);font-size:.88rem;font-family:var(--font);
+  flex:1;min-width:0;
+}
+#catalogo-search::placeholder{color:var(--muted)}
+
+/* Tarjetas de producto */
+.productos-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(155px,1fr));
+  gap:10px;
+}
 .producto-card{
-  background:var(--card2);border:1px solid var(--border2);border-radius:var(--radius-sm);
-  padding:16px;cursor:pointer;transition:var(--trans);display:flex;flex-direction:column;gap:6px;
+  background:var(--card2);border:1px solid var(--border2);
+  border-radius:var(--radius-sm);
+  cursor:pointer;transition:var(--trans);
+  display:flex;flex-direction:column;
+  overflow:hidden;position:relative;
 }
 .producto-card:hover{border-color:var(--accent);box-shadow:var(--glow2);transform:translateY(-2px)}
-.producto-card.selected{border-color:var(--accent);background:rgba(255,149,0,.07)}
-.prod-nom{font-weight:600;font-size:.88rem;line-height:1.3}
-.prod-precio{font-family:var(--font-h);font-size:1.1rem;color:var(--gold)}
-.prod-cat{font-size:.67rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
+.producto-card:active{transform:scale(.97)}
+.prod-color-bar{height:3px;width:100%;flex-shrink:0}
+.prod-body{
+  display:flex;flex-direction:column;gap:4px;
+  padding:12px 12px 10px;flex:1;
+}
+.prod-nom{font-weight:600;font-size:.9rem;line-height:1.3;color:var(--cream)}
+.prod-precio{font-family:var(--font-h);font-size:1.05rem;color:var(--gold);margin-top:2px}
+.prod-cat{font-size:.63rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
+.prod-add-btn{
+  position:absolute;bottom:10px;right:10px;
+  width:26px;height:26px;border-radius:50%;
+  background:rgba(255,149,0,.15);
+  display:grid;place-items:center;
+  font-size:.7rem;color:var(--accent);
+  transition:var(--trans);
+}
+.producto-card:hover .prod-add-btn{
+  background:var(--accent);color:#fff;
+  box-shadow:0 4px 12px rgba(255,100,0,.4);
+}
 
 /* Carrito */
 .carrito-panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;position:sticky;top:74px}
