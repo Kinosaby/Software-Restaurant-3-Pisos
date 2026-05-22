@@ -487,11 +487,15 @@
             <button class="btn btn-ghost btn-sm admin-only" onclick="go('screen-menu')" style="padding:4px 8px;font-size:1.1rem;border:1px solid var(--border);" title="Volver al menú"><i class="fa-solid fa-arrow-left"></i></button>
             <span class="brand brand-sm" style="font-family:var(--font-h)">Menu</span>
           </div>
-          <div class="field" style="max-width:160px">
-            <label>Mesa #</label>
-            <input id="mesa-num" type="number" min="1" placeholder="Nº mesa" style="padding:8px 12px">
+          <!-- Mesa seleccionada (badge) -->
+          <div id="mesa-badge" class="mesa-badge-display" onclick="abrirSelectorMesa()">
+            <i class="fa-solid fa-table-cells"></i>
+            <span id="mesa-badge-text">Seleccionar mesa</span>
+            <i class="fa-solid fa-chevron-down" style="font-size:.65rem;color:var(--muted)"></i>
           </div>
         </div>
+        <!-- Input oculto para compatibilidad -->
+        <input id="mesa-num" type="hidden" value="">
 
         <!-- Tabs de categorías -->
         <div class="catalogo-tabs-wrap">
@@ -713,6 +717,22 @@
 <!-- ═══ LOADING OVERLAY ═══════════════════════════════════════ -->
 <div id="loading-overlay" class="loading-overlay">
   <div class="spinner" style="width:36px;height:36px;border-width:3px"></div>
+</div>
+
+<!-- ═══ MODAL: SELECTOR DE MESA ════════════════════════════ -->
+<div id="overlay-mesa-selector" class="overlay" onclick="if(event.target===this)cerrarSelectorMesa()">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-title"><i class="fa-solid fa-table-cells"></i> Seleccionar Mesa</div>
+    <div id="mesa-selector-leyenda" style="display:flex;gap:12px;font-size:.75rem;margin-bottom:4px">
+      <span><span class="mesa-dot libre"></span> Libre</span>
+      <span><span class="mesa-dot ocupada"></span> Ocupada</span>
+      <span><span class="mesa-dot activa"></span> Seleccionada</span>
+    </div>
+    <div id="mesa-selector-grid" class="mesa-selector-grid"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="cerrarSelectorMesa()">Cancelar</button>
+    </div>
+  </div>
 </div>
 
 <!-- ═══ TOAST CONTAINER ══════════════════════════════════════= -->

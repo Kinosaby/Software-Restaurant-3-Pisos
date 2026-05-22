@@ -8,6 +8,9 @@ const CATEGORIAS = [
   'Gringas','Bebidas','Postres','General'
 ];
 
+// ── Configuración de mesas ─────────────────────────────────────
+const TOTAL_MESAS = 20;   // <── Cambia este número si el restaurante tiene más/menos mesas
+
 // Tipo de pedido: 'aqui' o 'llevar'
 let _tipoPedido = 'aqui';
 
@@ -15,6 +18,83 @@ function setTipoPedido(tipo) {
   _tipoPedido = tipo;
   document.getElementById('btn-tipo-aqui')?.classList.toggle('active', tipo === 'aqui');
   document.getElementById('btn-tipo-llevar')?.classList.toggle('active', tipo === 'llevar');
+}
+
+/* ── Selector de Mesa ─────────────────────────────────────────── */
+let _mesaSeleccionada = null;
+
+function abrirSelectorMesa() {
+  renderMesaSelector();
+  document.getElementById('overlay-mesa-selector')?.classList.add('open');
+}
+
+function cerrarSelectorMesa() {
+  document.getElementById('overlay-mesa-selector')?.classList.remove('open');
+}
+
+function seleccionarMesa(num) {
+  // Verificar si la mesa tiene pedidos activos de OTRO mesero/sesión
+  // (pedidos en estado pendiente o preparando)
+  const activos = (State.pedidos || []).filter(p =>
+    p.mesa === num &&
+    !['pagado','cancelado','listo'].includes(p.estado)
+  );
+
+  if (activos.length > 0 && _mesaSeleccionada !== num) {
+    // Mesa ocupada — mostrar advertencia y bloquear
+    toastErr(`⚠️ Mesa ${num} ya está siendo atendida. Tiene ${activos.length} pedido(s) activo(s).`);
+    return;
+  }
+
+  // Permitir re-seleccionar la misma mesa (para agregar más pedidos)
+  _mesaSeleccionada = num;
+  document.getElementById('mesa-num').value = num;
+
+  // Actualizar badge
+  const badge = document.getElementById('mesa-badge');
+  const badgeText = document.getElementById('mesa-badge-text');
+  if (badge) badge.classList.add('mesa-badge-activa');
+  if (badgeText) badgeText.textContent = `Mesa ${num}`;
+
+  cerrarSelectorMesa();
+  toastOk(`Mesa ${num} seleccionada`);
+}
+
+function limpiarMesaSeleccionada() {
+  _mesaSeleccionada = null;
+  document.getElementById('mesa-num').value = '';
+  const badge = document.getElementById('mesa-badge');
+  const badgeText = document.getElementById('mesa-badge-text');
+  if (badge) badge.classList.remove('mesa-badge-activa');
+  if (badgeText) badgeText.textContent = 'Seleccionar mesa';
+}
+
+function renderMesaSelector() {
+  const grid = document.getElementById('mesa-selector-grid');
+  if (!grid) return;
+
+  // Mesas con pedidos activos (pendiente o preparando) = ocupadas
+  const mesasOcupadas = new Set(
+    (State.pedidos || [])
+      .filter(p => !['pagado','cancelado','listo'].includes(p.estado))
+      .map(p => p.mesa)
+  );
+
+  let html = '';
+  for (let i = 1; i <= TOTAL_MESAS; i++) {
+    const ocupada  = mesasOcupadas.has(i);
+    const activa   = _mesaSeleccionada === i;
+    const cls = activa ? 'mesa-btn activa' : ocupada ? 'mesa-btn ocupada' : 'mesa-btn libre';
+    const onclick = ocupada && !activa
+      ? `seleccionarMesa(${i})`   // Igual se llama — la función mostrará el error
+      : `seleccionarMesa(${i})`;
+    html += `
+      <button class="${cls}" onclick="${onclick}">
+        <span class="mesa-num-big">${i}</span>
+        ${ocupada ? '<span class="mesa-estado-label">Ocupada</span>' : '<span class="mesa-estado-label">Libre</span>'}
+      </button>`;
+  }
+  grid.innerHTML = html;
 }
 
 /* ── Carga de datos ─────────────────────────── */
@@ -232,7 +312,21 @@ function renderCarrito() {
 /* ── Enviar pedido(s) ───────────────────────────────────────── */
 async function submitPedido() {
   const mesa = parseInt(document.getElementById('mesa-num').value, 10);
-  if (!mesa || mesa < 1) { toastErr('Ingresa un número de mesa válido'); return; }
+  if (!mesa || mesa < 1) {
+    toastErr('Selecciona una mesa primero');
+    abrirSelectorMesa();
+    return;
+  }
+
+  // Doble verificación en el momento de enviar
+  const activosAhora = (State.pedidos || []).filter(p =>
+    p.mesa === mesa && !['pagado','cancelado','listo'].includes(p.estado)
+  );
+  if (activosAhora.length > 0 && _mesaSeleccionada !== mesa) {
+    toastErr(`⚠️ Mesa ${mesa} ya está siendo atendida por otro mesero`);
+    limpiarMesaSeleccionada();
+    return;
+  }
 
   const conItems = _comensales.filter(c => c.items.length > 0);
   if (!conItems.length) { toastErr('Agrega al menos un producto'); return; }
@@ -256,7 +350,7 @@ async function submitPedido() {
     const totalEnviado = conItems.reduce((s, c) => s + c.items.reduce((sc, it) => sc + it.precio * it.cantidad, 0), 0);
     toastOk(`${conItems.length > 1 ? conItems.length + ' pedidos' : 'Pedido'} enviado(s) — Mesa ${mesa} (${fmt.currency(totalEnviado)})`);
     clearCarrito();
-    document.getElementById('mesa-num').value = '';
+    limpiarMesaSeleccionada();
     await loadMeseroData();
   } catch(e) { toastErr(e.message); }
   finally { btn.disabled = false; loading(false); }

@@ -553,3 +553,73 @@ tbody td{padding:12px 14px;vertical-align:middle}
   border-radius:10px;padding:2px 8px;
   white-space:nowrap;
 }
+
+/* ── Mesa badge (selector trigger) ────────── */
+.mesa-badge-display{
+  display:flex;align-items:center;gap:8px;
+  background:rgba(255,255,255,.04);
+  border:1px solid var(--border2);
+  border-radius:var(--radius-sm);
+  padding:8px 14px;cursor:pointer;
+  transition:var(--trans);font-size:.84rem;
+  color:var(--muted);
+}
+.mesa-badge-display:hover{border-color:var(--accent);color:var(--cream)}
+.mesa-badge-display.mesa-badge-activa{
+  border-color:var(--accent);
+  background:rgba(255,149,0,.08);
+  color:var(--accent);font-weight:600;
+  box-shadow:0 0 0 2px rgba(255,149,0,.15);
+}
+
+/* ── Mesa selector grid ────────────────────── */
+.mesa-selector-grid{
+  display:grid;
+  grid-template-columns:repeat(5,1fr);
+  gap:10px;
+  max-height:360px;overflow-y:auto;
+  padding:4px 2px;
+}
+.mesa-btn{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:3px;padding:12px 8px;
+  border-radius:var(--radius-sm);
+  border:1.5px solid;
+  cursor:pointer;transition:var(--trans);
+  font-family:var(--font);
+}
+.mesa-btn.libre{
+  background:rgba(74,222,128,.06);
+  border-color:rgba(74,222,128,.3);
+  color:var(--success);
+}
+.mesa-btn.libre:hover{
+  background:rgba(74,222,128,.15);
+  border-color:var(--success);
+  transform:translateY(-2px);
+  box-shadow:0 6px 18px rgba(74,222,128,.2);
+}
+.mesa-btn.ocupada{
+  background:rgba(248,113,113,.06);
+  border-color:rgba(248,113,113,.25);
+  color:var(--danger);
+  opacity:.8;cursor:not-allowed;
+}
+.mesa-btn.activa{
+  background:rgba(255,149,0,.12);
+  border-color:var(--accent);
+  color:var(--accent);
+  box-shadow:0 0 0 3px rgba(255,149,0,.15);
+  transform:translateY(-2px);
+}
+.mesa-num-big{font-family:var(--font-h);font-size:1.3rem;font-weight:700;line-height:1}
+.mesa-estado-label{font-size:.58rem;letter-spacing:.1em;text-transform:uppercase;opacity:.8}
+
+/* Leyenda dots */
+.mesa-dot{
+  display:inline-block;width:10px;height:10px;border-radius:50%;
+  vertical-align:middle;margin-right:4px;
+}
+.mesa-dot.libre   {background:var(--success)}
+.mesa-dot.ocupada {background:var(--danger)}
+.mesa-dot.activa  {background:var(--accent)}
