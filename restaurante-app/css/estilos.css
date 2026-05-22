@@ -279,66 +279,18 @@ tbody td{padding:12px 14px;vertical-align:middle}
 .mesero-grid{display:grid;grid-template-columns:1fr 360px;gap:18px;align-items:start}
 
 @media (min-width: 901px) {
-  #screen-mesero.screen {
-    height: calc(100vh - 58px);
-    overflow: hidden;
-  }
   #screen-mesero .container {
     max-width: 1400px;
-    height: 100%;
     padding: 12px 20px;
     margin: 0 auto;
-    display: flex;
-    flex-direction: column;
-  }
-  #screen-mesero .mesero-grid {
-    flex: 1;
-    height: 100%;
-    min-height: 0;
-    align-items: stretch;
-  }
-  .mesero-left-col {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    min-height: 0;
-    overflow: hidden;
-  }
-  #catalogo-grid {
-    flex: 1;
-    overflow-y: auto;
-    min-height: 0;
-    padding-right: 4px;
   }
   .mesero-left-col > div:last-child {
     margin-top: 14px !important;
-    display: flex;
-    flex-direction: column;
-    max-height: 230px;
-    min-height: 0;
     border-top: 1px solid var(--border2);
     padding-top: 8px;
   }
-  #mesero-pedidos-list {
-    flex: 1;
-    overflow-y: auto;
-    min-height: 0;
-    padding-right: 4px;
-  }
-  .carrito-panel {
-    height: 100%;
-    position: static;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-  .carrito-body {
-    flex: 1;
-    overflow-y: auto;
-    max-height: none;
-    min-height: 0;
-  }
 }
+
 
 /* Tabs de categorías */
 .catalogo-tabs-wrap{
