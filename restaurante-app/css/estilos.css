@@ -438,20 +438,180 @@ tbody td{padding:12px 14px;vertical-align:middle}
 }
 .nota-input:focus{border-color:rgba(255,149,0,.4)}
 
-/* ── Media Queries ─────────────────────────── */
-@media(max-width:900px){
-  .mesero-grid{grid-template-columns:1fr}
-  .carrito-panel{position:static}
-  .stats-grid{grid-template-columns:repeat(2,1fr)}
+
+/* ══════════════════════════════════════════
+   RESPONSIVE SYSTEM
+   - 1200px+  : Desktop / Laptop (default)
+   - 900-1200 : Tablet landscape
+   - 640-900  : Tablet portrait
+   - 0-640    : Mobile phone
+   ══════════════════════════════════════════ */
+
+/* ── Tablet landscape (≤1200px) ────────────── */
+@media(max-width:1200px){
+  .stats-grid{grid-template-columns:repeat(4,1fr)}
+  .mesero-grid{grid-template-columns:1fr 340px}
+  .cocina-grid{grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
 }
-@media(max-width:640px){
-  .roles-grid{grid-template-columns:1fr}
+
+/* ── Tablet portrait (≤900px) ──────────────── */
+@media(max-width:900px){
+  .container{padding:16px 14px 120px}
+
+  /* Mesero: catálogo full width, carrito se convierte en drawer inferior */
+  .mesero-grid{
+    grid-template-columns:1fr;
+    gap:12px;
+  }
+  .carrito-panel{
+    position:fixed;
+    bottom:0;left:0;right:0;
+    z-index:80;
+    border-radius:var(--radius) var(--radius) 0 0;
+    box-shadow:0 -8px 40px rgba(0,0,0,.6);
+    max-height:65vh;
+    overflow-y:auto;
+    transform:translateY(calc(100% - 58px));
+    transition:transform .3s cubic-bezier(.4,0,.2,1);
+  }
+  .carrito-panel.open{
+    transform:translateY(0);
+  }
+  .carrito-header{
+    cursor:pointer;
+    padding:14px 18px;
+  }
+  .carrito-header::before{
+    content:'';display:block;
+    width:36px;height:4px;border-radius:2px;
+    background:rgba(255,255,255,.2);
+    margin:0 auto 10px;
+  }
+  .carrito-body{max-height:calc(65vh - 180px)}
+
+  /* Catálogo: grid más compacto */
+  .productos-grid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+  .catalogo-tabs-wrap{top:52px}
+
+  /* Stats */
   .stats-grid{grid-template-columns:repeat(2,1fr)}
-  .topbar{padding:10px 14px}
-  .login-card{padding:32px 20px}
+
+  /* Cocina: 2 columnas */
+  .cocina-grid{grid-template-columns:repeat(2,1fr);gap:10px}
+
+  /* Mesa selector: 5 columnas → 4 */
+  .mesa-selector-grid{grid-template-columns:repeat(4,1fr)}
+
+  /* Roles: 2 columnas */
+  .roles-grid{grid-template-columns:repeat(2,1fr)}
+}
+
+/* ── Mobile (≤640px) ───────────────────────── */
+@media(max-width:640px){
+  html{font-size:15px}
+
+  .topbar{padding:10px 12px}
+  .topbar .brand-md{font-size:1rem}
+  .container{padding:12px 10px 130px}
+
+  /* Login */
+  .login-card{padding:28px 16px;gap:16px}
+  .logo-big{width:90px;height:90px}
+
+  /* Roles: 1 columna en móvil muy pequeño, pero 2 si caben */
+  .roles-grid{grid-template-columns:repeat(2,1fr);gap:12px}
+  .role-card{padding:28px 14px;gap:10px}
+  .role-icon{font-size:2rem}
+
+  /* Stats */
+  .stats-grid{grid-template-columns:repeat(2,1fr);gap:8px}
+  .stat-value{font-size:1.35rem}
+
+  /* Tabs admin */
+  .tabs-header{padding:0 10px;overflow-x:auto}
+  .tab-btn{padding:12px 12px;font-size:.68rem}
+
+  /* Tablas → modo lista */
+  .table-wrap{overflow-x:auto}
   thead{display:none}
-  tbody td{display:block;padding:6px 14px}
-  tbody td::before{content:attr(data-label)' ';font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;display:block}
+  tbody tr{display:flex;flex-wrap:wrap;border-bottom:1px solid var(--border);padding:10px 0}
+  tbody td{display:block;padding:4px 12px;font-size:.82rem;width:auto}
+  tbody td::before{
+    content:attr(data-label)': ';
+    font-size:.6rem;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.08em;
+    display:block;margin-bottom:2px;
+  }
+
+  /* Catálogo mesero */
+  .productos-grid{grid-template-columns:repeat(2,1fr);gap:8px}
+  .prod-nom{font-size:.84rem}
+  .prod-precio{font-size:.95rem}
+
+  /* Carrito bottom drawer */
+  .carrito-panel{transform:translateY(calc(100% - 54px))}
+  .carrito-body{max-height:55vw}
+
+  /* Botones más grandes para touch */
+  .btn{padding:12px 16px;min-height:44px}
+  .btn-sm{padding:9px 13px;min-height:38px}
+  .qty-btn{width:32px;height:32px}
+
+  /* Cocina: 1 columna */
+  .cocina-grid{grid-template-columns:1fr}
+  .pedido-card .pedido-header{flex-wrap:wrap;gap:8px}
+
+  /* Mesa selector: 3 columnas en móvil */
+  .mesa-selector-grid{grid-template-columns:repeat(3,1fr)}
+  .mesa-btn{padding:10px 6px}
+  .mesa-num-big{font-size:1.1rem}
+
+  /* Modales full-width */
+  .modal{padding:22px 16px;border-radius:var(--radius) var(--radius) 0 0;margin:auto 0 0}
+  .overlay{align-items:flex-end}
+
+  /* Tipo toggle */
+  .tipo-toggle{flex-direction:row}
+  .tipo-btn{flex:1;font-size:.7rem;padding:10px 6px}
+
+  /* Pedidos mesero */
+  .pedido-row,.pedido-row-sub{flex-direction:column;gap:10px;align-items:flex-start}
+  .pedido-row > div:last-child,.pedido-row-sub > div:last-child{width:100%;justify-content:flex-start}
+  .mesa-grupo-header{gap:6px}
+}
+
+/* ── Móvil muy pequeño (≤400px) ────────────── */
+@media(max-width:400px){
+  .roles-grid{grid-template-columns:1fr}
+  .stats-grid{grid-template-columns:1fr 1fr}
+  .productos-grid{grid-template-columns:repeat(2,1fr);gap:6px}
+  .mesa-selector-grid{grid-template-columns:repeat(3,1fr)}
+}
+
+/* ── FAB flotante de carrito en tablet/móvil ─ */
+@media(max-width:900px){
+  #carrito-fab{
+    display:flex;
+  }
+}
+#carrito-fab{
+  display:none;
+  position:fixed;bottom:16px;right:16px;z-index:90;
+  width:56px;height:56px;border-radius:50%;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  align-items:center;justify-content:center;
+  font-size:1.2rem;color:#fff;
+  box-shadow:0 8px 24px rgba(255,100,0,.5);
+  cursor:pointer;border:none;
+  transition:var(--trans);
+}
+#carrito-fab:hover{transform:scale(1.08);box-shadow:0 12px 32px rgba(255,100,0,.65)}
+#carrito-fab-count{
+  position:absolute;top:-4px;right:-4px;
+  background:var(--gold);color:#000;
+  font-size:.62rem;font-weight:700;
+  width:20px;height:20px;border-radius:50%;
+  display:grid;place-items:center;
 }
 
 /* ── Comensal Tabs ─────────────────────────── */

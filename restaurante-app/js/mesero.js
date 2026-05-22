@@ -615,38 +615,102 @@ function verDetallePedido(id) {
 }
 
 /* ── Agregar productos a pedido activo ──────── */
-let _pedidoAgregarId = null;
-let _carritoAgregar  = [];
+let _pedidoAgregarId   = null;
+let _carritoAgregar    = [];
+let _agrCat            = 'Todas';
+let _agrBusqueda       = '';
+
+let _agregarTabActiva = 'productos';
+function setAgregarTab(tab) {
+  _agregarTabActiva = tab;
+  
+  const btnProds = document.getElementById('btn-tab-agregar-prods');
+  const btnCart = document.getElementById('btn-tab-agregar-cart');
+  const paneLeft = document.getElementById('agregar-left-pane');
+  const paneRight = document.getElementById('agregar-right-pane');
+  
+  if (btnProds) btnProds.classList.toggle('active', tab === 'productos');
+  if (btnCart) btnCart.classList.toggle('active', tab === 'carrito');
+  
+  if (paneLeft) paneLeft.classList.toggle('show-mobile', tab === 'productos');
+  if (paneRight) paneRight.classList.toggle('show-mobile', tab === 'carrito');
+}
 
 function abrirAgregarProductos(pedidoId) {
   _pedidoAgregarId = pedidoId;
   _carritoAgregar  = [];
+  _agrCat          = 'Todas';
+  _agrBusqueda     = '';
   const p = State.pedidos.find(x => x.id === pedidoId);
   if (!p) return;
 
-  // Renderizar modal
-  const content = document.getElementById('agregar-content');
-  if (!content) return;
+  const headerInfo = document.getElementById('agregar-pedido-info-header');
+  if (headerInfo) {
+    const labelC = p.comensal
+      ? `<span class="badge-comensal" style="margin:0"><i class="fa-solid fa-user"></i> ${p.comensal}</span>`
+      : '';
+    headerInfo.innerHTML = `
+      <span class="fw600" style="font-family:var(--font-h);color:var(--gold);font-size:.9rem">Mesa ${p.mesa}</span>
+      ${labelC}
+      <span class="muted text-xs">#${p.id}</span>
+    `;
+  }
 
-  const activos = State.productos.filter(x => x.activo !== false);
-  content.innerHTML = `
-    <div style="margin-bottom:12px;padding:10px;background:var(--surface2);border-radius:8px">
-      <div class="fw600">Pedido #${p.id} — Mesa ${p.mesa}</div>
-      <div class="text-xs muted">Ya tiene: ${(p.productos||[]).map(i=>i.cantidad+'× '+i.nombre).join(', ')}</div>
-      <div class="fw600 text-gold" style="margin-top:4px">Total actual: ${fmt.currency(p.total)}</div>
-    </div>
-    <div class="text-sm muted" style="margin-bottom:8px">Selecciona los productos a agregar:</div>
-    <div id="agregar-grid" class="productos-grid" style="max-height:280px;overflow-y:auto">
-      ${activos.map(prod => `
-        <div class="producto-card" onclick="addToAgregar(${prod.id})" id="agcard-${prod.id}">
-          <span class="prod-cat">${prod.categoria||'General'}</span>
-          <span class="prod-nom">${prod.nombre}</span>
-          <span class="prod-precio">${fmt.currency(prod.precio)}</span>
-        </div>`).join('')}
-    </div>
-    <div id="agregar-carrito" style="margin-top:12px"></div>`;
+  // Limpiar buscador
+  const searchInput = document.getElementById('agr-search');
+  if (searchInput) searchInput.value = '';
 
+  // Inicializar tab en móvil
+  setAgregarTab('productos');
+
+  _renderAgrTabs();
+  renderAgregarGrid();
+  renderAgregarCarrito();
   openModal('modal-agregar');
+}
+
+function _renderAgrTabs() {
+  const tabsEl = document.getElementById('agr-tabs');
+  if (!tabsEl) return;
+  const activos = State.productos.filter(x => x.activo !== false);
+  const cats = ['Todas', ...CATEGORIAS.filter(c => activos.some(p => (p.categoria||'General') === c))];
+  tabsEl.innerHTML = cats.map(c => {
+    const count = c === 'Todas' ? activos.length
+      : activos.filter(p => (p.categoria||'General') === c).length;
+    return `<button class="cat-tab${c === _agrCat ? ' active' : ''}"
+      onclick="_agrCat='${c}';this.parentNode.querySelectorAll('.cat-tab').forEach(b=>b.classList.remove('active'));this.classList.add('active');renderAgregarGrid()">
+      ${c} <span class="cat-tab-count">${count}</span>
+    </button>`;
+  }).join('');
+}
+
+function renderAgregarGrid() {
+  const grid = document.getElementById('agregar-grid');
+  if (!grid) return;
+  let prods = State.productos.filter(x => x.activo !== false);
+  if (_agrCat !== 'Todas') prods = prods.filter(p => (p.categoria||'General') === _agrCat);
+  if (_agrBusqueda.trim()) {
+    const q = _agrBusqueda.trim().toLowerCase();
+    prods = prods.filter(p => p.nombre.toLowerCase().includes(q));
+  }
+  if (!prods.length) {
+    grid.innerHTML = '<p class="muted text-sm" style="padding:16px;text-align:center">Sin productos</p>';
+    return;
+  }
+  grid.innerHTML = prods.map(prod => {
+    const color = CAT_COLORS[prod.categoria] || CAT_COLORS['General'];
+    const enCarrito = _carritoAgregar.find(i => i.producto_id === prod.id);
+    return `
+    <div class="producto-card${enCarrito ? ' agr-selected' : ''}" onclick="addToAgregar(${prod.id})" id="agcard-${prod.id}">
+      <div class="prod-color-bar" style="background:${color}"></div>
+      <div class="prod-body">
+        <span class="prod-cat">${prod.categoria||'General'}</span>
+        <span class="prod-nom">${prod.nombre}</span>
+        <span class="prod-precio">${fmt.currency(prod.precio)}</span>
+      </div>
+      ${enCarrito ? `<div class="prod-add-btn" style="background:var(--accent);color:#fff">${enCarrito.cantidad}</div>` : '<div class="prod-add-btn"><i class="fa-solid fa-plus"></i></div>'}
+    </div>`;
+  }).join('');
 }
 
 function addToAgregar(productoId) {
@@ -655,6 +719,7 @@ function addToAgregar(productoId) {
   const existing = _carritoAgregar.find(i => i.producto_id === productoId);
   if (existing) { existing.cantidad++; }
   else { _carritoAgregar.push({ producto_id: productoId, nombre: prod.nombre, precio: parseFloat(prod.precio), cantidad: 1, nota: '' }); }
+  renderAgregarGrid();
   renderAgregarCarrito();
 }
 
@@ -663,6 +728,7 @@ function changeQtyAgregar(productoId, delta) {
   if (!item) return;
   item.cantidad += delta;
   if (item.cantidad <= 0) _carritoAgregar = _carritoAgregar.filter(i => i.producto_id !== productoId);
+  renderAgregarGrid();
   renderAgregarCarrito();
 }
 
@@ -674,31 +740,54 @@ function setNotaAgregar(productoId, nota) {
 function renderAgregarCarrito() {
   const el = document.getElementById('agregar-carrito');
   if (!el) return;
-  if (!_carritoAgregar.length) { el.innerHTML = ''; return; }
-  const total = _carritoAgregar.reduce((s,i) => s + i.precio * i.cantidad, 0);
+
+  // Actualizar contador de la pestaña móvil
+  const badge = document.getElementById('agregar-badge-count');
+  const totalItems = _carritoAgregar.reduce((sum, item) => sum + item.cantidad, 0);
+  if (badge) {
+    if (totalItems > 0) {
+      badge.textContent = totalItems;
+      badge.style.display = 'inline-flex';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
+  // Actualizar total en el footer
+  const total = _carritoAgregar.reduce((s, i) => s + i.precio * i.cantidad, 0);
+  const totalMontoEl = document.getElementById('agregar-total-monto');
+  if (totalMontoEl) {
+    totalMontoEl.textContent = fmt.currency(total);
+  }
+
+  if (!_carritoAgregar.length) {
+    el.innerHTML = '<p class="muted text-sm" style="text-align:center;padding:24px 0">Selecciona productos del menú</p>';
+    return;
+  }
+
   el.innerHTML = `
-    <div class="divider" style="margin:8px 0"></div>
-    <div class="fw600 text-sm" style="margin-bottom:6px">A agregar:</div>
-    ${_carritoAgregar.map(item => `
-      <div class="carrito-item" style="flex-direction:column;align-items:stretch;gap:6px">
-        <div style="display:flex;align-items:center;gap:8px">
-          <div style="flex:1;font-size:.83rem;font-weight:600">${item.nombre}</div>
-          <div class="carrito-qty">
-            <button class="qty-btn" onclick="changeQtyAgregar(${item.producto_id},-1)">−</button>
-            <span style="min-width:20px;text-align:center;font-weight:600">${item.cantidad}</span>
-            <button class="qty-btn" onclick="changeQtyAgregar(${item.producto_id},1)">+</button>
-          </div>
-          <span class="text-gold" style="font-size:.83rem;min-width:52px;text-align:right">${fmt.currency(item.precio * item.cantidad)}</span>
-        </div>
-        <input class="nota-input" placeholder="Indicaciones: sin cebolla, extra salsa..."
-          value="${item.nota || ''}"
-          oninput="setNotaAgregar(${item.producto_id}, this.value)">
-      </div>`).join('')}
-    <div class="total-row" style="margin-top:8px">
-      <span class="total-label">Subtotal a agregar</span>
-      <span class="total-value">${fmt.currency(total)}</span>
+    <div class="agr-carrito-wrap">
+      <div class="agr-carrito-items-list">
+        ${_carritoAgregar.map(item => `
+          <div class="agr-carrito-item">
+            <div style="flex:1;min-width:0">
+              <div class="fw600" style="font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.nombre}</div>
+              <input class="nota-input" placeholder="Indicaciones..."
+                value="${item.nota || ''}"
+                oninput="setNotaAgregar(${item.producto_id}, this.value)"
+                style="margin-top:4px">
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+              <button class="qty-btn" onclick="changeQtyAgregar(${item.producto_id},-1)">−</button>
+              <span style="min-width:22px;text-align:center;font-weight:700">${item.cantidad}</span>
+              <button class="qty-btn" onclick="changeQtyAgregar(${item.producto_id},1)">+</button>
+              <span class="text-gold" style="font-size:.82rem;min-width:54px;text-align:right">${fmt.currency(item.precio * item.cantidad)}</span>
+            </div>
+          </div>`).join('')}
+      </div>
     </div>`;
 }
+
 
 async function confirmarAgregarProductos() {
   if (!_carritoAgregar.length) { toastErr('Selecciona al menos un producto'); return; }

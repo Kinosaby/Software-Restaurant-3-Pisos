@@ -276,11 +276,221 @@
 .cocina-btn { font-size: 1rem; padding: 10px 16px; }
 
 /* ── Modal agregar productos ──────────────────────────────── */
-#overlay-agregar .modal {
-  max-width: 540px;
-  max-height: 90vh;
+.modal-agregar-responsive {
+  max-width: 900px !important;
+  width: 95% !important;
+  height: 85vh !important;
+  max-height: 750px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+.modal-agregar-responsive .modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--card2);
+  flex-shrink: 0;
+}
+
+.modal-agregar-responsive .modal-tabs-mobile {
+  display: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface2);
+  flex-shrink: 0;
+}
+
+.modal-agregar-responsive .modal-tab-btn {
+  flex: 1;
+  padding: 12px 8px;
+  font-size: .85rem;
+  font-weight: 700;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+  transition: all .2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.modal-agregar-responsive .modal-tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.modal-agregar-responsive .tab-badge {
+  background: var(--accent);
+  color: #000;
+  font-size: 0.7rem;
+  font-weight: 800;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.modal-agregar-responsive .modal-body-split {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.modal-agregar-responsive .modal-split-left {
+  flex: 1.3;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px;
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.modal-agregar-responsive .modal-split-right {
+  flex: 0.9;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px;
+  background: var(--card2);
   overflow-y: auto;
 }
+
+.modal-agregar-responsive .agr-tabs-wrap {
+  overflow-x: auto;
+  white-space: nowrap;
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+  scrollbar-width: thin;
+  flex-shrink: 0;
+}
+
+.modal-agregar-responsive .agr-tabs-wrap::-webkit-scrollbar { height: 4px; }
+.modal-agregar-responsive .agr-tabs-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+.modal-agregar-responsive .agr-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.modal-agregar-responsive .agr-grid {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.modal-agregar-responsive .agr-grid::-webkit-scrollbar,
+.modal-agregar-responsive .modal-split-right::-webkit-scrollbar {
+  width: 6px;
+}
+.modal-agregar-responsive .agr-grid::-webkit-scrollbar-thumb,
+.modal-agregar-responsive .modal-split-right::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+.modal-agregar-responsive .agregar-carrito-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.modal-agregar-responsive .agr-carrito-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.modal-agregar-responsive .agr-carrito-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modal-agregar-responsive .agr-carrito-item {
+  background: var(--surface2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border);
+}
+
+.modal-agregar-responsive .modal-footer-split {
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--card2);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.modal-agregar-responsive .total-display {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--cream);
+}
+
+.producto-card.agr-selected {
+  border-color: var(--accent);
+  background: rgba(212, 168, 67, 0.08);
+  box-shadow: 0 0 10px rgba(212, 168, 67, 0.15);
+}
+
+@media (max-width: 768px) {
+  .modal-agregar-responsive {
+    height: 90vh !important;
+    max-height: none !important;
+    border-radius: var(--radius) var(--radius) 0 0 !important;
+    margin: auto 0 0 !important;
+    width: 100% !important;
+  }
+  
+  .modal-agregar-responsive .modal-tabs-mobile {
+    display: flex;
+  }
+  
+  .modal-agregar-responsive .modal-body-split {
+    position: relative;
+  }
+  
+  .modal-agregar-responsive .modal-split-left,
+  .modal-agregar-responsive .modal-split-right {
+    display: none;
+    flex: 1;
+    width: 100%;
+    border-right: none;
+    padding: 12px 14px;
+    height: 100%;
+    overflow-y: auto;
+  }
+  
+  .modal-agregar-responsive .modal-split-left.show-mobile,
+  .modal-agregar-responsive .modal-split-right.show-mobile {
+    display: flex;
+  }
+  
+  .modal-agregar-responsive .modal-footer-split {
+    padding: 12px 14px;
+  }
+  
+  .modal-agregar-responsive .total-display {
+    font-size: 1rem;
+  }
+}
+
 
 /* ── Modal editar pedido ─────────────────────────────────── */
 #overlay-editar .modal {
@@ -688,17 +898,64 @@
 
 <!-- Modal Agregar Productos a Pedido -->
 <div class="overlay" id="overlay-agregar" onclick="closeModal()">
-  <div class="modal" onclick="event.stopPropagation()">
-    <div class="modal-title"><i class="fa-solid fa-plus"></i> Agregar al Pedido</div>
-    <div id="agregar-content" class="modal-body"></div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancelar</button>
-      <button id="btn-confirmar-agregar" class="btn btn-primary btn-sm" style="width:auto" onclick="confirmarAgregarProductos()">
-        <i class="fa-solid fa-paper-plane"></i> Confirmar
+  <div class="modal modal-agregar-responsive" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div style="display:flex; justify-content:space-between; align-items:center; width:100%; gap:10px; flex-wrap:wrap;">
+        <div class="modal-title" style="margin:0;"><i class="fa-solid fa-plus"></i> Agregar al Pedido</div>
+        <div id="agregar-pedido-info-header" style="display:flex; gap:8px; align-items:center;"></div>
+      </div>
+    </div>
+    
+    <!-- Segmented control for mobile -->
+    <div class="modal-tabs-mobile">
+      <button id="btn-tab-agregar-prods" class="modal-tab-btn active" onclick="setAgregarTab('productos')">
+        <i class="fa-solid fa-utensils"></i> Menú
       </button>
+      <button id="btn-tab-agregar-cart" class="modal-tab-btn" onclick="setAgregarTab('carrito')">
+        <i class="fa-solid fa-cart-shopping"></i> Selección <span id="agregar-badge-count" class="tab-badge" style="display:none">0</span>
+      </button>
+    </div>
+
+    <div class="modal-body-split">
+      <!-- Left side: Catalog (products grid, search, categories) -->
+      <div class="modal-split-left" id="agregar-left-pane">
+        <!-- Buscador -->
+        <div class="catalogo-search-wrap" style="margin: 0 0 10px 0;">
+          <i class="fa-solid fa-magnifying-glass" style="color:var(--muted);font-size:.85rem"></i>
+          <input id="agr-search" type="text" placeholder="Buscar producto..."
+            oninput="_agrBusqueda=this.value;renderAgregarGrid()"
+            autocomplete="off">
+        </div>
+        <!-- Tabs de categoría -->
+        <div class="agr-tabs-wrap">
+          <div id="agr-tabs" class="agr-tabs"></div>
+        </div>
+        <!-- Grid de productos -->
+        <div id="agregar-grid" class="productos-grid agr-grid"></div>
+      </div>
+      
+      <!-- Right side: Carrito -->
+      <div class="modal-split-right" id="agregar-right-pane">
+        <div id="agregar-carrito" class="agregar-carrito-container">
+          <p class="muted text-sm" style="text-align:center;padding:24px 0">Selecciona productos del menú</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer-split">
+      <div class="total-display">
+        Total: <span id="agregar-total-monto" class="text-gold fw600">$0.00</span>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancelar</button>
+        <button id="btn-confirmar-agregar" class="btn btn-primary btn-sm" style="width:auto" onclick="confirmarAgregarProductos()">
+          <i class="fa-solid fa-paper-plane"></i> Confirmar
+        </button>
+      </div>
     </div>
   </div>
 </div>
+
 
 <!-- Modal Editar Pedido -->
 <div class="overlay" id="overlay-editar" onclick="closeModal()">
