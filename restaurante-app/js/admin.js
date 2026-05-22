@@ -251,7 +251,8 @@ async function adminDeletePedido(id) {
 let _chartVentas = null;
 
 async function showWeeklySales() {
-  document.getElementById('overlay-ventas-semana').style.display = 'flex';
+  document.getElementById('overlay-ventas-semana').style.display = '';
+  document.getElementById('overlay-ventas-semana').classList.add('open');
   const content = document.getElementById('ventas-semana-content');
   const canvas = document.getElementById('chart-ventas');
   
