@@ -262,12 +262,47 @@ async function showWeeklySales() {
   try {
     const res = await api.metricas.ventas(7);
     const ventas = res.ventas || [];
-    if (!ventas.length) {
-      content.innerHTML = '<p>No hay ventas en los últimos 7 días.</p>';
-      return;
+    
+    // Determinar los 4 días hábiles (Jue, Vie, Sab, Dom) de la "semana" relevante
+    const now = new Date();
+    const day = now.getDay();
+    let offsetToThursday;
+    // Si estamos a Lunes(1), Martes(2) o Miercoles(3), mostramos el fin de semana PASADO
+    if (day >= 1 && day <= 3) {
+      offsetToThursday = - (day + 3);
+    } else if (day === 0) {
+      // Si es Domingo(0), mostramos desde el Jueves pasado (hace 3 días)
+      offsetToThursday = -3;
+    } else {
+      // Si es Jue(4), Vie(5), Sab(6), mostramos el fin de semana ACTUAL
+      offsetToThursday = 4 - day;
     }
     
-    // Preparar datos para gráfica
+    const thu = new Date(now);
+    thu.setDate(now.getDate() + offsetToThursday);
+    
+    const businessDates = [];
+    for(let i = 0; i < 4; i++) {
+      const d = new Date(thu);
+      d.setDate(thu.getDate() + i);
+      businessDates.push(d);
+    }
+    
+    // Fechas en formato YYYY-MM-DD para empatar con la DB
+    const targetDatesStr = businessDates.map(d => {
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    });
+    
+    // Mapear ventas de la BD a formato { "YYYY-MM-DD": {pedidos, total} }
+    const ventasMap = {};
+    ventas.forEach(v => {
+      const dStr = v.fecha.split('T')[0];
+      ventasMap[dStr] = { pedidos: parseInt(v.pedidos||0), total: parseFloat(v.total||0) };
+    });
+    
     const labels = [];
     const data = [];
     let totalAcumulado = 0;
@@ -284,21 +319,21 @@ async function showWeeklySales() {
         <tbody>
     `;
     
-    ventas.forEach(v => {
-      const dateStrFormat = v.fecha.includes('T') ? v.fecha : v.fecha + 'T12:00:00';
-      const date = new Date(dateStrFormat);
-      const dateStr = date.toLocaleDateString('es-MX', { weekday: 'short', day: '2-digit', month: 'short' });
-      const total = parseFloat(v.total || 0);
+    businessDates.forEach((dObj, index) => {
+      const dateStr = targetDatesStr[index];
+      const diaData = ventasMap[dateStr] || { pedidos: 0, total: 0 };
+      const labelStr = dObj.toLocaleDateString('es-MX', { weekday: 'short', day: '2-digit', month: 'short' });
       
-      labels.push(dateStr);
-      data.push(total);
-      totalAcumulado += total;
+      const labelCapitalized = labelStr.charAt(0).toUpperCase() + labelStr.slice(1);
+      labels.push(labelCapitalized);
+      data.push(diaData.total);
+      totalAcumulado += diaData.total;
       
       html += `
         <tr style="border-bottom: 1px solid var(--border);">
-          <td style="padding: 10px 0; text-transform: capitalize;">${dateStr}</td>
-          <td style="padding: 10px 0; text-align: center; color: var(--text-secondary);">${v.pedidos}</td>
-          <td style="padding: 10px 0; text-align: right; color: var(--success); font-weight: bold;">${fmt.currency(total)}</td>
+          <td style="padding: 10px 0;">${labelCapitalized}</td>
+          <td style="padding: 10px 0; text-align: center; color: var(--text-secondary);">${diaData.pedidos}</td>
+          <td style="padding: 10px 0; text-align: right; color: var(--success); font-weight: bold;">${fmt.currency(diaData.total)}</td>
         </tr>
       `;
     });
@@ -307,7 +342,7 @@ async function showWeeklySales() {
         </tbody>
         <tfoot>
           <tr>
-            <td style="padding: 15px 0; font-weight: bold; font-size: 1.1rem;">Total 7 Días</td>
+            <td style="padding: 15px 0; font-weight: bold; font-size: 1.1rem;">Total 4 Días</td>
             <td></td>
             <td style="padding: 15px 0; text-align: right; font-weight: bold; font-size: 1.2rem; color: var(--accent);">${fmt.currency(totalAcumulado)}</td>
           </tr>
