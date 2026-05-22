@@ -1091,10 +1091,13 @@ tbody td{padding:12px 14px;vertical-align:middle}
 .modal-agregar-responsive {
   max-width: 900px !important;
   width: 95% !important;
-  max-height: none !important;
+  height: 85vh !important;
+  display: flex !important;
+  flex-direction: column !important;
   position: relative;
   padding: 0 !important;
-  margin: 40px auto !important;
+  margin: 5vh auto !important;
+  overflow: hidden !important;
 }
 
 .modal-agregar-responsive .modal-header {
@@ -1157,6 +1160,8 @@ tbody td{padding:12px 14px;vertical-align:middle}
 .modal-agregar-responsive .modal-body-split {
   display: flex;
   background: var(--surface);
+  flex: 1;
+  overflow: hidden;
 }
 
 .modal-agregar-responsive .modal-split-left {
@@ -1164,6 +1169,7 @@ tbody td{padding:12px 14px;vertical-align:middle}
   padding: 16px 20px;
   border-right: 1px solid var(--border);
   min-width: 0;
+  overflow-y: auto;
 }
 
 .modal-agregar-responsive .modal-split-right {
@@ -1171,6 +1177,7 @@ tbody td{padding:12px 14px;vertical-align:middle}
   padding: 16px 20px;
   background: var(--card2);
   min-width: 0;
+  overflow-y: auto;
 }
 
 .modal-agregar-responsive .agr-tabs-wrap {
@@ -1249,7 +1256,8 @@ tbody td{padding:12px 14px;vertical-align:middle}
 
 @media (max-width: 768px) {
   .modal-agregar-responsive {
-    max-height: none !important;
+    height: 95vh !important;
+    max-height: 95vh !important;
     border-radius: var(--radius) var(--radius) 0 0 !important;
     margin: auto 0 0 !important;
     width: 100% !important;
