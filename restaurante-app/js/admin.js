@@ -246,3 +246,64 @@ async function adminDeletePedido(id) {
   } catch(e) { toastErr(e.message); }
   finally { loading(false); }
 }
+
+/* ── Ventas Semanales ──────────────────────────── */
+async function showWeeklySales() {
+  document.getElementById('overlay-ventas-semana').style.display = 'flex';
+  const body = document.getElementById('ventas-semana-body');
+  body.innerHTML = '<p>Cargando datos...</p>';
+  try {
+    const res = await api.metricas.ventas(7);
+    const ventas = res.ventas || [];
+    if (!ventas.length) {
+      body.innerHTML = '<p>No hay ventas en los últimos 7 días.</p>';
+      return;
+    }
+    
+    let html = `
+      <table style="width: 100%; text-align: left; border-collapse: collapse; margin-top: 10px;">
+        <thead>
+          <tr style="border-bottom: 1px solid var(--border);">
+            <th style="padding: 10px 0;">Fecha</th>
+            <th style="padding: 10px 0; text-align: center;">Pedidos</th>
+            <th style="padding: 10px 0; text-align: right;">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+    
+    let totalAcumulado = 0;
+    
+    ventas.forEach(v => {
+      // Usar 'T12:00:00' para evitar que la conversión de huso horario cambie el día
+      const dateStrFormat = v.fecha.includes('T') ? v.fecha : v.fecha + 'T12:00:00';
+      const date = new Date(dateStrFormat);
+      const dateStr = date.toLocaleDateString('es-MX', { weekday: 'short', day: '2-digit', month: 'short' });
+      const total = parseFloat(v.total || 0);
+      totalAcumulado += total;
+      html += `
+        <tr style="border-bottom: 1px solid var(--border);">
+          <td style="padding: 10px 0; text-transform: capitalize;">${dateStr}</td>
+          <td style="padding: 10px 0; text-align: center; color: var(--text-secondary);">${v.pedidos}</td>
+          <td style="padding: 10px 0; text-align: right; color: var(--success); font-weight: bold;">${fmt.currency(total)}</td>
+        </tr>
+      `;
+    });
+    
+    html += `
+        </tbody>
+        <tfoot>
+          <tr>
+            <td style="padding: 15px 0; font-weight: bold; font-size: 1.1rem;">Total 7 Días</td>
+            <td></td>
+            <td style="padding: 15px 0; text-align: right; font-weight: bold; font-size: 1.2rem; color: var(--accent);">${fmt.currency(totalAcumulado)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+    
+    body.innerHTML = html;
+  } catch (error) {
+    body.innerHTML = `<p style="color: var(--danger);">Error al cargar ventas: ${error.message}</p>`;
+  }
+}
