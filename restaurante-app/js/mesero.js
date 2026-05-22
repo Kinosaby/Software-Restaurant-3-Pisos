@@ -343,12 +343,59 @@ function renderMeseroPedidos() {
 
 let _cobroPendientesMesa = [];
 
+/** Cobrar todos los comensales de una mesa en UN solo modal con total combinado */
 async function cobrarTodoMesa(mesa) {
   const listos = State.pedidos.filter(p => p.mesa === mesa && p.estado === 'listo');
   if (!listos.length) return;
   if (listos.length === 1) { abrirCobro(listos[0].id); return; }
-  _cobroPendientesMesa = listos.slice(1).map(p => p.id);
-  abrirCobro(listos[0].id);
+
+  // Cobro unificado: guardar todos los ids
+  _cobroPendientesMesa = listos.map(p => p.id);
+  const totalCombinado = listos.reduce((s, p) => s + parseFloat(p.total || 0), 0);
+
+  // Usar primer pedido como referencia de mesa
+  const refPedido = listos[0];
+  _pedidoCobrarId    = null;  // null indica cobro múltiple
+  _pedidoCobrarTotal = totalCombinado;
+
+  const content = document.getElementById('cobro-content');
+  if (!content) return;
+
+  const desglose = listos.map(p => {
+    const label = p.comensal ? `<span class="badge-comensal"><i class="fa-solid fa-user"></i> ${p.comensal}</span>` : `#${p.id}`;
+    return `<div class="cobro-row" style="font-size:.84rem">
+      <span>${label}</span>
+      <span>${fmt.currency(p.total)}</span>
+    </div>`;
+  }).join('');
+
+  content.innerHTML = `
+    <div class="cobro-resumen">
+      <div class="cobro-mesa">Mesa ${refPedido.mesa} &nbsp;&nbsp; <span class="text-xs muted">${listos.length} cuentas</span></div>
+      ${desglose}
+      <div class="divider" style="margin:10px 0"></div>
+      <div class="cobro-row">
+        <span style="font-weight:700">Total a pagar</span>
+        <span class="cobro-total">${fmt.currency(totalCombinado)}</span>
+      </div>
+    </div>
+    <div class="field" style="margin-top:16px">
+      <label style="font-size:1rem">Con cu\u00e1nto paga</label>
+      <input id="cobro-pago" type="number" step="0.50" min="0"
+        placeholder="0.00"
+        oninput="calcularCambio()"
+        style="font-size:1.4rem;text-align:right;padding:12px 16px;letter-spacing:.05em">
+    </div>
+    <div class="cobro-cambio-wrap" id="cobro-cambio-wrap" style="display:none">
+      <div class="cobro-row">
+        <span>Cambio</span>
+        <span id="cobro-cambio" class="cobro-cambio-val">$0.00</span>
+      </div>
+    </div>`;
+
+  document.getElementById('btn-confirmar-cobro').disabled = true;
+  openModal('modal-cobro');
+  setTimeout(() => document.getElementById('cobro-pago')?.focus(), 120);
 }
 
 /* ── Cobro con cambio ──────────────────────── */
@@ -417,9 +464,18 @@ async function confirmarCobro() {
   if (btn) btn.disabled = true;
   try {
     loading(true);
-    await api.pedidos.cambiarEstado(_pedidoCobrarId, 'pagado');
     const pago   = parseFloat(document.getElementById('cobro-pago')?.value) || 0;
     const cambio = pago - _pedidoCobrarTotal;
+
+    if (_pedidoCobrarId !== null) {
+      // Cobro individual
+      await api.pedidos.cambiarEstado(_pedidoCobrarId, 'pagado');
+    } else {
+      // Cobro múltiple: marcar todos como pagado en paralelo
+      await Promise.all(_cobroPendientesMesa.map(id => api.pedidos.cambiarEstado(id, 'pagado')));
+      _cobroPendientesMesa = [];
+    }
+
     toastOk(`Cobrado exitosamente. Cambio: ${fmt.currency(Math.max(0, cambio))}`);
     closeModal();
     await loadMeseroData();
