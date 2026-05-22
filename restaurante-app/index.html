@@ -96,7 +96,10 @@
     <div class="stats-grid">
       <div class="stat-card"><span class="stat-label">Pedidos hoy</span><span id="stat-pedidos" class="stat-value">—</span></div>
       <div class="stat-card"><span class="stat-label">Ventas del día</span><span id="stat-ventas" class="stat-value">—</span></div>
-      <div class="stat-card"><span class="stat-label">Ventas Semana</span><span id="stat-semana" class="stat-value">—</span></div>
+      <div class="stat-card" style="cursor:pointer; border: 1px solid var(--accent); transition: transform 0.2s;" onclick="showWeeklySales()" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+        <span class="stat-label" style="color:var(--accent)">Ventas Semana <i class="fa-solid fa-chart-bar" style="margin-left:4px"></i></span>
+        <span id="stat-semana" class="stat-value text-gold">—</span>
+      </div>
       <div class="stat-card"><span class="stat-label">Productos</span><span id="stat-productos" class="stat-value">—</span></div>
       <div class="stat-card"><span class="stat-label">Usuarios</span><span id="stat-usuarios" class="stat-value">—</span></div>
     </div>
@@ -253,6 +256,22 @@
 </div>
 
 <!-- ═══ MODALES ═══════════════════════════════════════════════ -->
+
+<!-- Modal Ventas Semana -->
+<div class="overlay" id="overlay-ventas-semana" onclick="closeModal()">
+  <div class="modal" onclick="event.stopPropagation()" style="width: 90%; max-width: 600px; max-height: 90vh; overflow-y: auto;">
+    <div class="modal-title"><i class="fa-solid fa-chart-column"></i> Ventas últimos 7 días</div>
+    <div class="modal-body" id="ventas-semana-body">
+        <canvas id="chart-ventas" style="width:100%; max-height:250px; display:none; margin-bottom: 15px;"></canvas>
+        <div id="ventas-semana-content">
+            <p>Cargando datos...</p>
+        </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary btn-sm" style="width:100%" onclick="closeModal()">Cerrar</button>
+    </div>
+  </div>
+</div>
 
 <!-- Modal Usuario -->
 <div class="overlay" id="overlay-user" onclick="closeModal()">
@@ -460,10 +479,11 @@
 <div id="toast-container" class="toast-container"></div>
 
 <!-- ═══ SCRIPTS ══════════════════════════════════════════════ -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script src="/js/api.js"></script>
 <script src="/js/main.js"></script>
-<script src="/js/admin.js"></script>
+<script src="/js/admin.js?v=2"></script>
 <script src="/js/mesero.js"></script>
 <script src="/js/cocina.js"></script>
 
