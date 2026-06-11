@@ -78,6 +78,7 @@ function verDetalleCocina(pedidoId) {
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
       <div class="cocina-mesa" style="font-size:1.4rem">Mesa ${p.mesa}</div>
       ${badgeHtml(p.estado)}
+      ${p.tipo === 'llevar' ? `<span class="badge badge-llevar"><i class="fa-solid fa-bag-shopping"></i> Para Llevar</span>` : `<span class="badge badge-aqui"><i class="fa-solid fa-utensils"></i> Comer Aquí</span>`}
       <span class="muted text-xs">Pedido #${p.id}</span>
     </div>
     <div class="detalle-cocina-time">
@@ -110,23 +111,23 @@ function renderCocina() {
     return;
   }
 
-  /* ── Agrupar cola por mesa ─────────────────────────── */
-  // Cada "grupo" es una tarjeta que puede tener 1..N comensales
+  /* ── Agrupar cola por mesa/llevar ─────────────────────────── */
   const grupos = {};
   enCola.forEach(p => {
-    if (!grupos[p.mesa]) grupos[p.mesa] = [];
-    grupos[p.mesa].push(p);
+    const key = p.tipo === 'llevar' ? 'llevar-' + p.id : String(p.mesa);
+    if (!grupos[key]) grupos[key] = [];
+    grupos[key].push(p);
   });
 
-  // Turno global (por orden de llegada del primer pedido de cada mesa)
-  const mesasOrdenadas = Object.keys(grupos).sort((a, b) => {
+  // Turno global (por orden de llegada del primer pedido de cada mesa/llevar)
+  const clavesOrdenadas = Object.keys(grupos).sort((a, b) => {
     const tA = Math.min(...grupos[a].map(p => new Date(p.creado_en).getTime()));
     const tB = Math.min(...grupos[b].map(p => new Date(p.creado_en).getTime()));
     return tA - tB;
   });
 
-  const colaHtml = mesasOrdenadas.map((mesa, turnoIdx) => {
-    const pedidos   = grupos[mesa];
+  const colaHtml = clavesOrdenadas.map((key, turnoIdx) => {
+    const pedidos   = grupos[key];
     const turno     = turnoIdx + 1;
     const isPrimero = turno === 1;
 
@@ -189,26 +190,31 @@ function renderCocina() {
 
     const botonesHtml = algunoPendiente
       ? `<button class="btn btn-outline cocina-btn" style="flex:1"
-            onclick="avanzarTodosMesa(${mesa},'preparando')">
+            onclick="avanzarTodosMesa('${key}','preparando')">
             <i class="fa-solid fa-fire"></i> Preparar todos
           </button>
           <button class="btn btn-danger cocina-btn" onclick="cocina_cancelar(${pedidos[0].id})">
             <i class="fa-solid fa-xmark"></i>
           </button>`
       : `<button class="btn ${todosMarcados ? 'btn-success' : 'btn-outline'} cocina-btn" style="flex:1"
-            onclick="avanzarTodosMesa(${mesa},'listo')">
+            onclick="avanzarTodosMesa('${key}','listo')">
             <i class="fa-solid fa-${todosMarcados ? 'check-double' : 'check'}"></i>
             ${todosMarcados ? 'Todo Listo' : 'Marcar Listos'}
           </button>`;
 
     const mins0 = Math.floor((Date.now() - new Date(pedidos[0].creado_en).getTime()) / 60000);
+    const totalMesa = pedidos.reduce((s, p) => s + parseFloat(p.total || 0), 0);
+    const title = key.startsWith('llevar-') ? `Para Llevar (#${key.split('-')[1]})` : `Mesa ${key}`;
 
     return `
       <div class="pedido-card${urgente ? ' urgente' : ''}">
         <div class="pedido-header">
           <div>
             <div class="cocina-turno${isPrimero ? ' turno-primero' : ''}">#${turno} en cola</div>
-            <div class="cocina-mesa">Mesa ${mesa}</div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="cocina-mesa">${title}</span>
+              ${pedidos[0].tipo === 'llevar' ? `<span class="badge badge-llevar"><i class="fa-solid fa-bag-shopping"></i> Para Llevar</span>` : `<span class="badge badge-aqui"><i class="fa-solid fa-utensils"></i> Comer Aquí</span>`}
+            </div>
             ${pedidos.length > 1 ? `<div class="cocina-pedido-id" style="color:var(--blue)">${pedidos.length} comensales</div>` : `<div class="cocina-pedido-id">#${pedidos[0].id}</div>`}
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px">
@@ -223,20 +229,25 @@ function renderCocina() {
         <div class="pedido-body cocina-body" style="flex-direction:column;gap:0;padding:0">
           ${comensalesHtml}
         </div>
-        <div class="items-counter" id="items-count-mesa-${mesa}">${marcadosMesa}/${totalItemsMesa} listos en total</div>
+        <div class="items-counter" id="items-count-mesa-${key}">${marcadosMesa}/${totalItemsMesa} listos en total</div>
+        <div class="cocina-total-row">
+          <span>Total ${key.startsWith('llevar-') ? 'pedido' : 'mesa'}</span>
+          <span class="cocina-total-val">${fmt.currency(totalMesa)}</span>
+        </div>
         <div class="pedido-footer">${botonesHtml}</div>
       </div>`;
   }).join('');
 
-  /* ── Pedidos listos para cobrar (también agrupados por mesa) ─ */
+  /* ── Pedidos listos para cobrar (también agrupados por mesa/llevar) ─ */
   const mesasListas = {};
   paraCobrar.forEach(p => {
-    if (!mesasListas[p.mesa]) mesasListas[p.mesa] = [];
-    mesasListas[p.mesa].push(p);
+    const key = p.tipo === 'llevar' ? 'llevar-' + p.id : String(p.mesa);
+    if (!mesasListas[key]) mesasListas[key] = [];
+    mesasListas[key].push(p);
   });
 
-  const cobrarHtml = Object.keys(mesasListas).map(mesa => {
-    const pedidos = mesasListas[mesa];
+  const cobrarHtml = Object.keys(mesasListas).map(key => {
+    const pedidos = mesasListas[key];
     const totalMesa = pedidos.reduce((s, p) => s + parseFloat(p.total || 0), 0);
 
     const comensalesHtml = pedidos.map((p, ci) => {
@@ -265,12 +276,17 @@ function renderCocina() {
         </div>`;
     }).join('');
 
+    const title = key.startsWith('llevar-') ? `Para Llevar (#${key.split('-')[1]})` : `Mesa ${key}`;
+
     return `
       <div class="pedido-card cobrar-card">
         <div class="pedido-header">
           <div>
             <div class="cocina-turno" style="color:#22c55e;font-size:.85rem">LISTO PARA COBRAR</div>
-            <div class="cocina-mesa">Mesa ${mesa}</div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="cocina-mesa">${title}</span>
+              ${pedidos[0].tipo === 'llevar' ? `<span class="badge badge-llevar"><i class="fa-solid fa-bag-shopping"></i> Para Llevar</span>` : `<span class="badge badge-aqui"><i class="fa-solid fa-utensils"></i> Comer Aquí</span>`}
+            </div>
             ${pedidos.length > 1 ? `<div class="cocina-pedido-id" style="color:var(--blue)">${pedidos.length} cuentas</div>` : ''}
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px">
@@ -281,8 +297,13 @@ function renderCocina() {
           ${comensalesHtml}
         </div>
         <div class="cobrar-total-row">
-          <span>Total mesa</span>
+          <span>Total ${key.startsWith('llevar-') ? 'pedido' : 'mesa'}</span>
           <span class="cobrar-total-val">${fmt.currency(totalMesa)}</span>
+        </div>
+        <div class="pedido-footer">
+          <button class="btn btn-primary cocina-btn" style="flex:1" onclick="cobrarMesa('${key}')">
+            <i class="fa-solid fa-cash-register"></i> Cobrar
+          </button>
         </div>
       </div>`;
   }).join('');
@@ -294,14 +315,49 @@ function renderCocina() {
 }
 
 /** Avanza todos los pedidos de una mesa al mismo estado */
-async function avanzarTodosMesa(mesa, estado) {
-  const pedidos = State.pedidos.filter(p =>
-    p.mesa === Number(mesa) && (p.estado === 'pendiente' || p.estado === 'preparando')
-  );
+async function avanzarTodosMesa(key, estado) {
+  let pedidos;
+  if (typeof key === 'string' && key.startsWith('llevar-')) {
+    const orderId = Number(key.split('-')[1]);
+    pedidos = State.pedidos.filter(p =>
+      p.id === orderId && (p.estado === 'pendiente' || p.estado === 'preparando')
+    );
+  } else {
+    pedidos = State.pedidos.filter(p =>
+      p.mesa === Number(key) && (p.estado === 'pendiente' || p.estado === 'preparando')
+    );
+  }
   if (!pedidos.length) return;
   try {
     loading(true);
     await Promise.all(pedidos.map(p => api.pedidos.cambiarEstado(p.id, estado)));
+    await loadCocinaData();
+  } catch(e) { toastErr(e.message); }
+  finally { loading(false); }
+}
+
+/** Marca como pagados todos los pedidos listos de una mesa */
+async function cobrarMesa(key) {
+  let pedidos;
+  let label;
+  if (typeof key === 'string' && key.startsWith('llevar-')) {
+    const orderId = Number(key.split('-')[1]);
+    pedidos = State.pedidos.filter(p =>
+      p.id === orderId && p.estado === 'listo'
+    );
+    label = `Pedido Para Llevar #${orderId}`;
+  } else {
+    pedidos = State.pedidos.filter(p =>
+      p.mesa === Number(key) && p.estado === 'listo'
+    );
+    label = `Mesa ${key}`;
+  }
+  if (!pedidos.length) return;
+  if (!confirm(`¿Confirmar cobro de ${label}? Total: ${fmt.currency(pedidos.reduce((s, p) => s + parseFloat(p.total || 0), 0))}`)) return;
+  try {
+    loading(true);
+    await Promise.all(pedidos.map(p => api.pedidos.cambiarEstado(p.id, 'pagado')));
+    toastOk(`${label} cobrada exitosamente`);
     await loadCocinaData();
   } catch(e) { toastErr(e.message); }
   finally { loading(false); }
@@ -344,7 +400,7 @@ function renderCocinaExtras() {
 
         const tipoBadge = ex.tipo === 'llevar'
           ? `<span class="badge badge-llevar" style="font-size:.78rem"><i class="fa-solid fa-bag-shopping"></i> LLEVAR</span>`
-          : '';
+          : `<span class="badge badge-aqui" style="font-size:.78rem"><i class="fa-solid fa-utensils"></i> AQUÍ</span>`;
 
         return `
           <div class="extra-card">

@@ -96,13 +96,16 @@ router.patch('/:id/agregar',
   ctrl.agregar
 );
 
-/** Editar items de un pedido (quitar o cambiar cantidad) */
+/** Editar items de un pedido (quitar o cambiar cantidad, cambiar mesa/tipo/comensal) */
 const editarPedidoRules = [
   param('id').isInt({ min: 1 }).withMessage('ID inválido.'),
-  body('items').isArray({ min: 1 }).withMessage('Debe enviar al menos un item.'),
-  body('items.*.detalle_id').isInt({ min: 1 }).withMessage('detalle_id inválido.'),
-  body('items.*.cantidad').isInt({ min: 0 }).withMessage('Cantidad debe ser 0 o mayor.'),
+  body('items').optional().isArray({ min: 1 }).withMessage('Debe enviar al menos un item.'),
+  body('items.*.detalle_id').optional().isInt({ min: 1 }).withMessage('detalle_id inválido.'),
+  body('items.*.cantidad').optional().isInt({ min: 0 }).withMessage('Cantidad debe ser 0 o mayor.'),
   body('items.*.nota').optional({ nullable: true }).isString().isLength({ max: 200 }),
+  body('mesa').optional().isInt({ min: 1 }).withMessage('Mesa debe ser un número positivo.'),
+  body('tipo').optional().isIn(['aqui','llevar']).withMessage('Tipo de pedido inválido.'),
+  body('comensal').optional({ nullable: true }).isString().isLength({ max: 50 }).withMessage('Nombre de comensal inválido.'),
 ];
 
 router.patch('/:id/editar',

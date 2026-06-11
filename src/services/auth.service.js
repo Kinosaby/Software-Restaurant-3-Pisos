@@ -12,9 +12,10 @@ const AppError = require('../utils/AppError');
 function normalizar(row) {
   if (!row) return null;
   return {
-    id:       row.id,
-    username: row.username,
-    role:     row.role,
+    id:         row.id,
+    username:   row.username,
+    role:       row.role,
+    created_at: row.created_at,
   };
 }
 

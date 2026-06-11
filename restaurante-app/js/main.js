@@ -159,8 +159,54 @@ function enterMesero() {
 }
 
 function enterCocina() {
+  if ("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission();
+  }
   show('screen-cocina');
   loadCocinaData();
+}
+
+/* ── Web Notifications & Audio Helpers ──────────────── */
+function playBeepSound() {
+  try {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5 note
+    gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+
+    oscillator.start();
+    oscillator.stop(audioCtx.currentTime + 0.5);
+  } catch (e) {
+    console.error("Web Audio API error playing sound:", e);
+  }
+}
+
+function sendWebNotification(title, body) {
+  if (!("Notification" in window)) return;
+  
+  const showNotification = () => {
+    new Notification(title, {
+      body,
+      icon: '/img/favicon.png'
+    });
+  };
+
+  if (Notification.permission === "granted") {
+    showNotification();
+  } else if (Notification.permission !== "denied") {
+    Notification.requestPermission().then(permission => {
+      if (permission === "granted") {
+        showNotification();
+      }
+    });
+  }
 }
 
 /* ── Socket.IO ──────────────────────────────── */
@@ -185,6 +231,12 @@ function initSocket() {
     if (getRole() === 'mesero' || getRole() === 'admin') {
       toastInfo(`Pedido #${pedido.id} registrado — Mesa ${pedido.mesa}`);
     }
+    if (getRole() === 'cocina') {
+      const mesaStr = pedido.tipo === 'llevar' ? 'Para Llevar' : `Mesa ${pedido.mesa}`;
+      const comensalStr = pedido.comensal ? `Comensal: ${pedido.comensal}` : 'Comensal: No especificado';
+      sendWebNotification("¡Nuevo Pedido!", `${mesaStr} · ${comensalStr}`);
+      playBeepSound();
+    }
     renderCocina();
     renderMeseroPedidos();
     renderAdminPedidos();
@@ -199,6 +251,9 @@ function initSocket() {
     const role = getRole();
     if (pedido.estado === 'listo' && role === 'mesero') {
       toastOk(`Mesa ${pedido.mesa} lista para cobrar — ${fmt.currency(pedido.total)}`);
+      const mesaText = pedido.mesa === 99 ? 'Para Llevar' : `Mesa ${pedido.mesa}`;
+      sendWebNotification("¡Pedido Listo!", `${mesaText} listo para recoger`);
+      playBeepSound();
     } else if (pedido.estado === 'listo' && role === 'admin') {
       toastInfo(`Pedido #${pedido.id} listo — Mesa ${pedido.mesa}`);
     } else if (pedido._accion === 'productos_agregados' && role === 'cocina') {
@@ -208,6 +263,7 @@ function initSocket() {
     renderCocina();
     renderMeseroPedidos();
     renderAdminPedidos();
+    if (typeof renderMesaSelector === 'function') renderMesaSelector();
     // Actualizar métricas del admin cuando cambia estado (especialmente pagado/listo)
     if (typeof scheduleMetricasRefresh === 'function') scheduleMetricasRefresh();
   });
@@ -223,6 +279,11 @@ function initSocket() {
       if (typeof _saveExtras === 'function') _saveExtras();
       renderCocinaExtras();
       toastInfo(`⚡ Extra — Mesa ${extra.mesa}: ${extra.items.length} producto(s) nuevo(s)`);
+
+      const mesaStr = extra.tipo === 'llevar' ? 'Para Llevar' : `Mesa ${extra.mesa}`;
+      const comensalStr = extra.comensal ? `Comensal: ${extra.comensal}` : 'Comensal: No especificado';
+      sendWebNotification("¡Nuevo Pedido!", `[Extra] ${mesaStr} · ${comensalStr}`);
+      playBeepSound();
     } else if (role === 'mesero') {
       toastOk(`Extra enviado a cocina — Mesa ${extra.mesa}`);
     }
@@ -253,4 +314,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   checkSession();
   initSocket();
+
+  if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
 });

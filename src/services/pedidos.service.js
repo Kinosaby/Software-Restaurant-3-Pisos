@@ -286,9 +286,9 @@ async function eliminar(id) {
  *   cantidad > 0 → actualiza cantidad y nota
  * Recalcula el total y emite pedido_actualizado via socket.
  */
-async function editarPedido(id, { items }, io = null) {
-  if (!items || items.length === 0) {
-    throw new AppError('Debe enviar al menos un item.', 400, 'EMPTY_ITEMS');
+async function editarPedido(id, { items, mesa, tipo, comensal }, io = null) {
+  if ((!items || items.length === 0) && mesa === undefined && tipo === undefined && comensal === undefined) {
+    throw new AppError('Debe enviar al menos un campo a editar.', 400, 'EMPTY_FIELDS');
   }
 
   const pedido = await obtenerPorId(id);
@@ -303,23 +303,50 @@ async function editarPedido(id, { items }, io = null) {
   try {
     await client.query('BEGIN');
 
-    for (const item of items) {
-      if (item.cantidad <= 0) {
-        // Eliminar el item del detalle
-        await client.query(
-          'DELETE FROM pedido_detalle WHERE id = $1 AND pedido_id = $2',
-          [item.detalle_id, id]
-        );
-      } else {
-        // Actualizar cantidad y nota
-        await client.query(
-          'UPDATE pedido_detalle SET cantidad = $1, nota = $2 WHERE id = $3 AND pedido_id = $4',
-          [item.cantidad, item.nota ?? null, item.detalle_id, id]
-        );
+    // 1. Actualizar metadatos si vienen
+    if (mesa !== undefined || tipo !== undefined || comensal !== undefined) {
+      const updates = [];
+      const params = [];
+      let idx = 1;
+      if (mesa !== undefined) {
+        updates.push(`mesa = $${idx++}`);
+        params.push(mesa);
+      }
+      if (tipo !== undefined) {
+        updates.push(`tipo = $${idx++}`);
+        params.push(tipo);
+      }
+      if (comensal !== undefined) {
+        updates.push(`comensal = $${idx++}`);
+        params.push(comensal);
+      }
+      params.push(id);
+      await client.query(
+        `UPDATE pedidos SET ${updates.join(', ')} WHERE id = $${idx}`,
+        params
+      );
+    }
+
+    // 2. Actualizar items si vienen
+    if (items && items.length > 0) {
+      for (const item of items) {
+        if (item.cantidad <= 0) {
+          // Eliminar el item del detalle
+          await client.query(
+            'DELETE FROM pedido_detalle WHERE id = $1 AND pedido_id = $2',
+            [item.detalle_id, id]
+          );
+        } else {
+          // Actualizar cantidad y nota
+          await client.query(
+            'UPDATE pedido_detalle SET cantidad = $1, nota = $2 WHERE id = $3 AND pedido_id = $4',
+            [item.cantidad, item.nota ?? null, item.detalle_id, id]
+          );
+        }
       }
     }
 
-    // Recalcular total desde cero sumando precio * cantidad del detalle actual
+    // 3. Recalcular total desde cero sumando precio * cantidad del detalle actual
     const { rows: detalles } = await client.query(
       `SELECT pd.cantidad, pr.precio
        FROM pedido_detalle pd

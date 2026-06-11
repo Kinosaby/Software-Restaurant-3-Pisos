@@ -9,7 +9,7 @@ const CATEGORIAS = [
 ];
 
 // ── Configuración de mesas ─────────────────────────────────────
-const TOTAL_MESAS = 20;   // <── Cambia este número si el restaurante tiene más/menos mesas
+const TOTAL_MESAS = 13;   // <── Cambia este número si el restaurante tiene más/menos mesas
 
 // Tipo de pedido: 'aqui' o 'llevar'
 let _tipoPedido = 'aqui';
@@ -18,6 +18,22 @@ function setTipoPedido(tipo) {
   _tipoPedido = tipo;
   document.getElementById('btn-tipo-aqui')?.classList.toggle('active', tipo === 'aqui');
   document.getElementById('btn-tipo-llevar')?.classList.toggle('active', tipo === 'llevar');
+
+  if (tipo === 'llevar') {
+    if (_mesaSeleccionada === null) {
+      _mesaSeleccionada = 99;
+      const numInput = document.getElementById('mesa-num');
+      if (numInput) numInput.value = 99;
+      const badge = document.getElementById('mesa-badge');
+      const badgeText = document.getElementById('mesa-badge-text');
+      if (badge) badge.classList.add('mesa-badge-activa');
+      if (badgeText) badgeText.textContent = "Para Llevar";
+    }
+  } else if (tipo === 'aqui') {
+    if (_mesaSeleccionada === 99) {
+      limpiarMesaSeleccionada();
+    }
+  }
 }
 
 /* ── Selector de Mesa ─────────────────────────────────────────── */
@@ -33,17 +49,21 @@ function cerrarSelectorMesa() {
 }
 
 function seleccionarMesa(num) {
-  // Verificar si la mesa tiene pedidos activos de OTRO mesero/sesión
-  // (pedidos en estado pendiente o preparando)
-  const activos = (State.pedidos || []).filter(p =>
-    p.mesa === num &&
-    !['pagado','cancelado','listo'].includes(p.estado)
-  );
+  if (num !== 99) {
+    // Verificar si la mesa tiene pedidos activos de OTRO mesero/sesión
+    // (pedidos en estado pendiente, preparando o listo)
+    const activos = (State.pedidos || []).filter(p =>
+      p.mesa === num &&
+      !['pagado','cancelado'].includes(p.estado)
+    );
 
-  if (activos.length > 0 && _mesaSeleccionada !== num) {
-    // Mesa ocupada — mostrar advertencia y bloquear
-    toastErr(`⚠️ Mesa ${num} ya está siendo atendida. Tiene ${activos.length} pedido(s) activo(s).`);
-    return;
+    if (activos.length > 0 && _mesaSeleccionada !== num) {
+      // Mesa ocupada — mostrar confirmación en vez de bloquear
+      const confirmed = confirm(`La Mesa ${num} ya tiene pedidos activos. ¿Deseas agregar más comensales o pedidos a esta mesa?`);
+      if (!confirmed) {
+        return;
+      }
+    }
   }
 
   // Permitir re-seleccionar la misma mesa (para agregar más pedidos)
@@ -54,10 +74,10 @@ function seleccionarMesa(num) {
   const badge = document.getElementById('mesa-badge');
   const badgeText = document.getElementById('mesa-badge-text');
   if (badge) badge.classList.add('mesa-badge-activa');
-  if (badgeText) badgeText.textContent = `Mesa ${num}`;
+  if (badgeText) badgeText.textContent = num === 99 ? 'Para Llevar' : `Mesa ${num}`;
 
   cerrarSelectorMesa();
-  toastOk(`Mesa ${num} seleccionada`);
+  toastOk(num === 99 ? 'Para Llevar seleccionado' : `Mesa ${num} seleccionada`);
 }
 
 function limpiarMesaSeleccionada() {
@@ -73,10 +93,10 @@ function renderMesaSelector() {
   const grid = document.getElementById('mesa-selector-grid');
   if (!grid) return;
 
-  // Mesas con pedidos activos (pendiente o preparando) = ocupadas
+  // Mesas con pedidos activos (pendiente, preparando o listo) = ocupadas
   const mesasOcupadas = new Set(
     (State.pedidos || [])
-      .filter(p => !['pagado','cancelado','listo'].includes(p.estado))
+      .filter(p => !['pagado','cancelado'].includes(p.estado))
       .map(p => p.mesa)
   );
 
@@ -85,11 +105,8 @@ function renderMesaSelector() {
     const ocupada  = mesasOcupadas.has(i);
     const activa   = _mesaSeleccionada === i;
     const cls = activa ? 'mesa-btn activa' : ocupada ? 'mesa-btn ocupada' : 'mesa-btn libre';
-    const onclick = ocupada && !activa
-      ? `seleccionarMesa(${i})`   // Igual se llama — la función mostrará el error
-      : `seleccionarMesa(${i})`;
     html += `
-      <button class="${cls}" onclick="${onclick}">
+      <button class="${cls}" onclick="seleccionarMesa(${i})">
         <span class="mesa-num-big">${i}</span>
         ${ocupada ? '<span class="mesa-estado-label">Ocupada</span>' : '<span class="mesa-estado-label">Libre</span>'}
       </button>`;
@@ -110,6 +127,7 @@ async function loadMeseroData() {
     State.pedidos   = (peds.pedidos || []).slice().reverse();
     renderCatalogo();
     renderMeseroPedidos();
+    if (typeof renderMesaSelector === 'function') renderMesaSelector();
   } catch(e) { toastErr(e.message); }
   finally { loading(false); }
 }
@@ -236,7 +254,13 @@ function clearCarrito() {
 
 function agregarComensal() {
   const n = _comensales.length + 1;
-  _comensales.push({ nombre: `C${n}`, items: [] });
+  let nombre = prompt("Nombre o etiqueta del comensal:");
+  if (nombre === null || nombre.trim() === "") {
+    nombre = `C${n}`;
+  } else {
+    nombre = nombre.trim();
+  }
+  _comensales.push({ nombre: nombre, items: [] });
   _comensalActivo = _comensales.length - 1;
   renderCarrito();
 }
@@ -320,7 +344,7 @@ async function submitPedido() {
 
   // Doble verificación en el momento de enviar
   const activosAhora = (State.pedidos || []).filter(p =>
-    p.mesa === mesa && !['pagado','cancelado','listo'].includes(p.estado)
+    p.mesa === mesa && !['pagado','cancelado'].includes(p.estado)
   );
   if (activosAhora.length > 0 && _mesaSeleccionada !== mesa) {
     toastErr(`⚠️ Mesa ${mesa} ya está siendo atendida por otro mesero`);
@@ -330,6 +354,9 @@ async function submitPedido() {
 
   const conItems = _comensales.filter(c => c.items.length > 0);
   if (!conItems.length) { toastErr('Agrega al menos un producto'); return; }
+
+  const confirmed = confirm("El pedido es correcto, ¿enviar?");
+  if (!confirmed) return;
 
   const btn = document.getElementById('btn-enviar-pedido');
   btn.disabled = true;
@@ -382,6 +409,7 @@ function renderMeseroPedidos() {
     const labelC = p.comensal
       ? `<span class="badge-comensal"><i class="fa-solid fa-user"></i> ${p.comensal}</span>`
       : '';
+    const descProductos = (p.productos || []).map(i => `${i.cantidad}x ${i.nombre}`).join(', ');
     return `
     <div class="pedido-row pedido-row-sub" onclick="verDetallePedido(${p.id})">
       <div class="pedido-row-info">
@@ -389,6 +417,7 @@ function renderMeseroPedidos() {
           ${labelC}${badgeHtml(p.estado)}
         </div>
         <div class="text-xs muted">#${p.id} &middot; ${fmt.relTime(p.creado_en)}</div>
+        ${descProductos ? `<div style="font-size:0.75rem; font-style:italic; color:var(--muted); margin-top:2px;">${descProductos}</div>` : ''}
       </div>
       <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
         ${puedeEditar ? `<button class="btn btn-sm btn-edit" onclick="event.stopPropagation();abrirEditarPedido(${p.id})"><i class="fa-solid fa-pen-to-square"></i></button>` : ''}
@@ -601,7 +630,7 @@ function verDetallePedido(id) {
   const prods = (p.productos||[]).map(i=>`<li>${i.cantidad}× ${i.nombre}${i.nota?' <span class="muted">('+i.nota+')</span>':''}</li>`).join('');
   document.getElementById('detalle-content').innerHTML = `
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px">
-      <span class="brand-sm" style="font-family:var(--font-h)">Mesa ${p.mesa}</span>
+      <span class="brand-sm" style="font-family:var(--font-h)">Mesa ${p.mesa === 99 ? 'Para Llevar' : p.mesa}</span>
       ${badgeHtml(p.estado)}
     </div>
     <ul style="list-style:none;display:flex;flex-direction:column;gap:6px;font-size:.88rem">${prods}</ul>
@@ -611,6 +640,32 @@ function verDetallePedido(id) {
       <span class="total-value">${fmt.currency(p.total)}</span>
     </div>
     <div class="text-xs muted" style="margin-top:8px">${fmt.date(p.creado_en)}</div>`;
+
+  const btnCambiarMesa = document.getElementById('btn-cambiar-mesa');
+  if (btnCambiarMesa) {
+    btnCambiarMesa.style.display = 'inline-block';
+    btnCambiarMesa.onclick = async () => {
+      const resp = prompt("Ingrese el nuevo número de mesa (1-13, o 99 para Llevar):");
+      if (resp === null) return;
+      const nuevaMesa = parseInt(resp.trim(), 10);
+      if (isNaN(nuevaMesa) || !((nuevaMesa >= 1 && nuevaMesa <= 13) || nuevaMesa === 99)) {
+        toastErr("Mesa inválida. Debe ser de 1 a 13, o 99 para Llevar.");
+        return;
+      }
+      try {
+        loading(true);
+        await api.pedidos.editar(id, { mesa: nuevaMesa });
+        toastOk(`Mesa cambiada exitosamente a ${nuevaMesa === 99 ? 'Para Llevar' : nuevaMesa}`);
+        closeModal();
+        await loadMeseroData();
+      } catch(e) {
+        toastErr(e.message);
+      } finally {
+        loading(false);
+      }
+    };
+  }
+
   openModal('modal-detalle');
 }
 

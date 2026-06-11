@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS pedidos (
   estado     VARCHAR(15) NOT NULL DEFAULT 'pendiente'
                CHECK (estado IN ('pendiente','preparando','listo','pagado','cancelado')),
   total      NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  tipo       VARCHAR(10) NOT NULL DEFAULT 'aqui' CHECK (tipo IN ('aqui','llevar')),
+  comensal   VARCHAR(50) DEFAULT NULL,
   usuario_id INTEGER REFERENCES usuarios(id),
   creado_en  TIMESTAMPTZ DEFAULT NOW()
 );
@@ -46,7 +48,7 @@ CREATE TABLE IF NOT EXISTS pedido_detalle (
 -- ── Tabla ventas ─────────────────────────────────────
 CREATE TABLE IF NOT EXISTS ventas (
   id        SERIAL PRIMARY KEY,
-  pedido_id INTEGER REFERENCES pedidos(id),
+  pedido_id INTEGER REFERENCES pedidos(id) ON DELETE SET NULL,
   total     NUMERIC(10,2) NOT NULL,
   fecha     TIMESTAMPTZ DEFAULT NOW()
 );
