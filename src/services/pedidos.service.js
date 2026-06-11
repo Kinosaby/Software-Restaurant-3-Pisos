@@ -127,7 +127,7 @@ async function crear({ mesa, productos, tipo = 'aqui', comensal = null, usuario_
  * Si el pedido está en listo/pagado, emite 'extra_pedido' con SOLO los items nuevos.
  * Si está en pendiente/preparando, emite 'pedido_actualizado' normal.
  */
-async function agregarProductos(id, { productos }, io = null) {
+async function agregarProductos(id, { productos, tipo }, io = null) {
   if (!productos || productos.length === 0) {
     throw new AppError('Debe incluir al menos un producto.', 400, 'EMPTY_ORDER');
   }
@@ -200,7 +200,7 @@ async function agregarProductos(id, { productos }, io = null) {
         io.emit('extra_pedido', {
           pedido_id: id,
           mesa:      pedido.mesa,
-          tipo:      pedido.tipo || 'aqui',
+          tipo:      tipo || pedido.tipo || 'aqui',
           items:     itemsNuevos,
           total_extra: totalExtra,
         });

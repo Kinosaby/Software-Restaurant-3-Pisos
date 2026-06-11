@@ -226,7 +226,7 @@ function addToCarrito(productoId) {
   const items    = _carritoActivo();
   const existing = items.find(i => i.producto_id === productoId);
   if (existing) { existing.cantidad++; }
-  else { items.push({ producto_id: productoId, nombre: prod.nombre, precio: parseFloat(prod.precio), cantidad: 1, nota: '' }); }
+  else { items.push({ producto_id: productoId, nombre: prod.nombre, precio: parseFloat(prod.precio), cantidad: 1, nota: '', esLlevar: false }); }
   renderCarrito();
 }
 
@@ -244,6 +244,13 @@ function changeQty(productoId, delta) {
 function setNota(productoId, nota) {
   const item = _carritoActivo().find(i => i.producto_id === productoId);
   if (item) item.nota = nota;
+}
+
+function toggleCartItemLlevar(productoId) {
+  const items = _carritoActivo();
+  const item = items.find(i => i.producto_id === productoId);
+  if (item) item.esLlevar = !item.esLlevar;
+  renderCarrito();
 }
 
 function clearCarrito() {
@@ -321,6 +328,7 @@ function renderCarrito() {
             <button class="qty-btn" onclick="changeQty(${item.producto_id},-1)">−</button>
             <span style="min-width:22px;text-align:center;font-weight:600">${item.cantidad}</span>
             <button class="qty-btn" onclick="changeQty(${item.producto_id},1)">+</button>
+            <button type="button" class="qty-btn ${item.esLlevar ? 'active' : ''}" style="margin-left:8px; background:${item.esLlevar ? 'var(--accent)' : 'none'}; border:1px solid var(--border); color:${item.esLlevar ? '#000' : 'var(--muted)'}" onclick="toggleCartItemLlevar(${item.producto_id})" title="Llevar"><i class="fa-solid fa-bag-shopping"></i></button>
           </div>
         </div>`;
     }).join('');
@@ -370,7 +378,7 @@ async function submitPedido() {
         productos: c.items.map(i => ({
           producto_id: i.producto_id,
           cantidad:    i.cantidad,
-          nota:        i.nota || '',
+          nota:        i.esLlevar ? '[LLEVAR] ' + (i.nota || '').trim() : (i.nota || ''),
         })),
       });
     }
@@ -773,7 +781,7 @@ function addToAgregar(productoId) {
   if (!prod) return;
   const existing = _carritoAgregar.find(i => i.producto_id === productoId);
   if (existing) { existing.cantidad++; }
-  else { _carritoAgregar.push({ producto_id: productoId, nombre: prod.nombre, precio: parseFloat(prod.precio), cantidad: 1, nota: '' }); }
+  else { _carritoAgregar.push({ producto_id: productoId, nombre: prod.nombre, precio: parseFloat(prod.precio), cantidad: 1, nota: '', esLlevar: false }); }
   renderAgregarGrid();
   renderAgregarCarrito();
 }
@@ -790,6 +798,12 @@ function changeQtyAgregar(productoId, delta) {
 function setNotaAgregar(productoId, nota) {
   const item = _carritoAgregar.find(i => i.producto_id === productoId);
   if (item) item.nota = nota;
+}
+
+function toggleAgregarItemLlevar(productoId) {
+  const item = _carritoAgregar.find(i => i.producto_id === productoId);
+  if (item) item.esLlevar = !item.esLlevar;
+  renderAgregarCarrito();
 }
 
 function renderAgregarCarrito() {
@@ -836,6 +850,7 @@ function renderAgregarCarrito() {
               <button class="qty-btn" onclick="changeQtyAgregar(${item.producto_id},-1)">−</button>
               <span style="min-width:22px;text-align:center;font-weight:700">${item.cantidad}</span>
               <button class="qty-btn" onclick="changeQtyAgregar(${item.producto_id},1)">+</button>
+              <button type="button" class="qty-btn ${item.esLlevar ? 'active' : ''}" style="margin-left:8px; background:${item.esLlevar ? 'var(--accent)' : 'none'}; border:1px solid var(--border); color:${item.esLlevar ? '#000' : 'var(--muted)'}" onclick="toggleAgregarItemLlevar(${item.producto_id})" title="Llevar"><i class="fa-solid fa-bag-shopping"></i></button>
               <span class="text-gold" style="font-size:.82rem;min-width:54px;text-align:right">${fmt.currency(item.precio * item.cantidad)}</span>
             </div>
           </div>`).join('')}
@@ -854,7 +869,7 @@ async function confirmarAgregarProductos() {
       productos: _carritoAgregar.map(i => ({
         producto_id: i.producto_id,
         cantidad:    i.cantidad,
-        nota:        i.nota || '',
+        nota:        i.esLlevar ? '[LLEVAR] ' + (i.nota || '').trim() : (i.nota || ''),
       }))
     });
     toastOk(`Productos agregados al pedido #${_pedidoAgregarId}`);

@@ -5,6 +5,17 @@
 // Estado local de checkboxes: { pedidoId: Set<productoDetalleIndex> }
 const _itemsListos = {};
 
+/* ── Helper para procesar notas y detectar si es para llevar ── */
+function procesarNotaProducto(item) {
+  let nota = item.nota || '';
+  let esLlevar = false;
+  if (nota.startsWith('[LLEVAR]')) {
+    esLlevar = true;
+    nota = nota.substring(8).trim();
+  }
+  return { esLlevar, nota };
+}
+
 /* ── Persistencia de extras en localStorage ────────────────── */
 function _saveExtras() {
   try {
@@ -62,15 +73,21 @@ function verDetalleCocina(pedidoId) {
   const p = State.pedidos.find(x => x.id === pedidoId);
   if (!p) return;
 
-  const prods = (p.productos || []).map(i => `
+  const prods = (p.productos || []).map(i => {
+    const info = procesarNotaProducto(i);
+    const badgeLlevar = info.esLlevar
+      ? `<span class="badge badge-llevar" style="font-size:0.7rem;padding:2px 6px;margin-left:6px;"><i class="fa-solid fa-bag-shopping"></i> Llevar</span>`
+      : '';
+    return `
     <div class="detalle-cocina-item">
       <div class="detalle-cocina-qty">${i.cantidad}×</div>
       <div style="flex:1">
-        <div class="detalle-cocina-nom">${i.nombre}</div>
-        ${i.nota ? `<div class="detalle-cocina-nota"><i class="fa-solid fa-note-sticky"></i> ${i.nota}</div>` : ''}
+        <div class="detalle-cocina-nom">${i.nombre}${badgeLlevar}</div>
+        ${info.nota ? `<div class="detalle-cocina-nota"><i class="fa-solid fa-note-sticky"></i> ${info.nota}</div>` : ''}
       </div>
       <div class="detalle-cocina-precio">${fmt.currency(parseFloat(i.precio) * i.cantidad)}</div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   const horaExacta = new Date(p.creado_en).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
 
@@ -153,6 +170,10 @@ function renderCocina() {
 
       const prodsHtml = (p.productos || []).map((i, iIdx) => {
         const done = _itemsListos[p.id]?.has(iIdx) || false;
+        const info = procesarNotaProducto(i);
+        const badgeLlevar = info.esLlevar
+          ? `<span class="badge badge-llevar" style="font-size:0.7rem;padding:2px 6px;margin-left:6px;"><i class="fa-solid fa-bag-shopping"></i> Llevar</span>`
+          : '';
         return `
           <div class="pedido-item${done ? ' item-done' : ''}" id="item-row-${p.id}-${iIdx}">
             <input type="checkbox" class="item-cb" id="cb-${p.id}-${iIdx}"
@@ -160,8 +181,8 @@ function renderCocina() {
               onclick="toggleItemListo(${p.id}, ${iIdx}, ${totalItemsP})">
             <span class="pedido-item-qty">${i.cantidad}×</span>
             <div style="flex:1">
-              <span class="pedido-item-nom">${i.nombre}</span>
-              ${i.nota ? `<div class="pedido-item-nota"><i class="fa-solid fa-note-sticky"></i> ${i.nota}</div>` : ''}
+              <span class="pedido-item-nom">${i.nombre}${badgeLlevar}</span>
+              ${info.nota ? `<div class="pedido-item-nota"><i class="fa-solid fa-note-sticky"></i> ${info.nota}</div>` : ''}
             </div>
           </div>`;
       }).join('');
@@ -255,15 +276,21 @@ function renderCocina() {
         ? `<span class="badge-comensal" style="font-size:.75rem"><i class="fa-solid fa-user"></i> ${p.comensal}</span>`
         : `<span class="muted text-xs">#${p.id}</span>`;
 
-      const prodsHtml = (p.productos || []).map(i => `
+      const prodsHtml = (p.productos || []).map(i => {
+        const info = procesarNotaProducto(i);
+        const badgeLlevar = info.esLlevar
+          ? `<span class="badge badge-llevar" style="font-size:0.7rem;padding:2px 6px;margin-left:6px;"><i class="fa-solid fa-bag-shopping"></i> Llevar</span>`
+          : '';
+        return `
         <div class="pedido-item item-done">
           <span class="pedido-item-qty">${i.cantidad}×</span>
           <div style="flex:1">
-            <span class="pedido-item-nom">${i.nombre}</span>
-            ${i.nota ? `<div class="pedido-item-nota"><i class="fa-solid fa-note-sticky"></i> ${i.nota}</div>` : ''}
+            <span class="pedido-item-nom">${i.nombre}${badgeLlevar}</span>
+            ${info.nota ? `<div class="pedido-item-nota"><i class="fa-solid fa-note-sticky"></i> ${info.nota}</div>` : ''}
           </div>
           <span style="font-size:.82rem;color:var(--gold)">${fmt.currency(parseFloat(i.precio)*i.cantidad)}</span>
-        </div>`).join('');
+        </div>`;
+      }).join('');
 
       const separador = ci > 0 ? `<div class="cocina-comensal-sep"></div>` : '';
       return `${separador}
@@ -383,17 +410,23 @@ function renderCocinaExtras() {
     </div>
     <div class="extras-grid">
       ${extras.map(ex => {
-        const prods = ex.items.map((i, idx) => `
+        const prods = ex.items.map((i, idx) => {
+          const info = procesarNotaProducto(i);
+          const badgeLlevar = info.esLlevar
+            ? `<span class="badge badge-llevar" style="font-size:0.7rem;padding:2px 6px;margin-left:6px;"><i class="fa-solid fa-bag-shopping"></i> Llevar</span>`
+            : '';
+          return `
           <div class="pedido-item${ex._done?.[idx] ? ' item-done' : ''}" id="xitem-${ex._id}-${idx}">
             <input type="checkbox" class="item-cb" id="xcb-${ex._id}-${idx}"
               ${ex._done?.[idx] ? 'checked' : ''}
               onclick="toggleExtraItem(${ex._id}, ${idx}, ${ex.items.length})">
             <span class="pedido-item-qty">${i.cantidad}×</span>
             <div style="flex:1">
-              <span class="pedido-item-nom">${i.nombre}</span>
-              ${i.nota ? `<div class="pedido-item-nota"><i class="fa-solid fa-note-sticky"></i> ${i.nota}</div>` : ''}
+              <span class="pedido-item-nom">${i.nombre}${badgeLlevar}</span>
+              ${info.nota ? `<div class="pedido-item-nota"><i class="fa-solid fa-note-sticky"></i> ${info.nota}</div>` : ''}
             </div>
-          </div>`).join('');
+          </div>`;
+        }).join('');
 
         const doneCnt  = Object.values(ex._done || {}).filter(Boolean).length;
         const allDone  = doneCnt >= ex.items.length;

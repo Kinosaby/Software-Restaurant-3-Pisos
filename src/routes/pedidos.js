@@ -86,6 +86,7 @@ const agregarProductosRules = [
   body('productos.*.producto_id').isInt({ min: 1 }).withMessage('producto_id inválido.'),
   body('productos.*.cantidad').isInt({ min: 1 }).withMessage('Cantidad mínima: 1.'),
   body('productos.*.nota').optional().isString().isLength({ max: 200 }),
+  body('tipo').optional().isIn(['aqui','llevar']).withMessage('Tipo de extra inválido.'),
 ];
 
 router.patch('/:id/agregar',
