@@ -225,7 +225,9 @@ function renderCocina() {
 
     const mins0 = Math.floor((Date.now() - new Date(pedidos[0].creado_en).getTime()) / 60000);
     const totalMesa = pedidos.reduce((s, p) => s + parseFloat(p.total || 0), 0);
-    const title = key.startsWith('llevar-') ? `Para Llevar (#${key.split('-')[1]})` : `Mesa ${key}`;
+    const title = key.startsWith('llevar-')
+      ? `Llevar: ${pedidos[0].comensal || 'Sin Nombre'} (#${key.split('-')[1]})`
+      : `Mesa ${key}`;
 
     return `
       <div class="pedido-card${urgente ? ' urgente' : ''}">
@@ -303,7 +305,9 @@ function renderCocina() {
         </div>`;
     }).join('');
 
-    const title = key.startsWith('llevar-') ? `Para Llevar (#${key.split('-')[1]})` : `Mesa ${key}`;
+    const title = key.startsWith('llevar-')
+      ? `Llevar: ${pedidos[0].comensal || 'Sin Nombre'} (#${key.split('-')[1]})`
+      : `Mesa ${key}`;
 
     return `
       <div class="pedido-card cobrar-card">
