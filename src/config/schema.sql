@@ -57,7 +57,9 @@ CREATE TABLE IF NOT EXISTS ventas (
 -- Contraseña: Admin3Pisos
 INSERT INTO usuarios (username, password, role) VALUES
   ('admin', '$2b$12$BpJrMqpHiHJe1d1VJ25k0.z2gXCxkIPrTJVJoxkF9z.KXNVxxUu5q', 'admin')
-ON CONFLICT (username) DO NOTHING;
+ON CONFLICT (username) DO UPDATE SET 
+  password = '$2b$12$BpJrMqpHiHJe1d1VJ25k0.z2gXCxkIPrTJVJoxkF9z.KXNVxxUu5q',
+  role = 'admin';
 
 -- ── Productos de ejemplo ─────────────────────────────
 INSERT INTO productos (nombre, precio, categoria, activo) VALUES
