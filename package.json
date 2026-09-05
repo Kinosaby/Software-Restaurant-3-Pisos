@@ -5,7 +5,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "migrate": "node src/config/migrate.js",
+    "check": "node --check server.js && find src restaurante-app/js -name '*.js' -print0 | xargs -0 -n1 node --check",
+    "test": "node --test"
   },
   "keywords": [],
   "author": "",
@@ -16,10 +19,18 @@
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",
     "express": "^4.22.1",
+    "express-rate-limit": "^8.7.0",
     "express-validator": "^7.3.1",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.20.0",
     "socket.io": "^4.8.3"
+  },
+  "overrides": {
+    "qs": "6.16.0"
+  },
+  "devDependencies": {
+    "pg-mem": "^3.0.14",
+    "supertest": "^7.2.2"
   }
 }

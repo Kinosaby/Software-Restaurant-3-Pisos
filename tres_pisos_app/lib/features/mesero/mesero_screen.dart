@@ -19,12 +19,19 @@ class MeseroScreen extends ConsumerStatefulWidget {
 
 class _MeseroScreenState extends ConsumerState<MeseroScreen> {
   final _mesaCtrl = TextEditingController();
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+  String _categoria = 'Todas';
 
   @override
   void initState() {
     super.initState();
-    _loadData();
-    _listenSocket();
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    await Future.wait([_loadData(), SocketService.connect()]);
+    if (mounted) _listenSocket();
   }
 
   Future<void> _loadData() async {
@@ -60,31 +67,54 @@ class _MeseroScreenState extends ConsumerState<MeseroScreen> {
     });
   }
 
-  Future<void> _enviarPedido() async {
+  Future<void> _enviarPedido(
+    String tipo,
+    String? comensal,
+    int? pedidoId,
+  ) async {
     final cart = ref.read(cartProvider);
     if (cart.isEmpty) {
       if (mounted) AppSnackbar.error(context, 'El carrito esta vacio');
       return;
     }
-    final mesa = int.tryParse(_mesaCtrl.text);
-    if (mesa == null || mesa < 1) {
+    final mesa = tipo == 'llevar' ? 99 : int.tryParse(_mesaCtrl.text);
+    if (pedidoId == null && (mesa == null || mesa < 1)) {
       if (mounted) AppSnackbar.error(context, 'Ingresa un numero de mesa valido');
       return;
     }
 
     ref.read(loadingProvider.notifier).state = true;
     try {
-      await ApiService.createPedido({
-        'mesa': mesa,
-        'productos': cart.map((i) => {
+      final productos = cart.map((i) => {
           'producto_id': i.productoId,
           'cantidad':    i.cantidad,
           'nota':        i.nota,
-        }).toList(),
-      });
+        }).toList();
+
+      if (pedidoId == null) {
+        await ApiService.createPedido({
+          'mesa': mesa,
+          'tipo': tipo,
+          'comensal': comensal?.trim().isEmpty == true ? null : comensal?.trim(),
+          'productos': productos,
+        });
+      } else {
+        await ApiService.agregarProductos(pedidoId, {
+          'tipo': tipo,
+          'productos': productos,
+        });
+      }
       ref.read(cartProvider.notifier).clear();
       _mesaCtrl.clear();
-      if (mounted) AppSnackbar.ok(context, 'Pedido enviado — Mesa $mesa');
+      final destino = pedidoId == null
+          ? (tipo == 'llevar' ? 'Para llevar' : 'Mesa $mesa')
+          : 'Pedido #$pedidoId';
+      if (mounted) AppSnackbar.ok(
+        context,
+        pedidoId == null
+            ? 'Pedido enviado — $destino'
+            : 'Productos agregados — $destino',
+      );
       await _loadData();
     } catch (e) {
       if (mounted) AppSnackbar.error(context, e.toString());
@@ -129,7 +159,7 @@ class _MeseroScreenState extends ConsumerState<MeseroScreen> {
     }
   }
 
-  void _mostrarCarrito() {
+  void _mostrarCarrito({Pedido? pedido}) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -137,13 +167,26 @@ class _MeseroScreenState extends ConsumerState<MeseroScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => _CarritoSheet(mesaCtrl: _mesaCtrl, onEnviar: _enviarPedido),
+      builder: (_) => _CarritoSheet(
+        mesaCtrl: _mesaCtrl,
+        pedido: pedido,
+        onEnviar: _enviarPedido,
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final productos = ref.watch(productosProvider).where((p) => p.activo).toList();
+    final todosProductos = ref.watch(productosProvider).where((p) => p.activo).toList();
+    final categorias = <String>[
+      'Todas',
+      ...{for (final producto in todosProductos) producto.categoria},
+    ];
+    final productos = todosProductos.where((p) {
+      final coincideCategoria = _categoria == 'Todas' || p.categoria == _categoria;
+      final coincideBusqueda = p.nombre.toLowerCase().contains(_query.toLowerCase());
+      return coincideCategoria && coincideBusqueda;
+    }).toList();
     final pedidos   = ref.watch(pedidosProvider)
         .where((p) => p.estado != 'pagado' && p.estado != 'cancelado')
         .toList();
@@ -161,7 +204,7 @@ class _MeseroScreenState extends ConsumerState<MeseroScreen> {
           Stack(children: [
             IconButton(
               icon: const Icon(Icons.shopping_cart_outlined),
-              onPressed: _mostrarCarrito,
+              onPressed: () => _mostrarCarrito(),
             ),
             if (cartCount > 0)
               Positioned(
@@ -202,6 +245,32 @@ class _MeseroScreenState extends ConsumerState<MeseroScreen> {
                     fontWeight: FontWeight.w700, letterSpacing: 1,
                   )),
                 const SizedBox(height: 12),
+                TextField(
+                  controller: _searchCtrl,
+                  onChanged: (value) => setState(() => _query = value.trim()),
+                  decoration: const InputDecoration(
+                    hintText: 'Buscar producto',
+                    prefixIcon: Icon(Icons.search, size: 20),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: 38,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: categorias.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    itemBuilder: (_, index) {
+                      final categoria = categorias[index];
+                      return ChoiceChip(
+                        label: Text(categoria),
+                        selected: _categoria == categoria,
+                        onSelected: (_) => setState(() => _categoria = categoria),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 12),
                 if (productos.isEmpty)
                   const Center(
                     child: Padding(
@@ -239,11 +308,19 @@ class _MeseroScreenState extends ConsumerState<MeseroScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text(p.nombre,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600, fontSize: 13),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(p.nombre,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600, fontSize: 13),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis),
+                                  Text(p.categoria,
+                                    style: const TextStyle(
+                                      color: AppColors.muted, fontSize: 10)),
+                                ],
+                              ),
                               Text('\$${p.precio.toStringAsFixed(2)}',
                                 style: const TextStyle(
                                   color: AppColors.amber,
@@ -287,13 +364,13 @@ class _MeseroScreenState extends ConsumerState<MeseroScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(children: [
-                            Text('Mesa ${p.mesa}',
+                            Text(p.tipo == 'llevar' ? 'Para llevar' : 'Mesa ${p.mesa}',
                               style: const TextStyle(fontWeight: FontWeight.w700)),
                             const SizedBox(width: 8),
                             BadgeEstado(p.estado),
                           ]),
                           const SizedBox(height: 4),
-                          Text('#${p.id}',
+                          Text('#${p.id}${p.comensal == null ? '' : ' · ${p.comensal}'}',
                             style: const TextStyle(
                               color: AppColors.muted, fontSize: 12)),
                         ],
@@ -301,22 +378,33 @@ class _MeseroScreenState extends ConsumerState<MeseroScreen> {
                       Text('\$${p.total.toStringAsFixed(2)}',
                         style: const TextStyle(
                           color: AppColors.amber, fontWeight: FontWeight.w700)),
-                      if (p.isListo) ...[
-                        const SizedBox(width: 8),
-                        ElevatedButton(
-                          onPressed: () => _cobrar(p.id),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 8)),
-                          child: const Text('Cobrar',
-                            style: TextStyle(fontSize: 12)),
-                        ),
-                      ],
-                      const SizedBox(width: 6),
-                      IconButton(
-                        icon: const Icon(Icons.close,
-                          color: AppColors.danger, size: 18),
-                        onPressed: () => _cancelar(p.id),
+                      PopupMenuButton<String>(
+                        tooltip: 'Acciones del pedido',
+                        onSelected: (value) {
+                          if (value == 'agregar') {
+                            _mostrarCarrito(pedido: p);
+                          } else if (value == 'cobrar') {
+                            _cobrar(p.id);
+                          } else if (value == 'cancelar') {
+                            _cancelar(p.id);
+                          }
+                        },
+                        itemBuilder: (_) => [
+                          if (!p.isListo)
+                            const PopupMenuItem(
+                              value: 'agregar',
+                              child: Text('Agregar productos'),
+                            ),
+                          if (p.isListo)
+                            const PopupMenuItem(
+                              value: 'cobrar',
+                              child: Text('Cobrar pedido'),
+                            ),
+                          const PopupMenuItem(
+                            value: 'cancelar',
+                            child: Text('Cancelar pedido'),
+                          ),
+                        ],
                       ),
                     ]),
                   )),
@@ -329,6 +417,7 @@ class _MeseroScreenState extends ConsumerState<MeseroScreen> {
   @override
   void dispose() {
     _mesaCtrl.dispose();
+    _searchCtrl.dispose();
     SocketService.off('nuevo_pedido');
     SocketService.off('pedido_actualizado');
     super.dispose();
@@ -336,13 +425,33 @@ class _MeseroScreenState extends ConsumerState<MeseroScreen> {
 }
 
 // ── Carrito BottomSheet ──────────────────────────────────────
-class _CarritoSheet extends ConsumerWidget {
+class _CarritoSheet extends ConsumerStatefulWidget {
   final TextEditingController mesaCtrl;
-  final VoidCallback          onEnviar;
-  const _CarritoSheet({required this.mesaCtrl, required this.onEnviar});
+  final Pedido? pedido;
+  final Future<void> Function(String tipo, String? comensal, int? pedidoId) onEnviar;
+  const _CarritoSheet({
+    required this.mesaCtrl,
+    required this.onEnviar,
+    this.pedido,
+  });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_CarritoSheet> createState() => _CarritoSheetState();
+}
+
+class _CarritoSheetState extends ConsumerState<_CarritoSheet> {
+  final _comensalCtrl = TextEditingController();
+  String _tipo = 'aqui';
+
+  @override
+  void initState() {
+    super.initState();
+    _tipo = widget.pedido?.tipo ?? 'aqui';
+    _comensalCtrl.text = widget.pedido?.comensal ?? '';
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final cart  = ref.watch(cartProvider);
     final total = cart.fold(0.0, (sum, i) => sum + i.subtotal);
 
@@ -368,8 +477,8 @@ class _CarritoSheet extends ConsumerWidget {
             child: Row(children: [
               const Icon(Icons.shopping_cart_outlined, color: AppColors.amber),
               const SizedBox(width: 10),
-              const Text('Carrito',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+              Text(widget.pedido == null ? 'Nuevo pedido' : 'Pedido #${widget.pedido!.id}',
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
               const Spacer(),
               TextButton(
                 onPressed: () => ref.read(cartProvider.notifier).clear(),
@@ -378,14 +487,68 @@ class _CarritoSheet extends ConsumerWidget {
               ),
             ]),
           ),
+          if (widget.pedido == null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: TextField(
+                controller: widget.mesaCtrl,
+                enabled: _tipo == 'aqui',
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Mesa #',
+                  prefixIcon: Icon(Icons.table_restaurant_outlined, size: 18),
+                ),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  widget.pedido!.tipo == 'llevar'
+                      ? 'Agregar a pedido para llevar'
+                      : 'Agregar a Mesa ${widget.pedido!.mesa}',
+                  style: const TextStyle(color: AppColors.muted),
+                ),
+              ),
+            ),
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(children: [
+              Expanded(
+                child: ChoiceChip(
+                  label: const Text('Comer aquí'),
+                  selected: _tipo == 'aqui',
+                  onSelected: widget.pedido == null
+                      ? (_) => setState(() => _tipo = 'aqui')
+                      : null,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ChoiceChip(
+                  label: const Text('Para llevar'),
+                  selected: _tipo == 'llevar',
+                  onSelected: widget.pedido == null
+                      ? (_) => setState(() => _tipo = 'llevar')
+                      : null,
+                ),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 10),
+          if (widget.pedido == null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: TextField(
-              controller: mesaCtrl,
-              keyboardType: TextInputType.number,
+              controller: _comensalCtrl,
+              maxLength: 50,
               decoration: const InputDecoration(
-                labelText: 'Mesa #',
-                prefixIcon: Icon(Icons.table_restaurant_outlined, size: 18),
+                labelText: 'Nombre o etiqueta (opcional)',
+                prefixIcon: Icon(Icons.person_outline, size: 18),
+                counterText: '',
               ),
             ),
           ),
@@ -446,7 +609,9 @@ class _CarritoSheet extends ConsumerWidget {
                             const Spacer(),
                             SizedBox(
                               width: 130,
-                              child: TextField(
+                              child: TextFormField(
+                                key: ValueKey('nota-${item.productoId}'),
+                                initialValue: item.nota,
                                 onChanged: (v) => ref.read(cartProvider.notifier)
                                     .setNota(item.productoId, v),
                                 style: const TextStyle(fontSize: 12),
@@ -487,10 +652,12 @@ class _CarritoSheet extends ConsumerWidget {
                 child: ElevatedButton.icon(
                   onPressed: () {
                     Navigator.pop(context);
-                    onEnviar();
+                    widget.onEnviar(_tipo, _comensalCtrl.text, widget.pedido?.id);
                   },
                   icon: const Icon(Icons.send),
-                  label: const Text('Enviar Pedido a Cocina'),
+                  label: Text(widget.pedido == null
+                      ? 'Enviar pedido a cocina'
+                      : 'Agregar productos'),
                 ),
               ),
             ]),
@@ -498,5 +665,11 @@ class _CarritoSheet extends ConsumerWidget {
         ]),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _comensalCtrl.dispose();
+    super.dispose();
   }
 }

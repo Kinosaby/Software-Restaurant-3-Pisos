@@ -92,6 +92,7 @@ async function doLogin() {
   try {
     const res = await api.auth.login(username, password);
     Auth.set(res);
+    initSocket();
     btn.disabled = false;
     btn.textContent = 'INGRESAR';
     updateTopbar();
@@ -213,7 +214,10 @@ function sendWebNotification(title, body) {
 function initSocket() {
   if (State.socket) return;
   // socket.io se carga desde CDN en el HTML
-  const s = io({ transports: ['websocket','polling'] });
+  const s = io({
+    transports: ['websocket','polling'],
+    auth: { token: Auth.token },
+  });
   State.socket = s;
 
   s.on('connect', () => {
@@ -223,6 +227,15 @@ function initSocket() {
 
   s.on('disconnect', () => {
     document.getElementById('socket-dot').className = 'socket-dot disconnected';
+  });
+
+  s.on('connect_error', (error) => {
+    document.getElementById('socket-dot').className = 'socket-dot disconnected';
+    if (error.message === 'NO_TOKEN' || error.message === 'INVALID_TOKEN') {
+      Auth.clear();
+      hideTopbar();
+      go('screen-login');
+    }
   });
 
   s.on('nuevo_pedido', (pedido) => {
@@ -313,7 +326,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('form-pedido').addEventListener('submit', e => { e.preventDefault(); submitPedido(); });
 
   checkSession();
-  initSocket();
 
   if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
     Notification.requestPermission();

@@ -1,6 +1,7 @@
 // lib/core/models/pedido.dart
 
 class DetallePedido {
+  final int    id;
   final int    productoId;
   final String nombre;
   final int    cantidad;
@@ -8,6 +9,7 @@ class DetallePedido {
   final String nota;
 
   DetallePedido({
+    required this.id,
     required this.productoId,
     required this.nombre,
     required this.cantidad,
@@ -16,6 +18,7 @@ class DetallePedido {
   });
 
   factory DetallePedido.fromJson(Map<String, dynamic> j) => DetallePedido(
+    id:         j['id']          ?? 0,
     productoId: j['producto_id'] ?? 0,
     nombre:     j['nombre']      ?? '',
     cantidad:   j['cantidad']    ?? 1,
@@ -29,6 +32,8 @@ class Pedido {
   final int              mesa;
   final String           estado;
   final double           total;
+  final String           tipo;
+  final String?          comensal;
   final DateTime         creadoEn;
   final List<DetallePedido> productos;
 
@@ -37,6 +42,8 @@ class Pedido {
     required this.mesa,
     required this.estado,
     required this.total,
+    required this.tipo,
+    this.comensal,
     required this.creadoEn,
     required this.productos,
   });
@@ -52,6 +59,8 @@ class Pedido {
       mesa:      j['mesa']  ?? 0,
       estado:    j['estado'] ?? 'pendiente',
       total:     double.tryParse(j['total'].toString()) ?? 0,
+      tipo:      j['tipo']?.toString() ?? 'aqui',
+      comensal:  j['comensal']?.toString(),
       creadoEn:  DateTime.tryParse(j['creado_en'] ?? '') ?? DateTime.now(),
       productos: prods,
     );

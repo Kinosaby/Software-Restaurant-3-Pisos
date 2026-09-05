@@ -3,6 +3,12 @@ const bcrypt = require('bcryptjs');
 
 async function cleanAndReset() {
   try {
+    if (process.env.CONFIRM_RESET !== 'RESET_3_PISOS') {
+      throw new Error('Operación cancelada. Define CONFIRM_RESET=RESET_3_PISOS para confirmar.');
+    }
+    if (!process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD.length < 8) {
+      throw new Error('Configura ADMIN_PASSWORD con al menos 8 caracteres.');
+    }
     console.log('--- 🧹 Limpiando Sistema para Cliente Nuevo ---');
 
     // 1. Limpiar pedidos y detalles (Primero detalles por FK)
@@ -20,12 +26,12 @@ async function cleanAndReset() {
     // Asegurar que admin tenga la contraseña por defecto si fue borrado
     const adminCheck = await pool.query('SELECT * FROM usuarios WHERE username = $1', ['admin']);
     if (adminCheck.rows.length === 0) {
-        const hashedPass = await bcrypt.hash('admin123', 10);
+        const hashedPass = await bcrypt.hash(process.env.ADMIN_PASSWORD, 12);
         await pool.query(
             'INSERT INTO usuarios (username, password, role) VALUES ($1, $2, $3)',
             ['admin', hashedPass, 'admin']
         );
-        console.log('✅ Usuario administrador recreado (admin / admin123).');
+        console.log('✅ Usuario administrador recreado.');
     } else {
         console.log('✅ Usuario administrador conservado.');
     }
@@ -39,7 +45,7 @@ async function cleanAndReset() {
     console.log('\n--- ✨ Sistema listo para entrega ---');
     console.log('Acceso inicial:');
     console.log('Usuario: admin');
-    console.log('Password: admin123');
+    console.log('Password: valor configurado en ADMIN_PASSWORD');
     
     process.exit(0);
   } catch (error) {

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'core/services/api_service.dart';
 import 'core/services/auth_service.dart';
+import 'core/services/socket_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/login_screen.dart';
 import 'features/menu/role_menu_screen.dart';
@@ -14,6 +15,10 @@ import 'features/admin/admin_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await ApiService.init();
+  ApiService.onUnauthorized = () {
+    SocketService.disconnect();
+    _router.go('/login');
+  };
   runApp(const ProviderScope(child: TresPisosApp()));
 }
 
@@ -23,10 +28,24 @@ final _router = GoRouter(
     final loggedIn = await AuthService.isLoggedIn();
     final isLogin  = state.matchedLocation == '/login';
     if (!loggedIn && !isLogin) return '/login';
-    if (loggedIn && isLogin) {
-      final role = await AuthService.getRole();
-      return switch (role) { 'mesero' => '/mesero', 'cocina' => '/cocina', _ => '/menu' };
+    if (!loggedIn) return null;
+
+    final role = await AuthService.getRole();
+    final home = switch (role) {
+      'mesero' => '/mesero',
+      'cocina' => '/cocina',
+      'admin' => '/menu',
+      _ => '/login',
+    };
+
+    if (!['admin', 'mesero', 'cocina'].contains(role)) {
+      await AuthService.clearSession();
+      return '/login';
     }
+    if (isLogin) return home;
+    if (state.matchedLocation == '/admin' && role != 'admin') return home;
+    if (state.matchedLocation == '/mesero' && role == 'cocina') return home;
+    if (state.matchedLocation == '/cocina' && role == 'mesero') return home;
     return null;
   },
   routes: [

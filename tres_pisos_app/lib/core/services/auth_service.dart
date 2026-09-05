@@ -17,7 +17,12 @@ class AuthService {
   static Future<Map<String, dynamic>?> getUser() async {
     final raw = await _storage.read(key: _userKey);
     if (raw == null) return null;
-    return jsonDecode(raw) as Map<String, dynamic>;
+    try {
+      return Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    } catch (_) {
+      await clearSession();
+      return null;
+    }
   }
 
   static Future<void> clearSession() async {
@@ -26,7 +31,8 @@ class AuthService {
 
   static Future<bool> isLoggedIn() async {
     final token = await getToken();
-    return token != null && token.isNotEmpty;
+    final user = await getUser();
+    return token != null && token.isNotEmpty && user != null;
   }
 
   /// Devuelve el rol del usuario guardado ('admin', 'mesero', 'cocina')

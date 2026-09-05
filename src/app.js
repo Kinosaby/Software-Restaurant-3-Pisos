@@ -10,6 +10,7 @@ const express       = require('express');
 const cors          = require('cors');
 const path          = require('path');
 const env           = require('./config/env');
+const pool          = require('./config/db');
 const logger        = require('./utils/logger');
 
 // Rutas
@@ -21,8 +22,15 @@ const metricasRoutes = require('./routes/metricas');
 // Middlewares
 const errorMiddleware = require('./middlewares/error.middleware');
 const AppError        = require('./utils/AppError');
+const asyncHandler    = require('./utils/asyncHandler');
 
 const app = express();
+
+// Railway termina HTTPS en su proxy. Esto permite obtener la IP real y aplicar
+// correctamente el límite de intentos de inicio de sesión.
+if (env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
 
 // ── Seguridad ────────────────────────────────────────────────────────────────
 // (helmet requiere instalación: npm install helmet)
@@ -69,14 +77,15 @@ app.use('/api/pedidos',   pedidosRoutes);
 app.use('/api/metricas',  metricasRoutes);
 
 // ── Health check ──────────────────────────────────────────────────────────────
-const healthHandler = (req, res) => {
+const healthHandler = asyncHandler(async (req, res) => {
+  await pool.query('SELECT 1');
   res.json({
     success: true,
     status: 'ok',
     timestamp: new Date().toISOString(),
     env: env.NODE_ENV,
   });
-};
+});
 app.get('/health',      healthHandler);
 app.get('/api/health',  healthHandler);
 
