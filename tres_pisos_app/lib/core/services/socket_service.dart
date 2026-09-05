@@ -1,10 +1,10 @@
 // lib/core/services/socket_service.dart
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:socket_io_client/socket_io_client.dart' as sio;
 import '../constants/api_constants.dart';
 import 'auth_service.dart';
 
 class SocketService {
-  static IO.Socket? _socket;
+  static sio.Socket? _socket;
   static bool _connected = false;
 
   static Future<void> connect() async {
@@ -12,9 +12,9 @@ class SocketService {
     final token = await AuthService.getToken();
     if (token == null || token.isEmpty) return;
 
-    _socket = IO.io(
+    _socket = sio.io(
       ApiConstants.baseUrl,
-      IO.OptionBuilder()
+      sio.OptionBuilder()
           .setTransports(['websocket', 'polling'])
           .setAuth({'token': token})
           .disableAutoConnect()

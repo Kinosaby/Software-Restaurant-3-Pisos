@@ -109,12 +109,14 @@ class _MeseroScreenState extends ConsumerState<MeseroScreen> {
       final destino = pedidoId == null
           ? (tipo == 'llevar' ? 'Para llevar' : 'Mesa $mesa')
           : 'Pedido #$pedidoId';
-      if (mounted) AppSnackbar.ok(
-        context,
-        pedidoId == null
-            ? 'Pedido enviado — $destino'
-            : 'Productos agregados — $destino',
-      );
+      if (mounted) {
+        AppSnackbar.ok(
+          context,
+          pedidoId == null
+              ? 'Pedido enviado — $destino'
+              : 'Productos agregados — $destino',
+        );
+      }
       await _loadData();
     } catch (e) {
       if (mounted) AppSnackbar.error(context, e.toString());
