@@ -3,6 +3,7 @@
  * Exporta una función que recibe el servidor HTTP y devuelve io.
  */
 const { Server } = require('socket.io');
+const jwt        = require('jsonwebtoken');
 const logger     = require('../utils/logger');
 const env        = require('../config/env');
 
@@ -16,14 +17,29 @@ function initSocket(httpServer) {
     transports: ['websocket', 'polling'],
   });
 
-  io.on('connection', (socket) => {
-    logger.info('Socket conectado', { socketId: socket.id });
+  io.use((socket, next) => {
+    const authToken = socket.handshake.auth?.token;
+    const header = socket.handshake.headers?.authorization;
+    const headerToken = header?.startsWith('Bearer ') ? header.slice(7).trim() : header;
+    const token = authToken || headerToken;
 
-    // El cliente puede suscribirse a una sala por rol
-    socket.on('join_room', (room) => {
-      socket.join(room);
-      logger.debug('Socket entró a sala', { socketId: socket.id, room });
-    });
+    if (!token) {
+      return next(new Error('NO_TOKEN'));
+    }
+
+    try {
+      socket.data.user = jwt.verify(token, env.JWT_SECRET);
+      return next();
+    } catch (_) {
+      return next(new Error('INVALID_TOKEN'));
+    }
+  });
+
+  io.on('connection', (socket) => {
+    const { id: userId, role } = socket.data.user;
+    socket.join(`role:${role}`);
+    socket.join(`user:${userId}`);
+    logger.info('Socket conectado', { socketId: socket.id, userId, role });
 
     socket.on('disconnect', (reason) => {
       logger.debug('Socket desconectado', { socketId: socket.id, reason });

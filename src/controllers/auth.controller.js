@@ -35,7 +35,7 @@ exports.actualizarUsuario = asyncHandler(async (req, res) => {
 
 /** DELETE /api/auth/:id  (solo admin) */
 exports.eliminarUsuario = asyncHandler(async (req, res) => {
-  const user = await authService.eliminarUsuario(req.params.id);
+  const user = await authService.eliminarUsuario(req.params.id, req.user.id);
   res.json({ success: true, mensaje: 'Usuario eliminado', user });
 });
 

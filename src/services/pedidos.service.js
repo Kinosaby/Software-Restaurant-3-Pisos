@@ -15,53 +15,66 @@ const logger  = require('../utils/logger');
 
 const ESTADOS_VALIDOS = ['pendiente', 'preparando', 'listo', 'cancelado', 'pagado'];
 
-/** Construye un pedido completo con su detalle mediante JSON aggregation */
-const QUERY_DETALLE = `
-  SELECT p.*,
-         COALESCE(
-           json_agg(
-             json_build_object(
-               'id',          pd.id,
-               'producto_id', pd.producto_id,
-               'nombre',      pr.nombre,
-               'cantidad',    pd.cantidad,
-               'nota',        pd.nota,
-               'precio',      pr.precio
-             )
-           ) FILTER (WHERE pd.id IS NOT NULL),
-           '[]'::json
-         ) AS productos
-  FROM pedidos p
-  LEFT JOIN pedido_detalle pd ON pd.pedido_id = p.id
-  LEFT JOIN productos pr      ON pr.id = pd.producto_id
-`;
+async function adjuntarDetalles(pedidos) {
+  if (pedidos.length === 0) return pedidos;
+
+  const ids = pedidos.map((pedido) => pedido.id);
+  const placeholders = ids.map((_, index) => `$${index + 1}`).join(', ');
+  const { rows: detalles } = await pool.query(
+    `SELECT pd.id,
+            pd.pedido_id,
+            pd.producto_id,
+            pr.nombre,
+            pd.cantidad,
+            pd.nota,
+            COALESCE(pd.precio_unitario, pr.precio) AS precio
+     FROM pedido_detalle pd
+     JOIN productos pr ON pr.id = pd.producto_id
+     WHERE pd.pedido_id IN (${placeholders})
+     ORDER BY pd.id ASC`,
+    ids
+  );
+
+  const porPedido = new Map();
+  for (const detalle of detalles) {
+    const lista = porPedido.get(detalle.pedido_id) || [];
+    lista.push(detalle);
+    porPedido.set(detalle.pedido_id, lista);
+  }
+
+  return pedidos.map((pedido) => ({
+    ...pedido,
+    productos: porPedido.get(pedido.id) || [],
+  }));
+}
 
 /** Devuelve todos los pedidos con su detalle, orden FIFO (más antiguo primero) */
 async function listar({ estado } = {}) {
-  let query  = QUERY_DETALLE;
+  let query  = 'SELECT * FROM pedidos';
   const params = [];
 
   if (estado && ESTADOS_VALIDOS.includes(estado)) {
-    query += ' WHERE p.estado = $1';
+    query += ' WHERE estado = $1';
     params.push(estado);
   }
 
   // FIFO: el pedido más antiguo aparece primero en cocina
-  query += ' GROUP BY p.id ORDER BY p.creado_en ASC, p.id ASC';
+  query += ' ORDER BY creado_en ASC, id ASC';
   const { rows } = await pool.query(query, params);
-  return rows;
+  return adjuntarDetalles(rows);
 }
 
 /** Devuelve un pedido por id con su detalle */
 async function obtenerPorId(id) {
   const { rows } = await pool.query(
-    QUERY_DETALLE + ' WHERE p.id = $1 GROUP BY p.id',
+    'SELECT * FROM pedidos WHERE id = $1',
     [id]
   );
   if (rows.length === 0) {
     throw new AppError('Pedido no encontrado.', 404, 'ORDER_NOT_FOUND');
   }
-  return rows[0];
+  const [pedido] = await adjuntarDetalles(rows);
+  return pedido;
 }
 
 /**
@@ -79,15 +92,17 @@ async function crear({ mesa, productos, tipo = 'aqui', comensal = null, usuario_
 
     // Verificar productos y calcular total
     let total = 0;
+    const precios = new Map();
     for (const item of productos) {
       const { rows } = await client.query(
-        'SELECT precio FROM productos WHERE id = $1 AND activo = true',
+        'SELECT id, precio FROM productos WHERE id = $1 AND activo = true',
         [item.producto_id]
       );
       if (rows.length === 0) {
         throw new AppError(`Producto ${item.producto_id} no existe o está inactivo.`, 400, 'PRODUCT_NOT_FOUND');
       }
       total += parseFloat(rows[0].precio) * item.cantidad;
+      precios.set(item.producto_id, rows[0].precio);
     }
 
     // Insertar pedido
@@ -101,9 +116,16 @@ async function crear({ mesa, productos, tipo = 'aqui', comensal = null, usuario_
     // Insertar detalle
     for (const item of productos) {
       await client.query(
-        `INSERT INTO pedido_detalle (pedido_id, producto_id, cantidad, nota)
-         VALUES ($1, $2, $3, $4)`,
-        [pedido.id, item.producto_id, item.cantidad, item.nota || null]
+        `INSERT INTO pedido_detalle
+           (pedido_id, producto_id, cantidad, precio_unitario, nota)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          pedido.id,
+          item.producto_id,
+          item.cantidad,
+          precios.get(item.producto_id),
+          item.nota || null,
+        ]
       );
     }
 
@@ -133,12 +155,15 @@ async function agregarProductos(id, { productos, tipo }, io = null) {
   }
 
   const pedido = await obtenerPorId(id);
-  // Permitir agregar a cualquier estado excepto cancelado
-  if (pedido.estado === 'cancelado') {
-    throw new AppError('No se puede modificar un pedido cancelado.', 400, 'INVALID_STATUS');
+  if (['pagado', 'cancelado'].includes(pedido.estado)) {
+    throw new AppError(
+      'No se puede modificar un pedido pagado o cancelado.',
+      400,
+      'INVALID_STATUS'
+    );
   }
 
-  const esExtra = ['listo', 'pagado'].includes(pedido.estado);
+  const esExtra = pedido.estado === 'listo';
 
   const client = await pool.connect();
   try {
@@ -165,9 +190,14 @@ async function agregarProductos(id, { productos, tipo }, io = null) {
         precio:   prod.precio,
       });
 
+      const nota = item.nota || null;
       const { rows: existing } = await client.query(
-        'SELECT id, cantidad FROM pedido_detalle WHERE pedido_id = $1 AND producto_id = $2',
-        [id, item.producto_id]
+        `SELECT id, cantidad
+         FROM pedido_detalle
+         WHERE pedido_id = $1
+           AND producto_id = $2
+           AND COALESCE(nota, '') = COALESCE($3, '')`,
+        [id, item.producto_id, nota]
       );
 
       if (existing.length > 0) {
@@ -177,8 +207,10 @@ async function agregarProductos(id, { productos, tipo }, io = null) {
         );
       } else {
         await client.query(
-          'INSERT INTO pedido_detalle (pedido_id, producto_id, cantidad, nota) VALUES ($1, $2, $3, $4)',
-          [id, item.producto_id, item.cantidad, item.nota || null]
+          `INSERT INTO pedido_detalle
+             (pedido_id, producto_id, cantidad, precio_unitario, nota)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [id, item.producto_id, item.cantidad, prod.precio, nota]
         );
       }
     }
@@ -201,6 +233,7 @@ async function agregarProductos(id, { productos, tipo }, io = null) {
           pedido_id: id,
           mesa:      pedido.mesa,
           tipo:      tipo || pedido.tipo || 'aqui',
+          comensal:  pedido.comensal,
           items:     itemsNuevos,
           total_extra: totalExtra,
         });
@@ -220,8 +253,36 @@ async function agregarProductos(id, { productos, tipo }, io = null) {
   }
 }
 
-/** Cambia el estado del pedido. Socket se emite SIEMPRE; ventas en try/catch propio. */
-async function cambiarEstado(id, estado, io = null) {
+const TRANSICIONES = {
+  pendiente:  ['preparando', 'cancelado'],
+  preparando: ['pendiente', 'listo', 'cancelado'],
+  listo:      ['preparando', 'pagado', 'cancelado'],
+  pagado:     [],
+  cancelado:  [],
+};
+
+const TRANSICIONES_POR_ROL = {
+  cocina: {
+    pendiente: ['preparando'],
+    preparando: ['listo'],
+  },
+  mesero: {
+    pendiente: ['cancelado'],
+    preparando: ['cancelado'],
+    listo: ['pagado', 'cancelado'],
+  },
+};
+
+function puedeCambiarEstado(actual, siguiente, actorRole) {
+  if (actual === siguiente) return true;
+  const permitidas = actorRole === 'admin'
+    ? (TRANSICIONES[actual] || [])
+    : (TRANSICIONES_POR_ROL[actorRole]?.[actual] || []);
+  return permitidas.includes(siguiente);
+}
+
+/** Cambia el estado del pedido y registra la venta de forma atómica al cobrar. */
+async function cambiarEstado(id, estado, io = null, actorRole = 'admin') {
   if (!ESTADOS_VALIDOS.includes(estado)) {
     throw new AppError(
       `Estado inválido. Valores permitidos: ${ESTADOS_VALIDOS.join(', ')}.`,
@@ -229,42 +290,75 @@ async function cambiarEstado(id, estado, io = null) {
     );
   }
 
-  const { rows } = await pool.query(
-    'UPDATE pedidos SET estado = $1 WHERE id = $2 RETURNING *',
-    [estado, id]
-  );
-  if (rows.length === 0) {
-    throw new AppError('Pedido no encontrado.', 404, 'ORDER_NOT_FOUND');
-  }
+  const client = await pool.connect();
+  let pedido;
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      'SELECT * FROM pedidos WHERE id = $1 FOR UPDATE',
+      [id]
+    );
+    if (rows.length === 0) {
+      throw new AppError('Pedido no encontrado.', 404, 'ORDER_NOT_FOUND');
+    }
 
-  logger.info('Estado actualizado', { pedidoId: id, estado });
+    pedido = rows[0];
+    if (pedido.estado === estado) {
+      await client.query('COMMIT');
+      return obtenerPorId(id);
+    }
 
-  // Emitir socket PRIMERO — antes de intentar registrar la venta
-  const actualizado = await obtenerPorId(id);
-  if (io) io.emit('pedido_actualizado', actualizado);
+    if (!puedeCambiarEstado(pedido.estado, estado, actorRole)) {
+      throw new AppError(
+        `El rol ${actorRole} no puede cambiar un pedido de ${pedido.estado} a ${estado}.`,
+        403,
+        'INVALID_STATUS_TRANSITION'
+      );
+    }
 
-  // Registrar en ventas en try/catch propio — no bloquea la respuesta
-  // Se registra en listo Y en pagado para cubrir todos los flujos.
-  // DO UPDATE garantiza que el total final siempre sea correcto.
-  if (estado === 'listo' || estado === 'pagado') {
-    try {
-      await pool.query(
+    const { rows: [actualizadoBase] } = await client.query(
+      'UPDATE pedidos SET estado = $1 WHERE id = $2 RETURNING *',
+      [estado, id]
+    );
+
+    if (estado === 'pagado') {
+      await client.query(
         `INSERT INTO ventas (pedido_id, total, fecha)
          VALUES ($1, $2, NOW())
-         ON CONFLICT (pedido_id) DO UPDATE SET total = EXCLUDED.total`,
-        [id, rows[0].total]
+         ON CONFLICT (pedido_id)
+         DO UPDATE SET total = EXCLUDED.total, fecha = EXCLUDED.fecha`,
+        [id, actualizadoBase.total]
       );
-    } catch (e) {
-      logger.error('Error registrando venta (no critico)', { pedidoId: id, error: e.message });
     }
+
+    if (estado === 'cancelado') {
+      await client.query('DELETE FROM ventas WHERE pedido_id = $1', [id]);
+    }
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
   }
+
+  logger.info('Estado actualizado', {
+    pedidoId: id,
+    anterior: pedido.estado,
+    estado,
+    actorRole,
+  });
+
+  const actualizado = await obtenerPorId(id);
+  if (io) io.emit('pedido_actualizado', actualizado);
 
   return actualizado;
 }
 
 /** Cancela el pedido */
-async function cancelar(id, io = null) {
-  return cambiarEstado(id, 'cancelado', io);
+async function cancelar(id, io = null, actorRole = 'mesero') {
+  return cambiarEstado(id, 'cancelado', io, actorRole);
 }
 
 /** Elimina un pedido (admin). Usa CASCADE en BD. */
@@ -348,7 +442,7 @@ async function editarPedido(id, { items, mesa, tipo, comensal }, io = null) {
 
     // 3. Recalcular total desde cero sumando precio * cantidad del detalle actual
     const { rows: detalles } = await client.query(
-      `SELECT pd.cantidad, pr.precio
+      `SELECT pd.cantidad, COALESCE(pd.precio_unitario, pr.precio) AS precio
        FROM pedido_detalle pd
        JOIN productos pr ON pr.id = pd.producto_id
        WHERE pd.pedido_id = $1`,
@@ -384,4 +478,15 @@ async function editarPedido(id, { items, mesa, tipo, comensal }, io = null) {
   }
 }
 
-module.exports = { listar, obtenerPorId, crear, agregarProductos, editarPedido, cambiarEstado, cancelar, eliminar, ESTADOS_VALIDOS };
+module.exports = {
+  listar,
+  obtenerPorId,
+  crear,
+  agregarProductos,
+  editarPedido,
+  cambiarEstado,
+  cancelar,
+  eliminar,
+  puedeCambiarEstado,
+  ESTADOS_VALIDOS,
+};

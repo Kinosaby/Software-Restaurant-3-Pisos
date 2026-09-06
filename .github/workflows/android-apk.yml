@@ -1,0 +1,46 @@
+name: Generar APK Android
+on:
+  push:
+    branches: [app-android]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tres_pisos_app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Empaquetar web completa sin CDN
+        working-directory: .
+        run: |
+          npm ci
+          node scripts/build-android-web.mjs
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+          channel: stable
+          cache: true
+      - name: Instalar dependencias
+        run: flutter pub get
+      - name: Analizar código
+        run: flutter analyze
+      - name: Ejecutar pruebas
+        run: flutter test
+      - name: Compilar APK local
+        run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tres-pisos-android-local
+          path: tres_pisos_app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error

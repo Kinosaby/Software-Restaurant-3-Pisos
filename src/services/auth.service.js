@@ -74,6 +74,27 @@ async function listarUsuarios() {
 
 /** Actualiza usuario; opcionalmente cambia contraseña */
 async function actualizarUsuario(id, { username, password, role }) {
+  const { rows: actuales } = await pool.query(
+    'SELECT id, role FROM usuarios WHERE id = $1',
+    [id]
+  );
+  if (actuales.length === 0) {
+    throw new AppError('Usuario no encontrado.', 404, 'USER_NOT_FOUND');
+  }
+
+  if (actuales[0].role === 'admin' && role !== 'admin') {
+    const { rows: [{ count }] } = await pool.query(
+      "SELECT COUNT(*)::int AS count FROM usuarios WHERE role = 'admin'"
+    );
+    if (count <= 1) {
+      throw new AppError(
+        'No puedes quitar el rol al último administrador.',
+        409,
+        'LAST_ADMIN'
+      );
+    }
+  }
+
   let query  = 'UPDATE usuarios SET username = $1, role = $2';
   let params = [username, role];
 
@@ -86,7 +107,15 @@ async function actualizarUsuario(id, { username, password, role }) {
     params.push(id);
   }
 
-  const result = await pool.query(query, params);
+  let result;
+  try {
+    result = await pool.query(query, params);
+  } catch (err) {
+    if (err.code === '23505') {
+      throw new AppError('El nombre de usuario ya existe.', 409, 'DUPLICATE_USER');
+    }
+    throw err;
+  }
   if (result.rows.length === 0) {
     throw new AppError('Usuario no encontrado.', 404, 'USER_NOT_FOUND');
   }
@@ -94,15 +123,48 @@ async function actualizarUsuario(id, { username, password, role }) {
 }
 
 /** Elimina un usuario */
-async function eliminarUsuario(id) {
-  const result = await pool.query(
-    'DELETE FROM usuarios WHERE id = $1 RETURNING id, username, role',
-    [id]
-  );
-  if (result.rows.length === 0) {
-    throw new AppError('Usuario no encontrado.', 404, 'USER_NOT_FOUND');
+async function eliminarUsuario(id, actorId) {
+  if (Number(id) === Number(actorId)) {
+    throw new AppError(
+      'No puedes eliminar tu propia cuenta mientras la estás usando.',
+      409,
+      'SELF_DELETE'
+    );
   }
-  return normalizar(result.rows[0]);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      'SELECT id, username, role FROM usuarios WHERE id = $1 FOR UPDATE',
+      [id]
+    );
+    if (rows.length === 0) {
+      throw new AppError('Usuario no encontrado.', 404, 'USER_NOT_FOUND');
+    }
+
+    if (rows[0].role === 'admin') {
+      const { rows: [{ count }] } = await client.query(
+        "SELECT COUNT(*)::int AS count FROM usuarios WHERE role = 'admin'"
+      );
+      if (count <= 1) {
+        throw new AppError(
+          'No puedes eliminar al último administrador.',
+          409,
+          'LAST_ADMIN'
+        );
+      }
+    }
+
+    await client.query('DELETE FROM usuarios WHERE id = $1', [id]);
+    await client.query('COMMIT');
+    return normalizar(rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 module.exports = { login, crearUsuario, listarUsuarios, actualizarUsuario, eliminarUsuario };

@@ -1,9 +1,13 @@
 // lib/core/constants/api_constants.dart
 
 class ApiConstants {
-  // Cambiar a trespisos.duckdns.org:3000 cuando el port forwarding esté listo
-  // Para pruebas locales: http://192.168.x.x:3000
-  static const String baseUrl = 'http://trespisos.duckdns.org:3000';
+  /// En producción se inyecta al compilar:
+  /// flutter build apk --dart-define=API_BASE_URL=https://servicio.up.railway.app
+  /// El valor por defecto permite usar el emulador Android contra localhost.
+  static const String baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'http://10.0.2.2:3000',
+  );
 
   // Auth
   static const String login         = '/api/auth/login';
@@ -21,7 +25,10 @@ class ApiConstants {
   static String pedidoById(int id)  => '/api/pedidos/$id';
   static String pedidoEstado(int id)=> '/api/pedidos/$id/estado';
   static String pedidoCancelar(int id) => '/api/pedidos/$id/cancelar';
+  static String pedidoAgregar(int id)   => '/api/pedidos/$id/agregar';
+  static String pedidoEditar(int id)    => '/api/pedidos/$id/editar';
 
   // Métricas
   static const String metricas      = '/api/metricas/resumen';
+  static const String health         = '/api/health';
 }

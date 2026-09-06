@@ -37,17 +37,19 @@ async function pedidosPorEstado() {
 
 /** Ventas por fecha — últimos N días */
 async function ventasPorFecha(dias = 7) {
+  const rango = Math.min(Math.max(parseInt(dias, 10) || 7, 1), 365);
   const { rows } = await pool.query(`
     SELECT DATE(fecha) AS fecha, COUNT(*)::int AS pedidos, SUM(total)::numeric AS total
     FROM ventas
-    WHERE fecha >= CURRENT_DATE - INTERVAL '${parseInt(dias, 10)} days'
+    WHERE fecha >= CURRENT_DATE - ($1::int * INTERVAL '1 day')
     GROUP BY DATE(fecha) ORDER BY fecha ASC
-  `);
+  `, [rango]);
   return rows;
 }
 
 /** Productos más pedidos */
 async function productosTop(limit = 5) {
+  const limite = Math.min(Math.max(parseInt(limit, 10) || 5, 1), 50);
   const { rows } = await pool.query(`
     SELECT pr.nombre, SUM(pd.cantidad)::int AS total_pedido
     FROM pedido_detalle pd
@@ -55,7 +57,7 @@ async function productosTop(limit = 5) {
     JOIN pedidos p    ON p.id  = pd.pedido_id
     WHERE p.estado != 'cancelado'
     GROUP BY pr.nombre ORDER BY total_pedido DESC LIMIT $1
-  `, [limit]);
+  `, [limite]);
   return rows;
 }
 

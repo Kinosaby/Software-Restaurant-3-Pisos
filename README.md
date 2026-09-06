@@ -1,4 +1,4 @@
-# Sistema Restaurante 3 Pisos - Backend y Web App
+# Sistema Restaurante 3 Pisos — Backend, Web y Android
 
 Este es el backend profesional y la aplicación Single Page Application (SPA) para el sistema Punto de Venta (POS) del "Restaurante 3 Pisos".
 
@@ -12,6 +12,7 @@ Este es el backend profesional y la aplicación Single Page Application (SPA) pa
 *   **Comunicación en Tiempo Real:** Uso de `socket.io` para actualizar el estado de las órdenes entre Meseros, Cocina y Caja instantáneamente.
 *   **Base de Datos PostgreSQL:** Almacenamiento seguro, conectado mediante el driver `pg`.
 *   **Interfaz de Usuario (SPA):** Ubicada dentro de la carpeta `restaurante-app/`. Interfaz fluida sin recargas, utilizando Vanilla JS, HTML y CSS.
+*   **Aplicación Android:** Cliente Flutter por roles dentro de `tres_pisos_app/`.
 
 ## Estructura del Proyecto
 
@@ -42,16 +43,17 @@ Este es el backend profesional y la aplicación Single Page Application (SPA) pa
     ```
 
 3.  **Configurar Variables de Entorno:**
-    Crea un archivo `.env` en la raíz del proyecto basándote en la configuración necesaria para conectarse a tu base de datos PostgreSQL y los secretos para JWT y puerto. Ejemplo:
+    Copia `.env.example` como `.env`. En Railway, `DATABASE_URL` aparece automáticamente cuando PostgreSQL está enlazado al servicio. Variables principales:
     ```env
     PORT=3000
-    DB_USER=tu_usuario
-    DB_PASSWORD=tu_contraseña
-    DB_HOST=localhost
-    DB_PORT=5432
-    DB_NAME=tu_base_de_datos
+    DATABASE_URL=postgresql://usuario:contraseña@host:5432/base
+    DB_SSL=true
     JWT_SECRET=tu_secreto_super_seguro
+    ADMIN_USERNAME=admin
+    ADMIN_PASSWORD=una_contraseña_inicial_segura
     ```
+
+    `ADMIN_PASSWORD` solo se usa si la tabla de usuarios está vacía. El esquema y las migraciones se aplican automáticamente al iniciar.
 
 4.  **Iniciar el servidor:**
     *   Modo desarrollo:
@@ -70,3 +72,14 @@ Este es el backend profesional y la aplicación Single Page Application (SPA) pa
 
 *   **Backend:** Node.js, Express, Socket.io, PostgreSQL, JWT, Bcrypt.js, Helmet, Express-validator.
 *   **Frontend:** HTML5, CSS3, JavaScript Vanilla.
+*   **Android:** Flutter, Riverpod, Dio, GoRouter y Socket.IO Client.
+
+## Pruebas
+
+```bash
+npm run check
+npm test
+npm audit --omit=dev
+```
+
+Consulta `tres_pisos_app/README.md` para ejecutar Flutter o generar el APK con GitHub Actions.
