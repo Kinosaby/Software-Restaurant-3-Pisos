@@ -42,7 +42,7 @@ if(window.LOCAL_POS){
  const oldSetNota=setNota;setNota=function(id,note){oldSetNota(id,note);saveDraft();};document.addEventListener('change',saveDraft);
  loadMeseroData=async function(){
   if(!restored.has(draftKey())){restored.add(draftKey());try{const d=JSON.parse(localStorage.getItem(draftKey()));if(d){_comensales=d.comensales;_comensalActivo=d.active;_mesaSeleccionada=d.mesa;_tipoPedido=d.tipo;document.getElementById('mesa-num').value=d.mesa||'';document.getElementById('mesa-badge').classList.toggle('mesa-badge-activa',!!d.mesa);document.getElementById('mesa-badge-text').textContent=d.mesa===99?'Para Llevar':d.mesa?'Mesa '+d.mesa:'Seleccionar mesa';setTipoPedido(d.tipo);}}catch(_){}}
-  await oldLoadMesero();
+  await oldLoadMesero();renderCarrito();
  };
  submitPedido=async function(){
   const diners=_comensales.filter(c=>c.items.length),mesa=Number(document.getElementById('mesa-num').value);if(!mesa||!diners.length){toastErr('Selecciona mesa y productos');return;}if(!confirm('¿Guardar y enviar este pedido a cocina?'))return;
