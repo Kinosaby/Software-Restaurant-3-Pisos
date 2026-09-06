@@ -30,6 +30,10 @@
     "qs": "6.16.0"
   },
   "devDependencies": {
+    "@fontsource/cinzel": "5.2.5",
+    "@fontsource/outfit": "5.2.5",
+    "@fortawesome/fontawesome-free": "6.5.1",
+    "chart.js": "4.4.9",
     "pg-mem": "^3.0.14",
     "supertest": "^7.2.2"
   }
