@@ -133,7 +133,7 @@ class _LocalPosScreenState extends State<LocalPosScreen>
         version: 1,
         onCreate: PosEngine.createSchema,
         onConfigure: (db) async {
-          await db.execute('PRAGMA journal_mode=WAL');
+          await db.rawQuery('PRAGMA journal_mode=WAL');
           await db.execute('PRAGMA synchronous=FULL');
         },
       );
