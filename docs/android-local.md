@@ -1,6 +1,6 @@
 # Android local: web completa
 
-La versión 2.0 empaqueta `restaurante-app/index.html`, sus pantallas y recursos dentro de Flutter. SQLite en la tablet de cocina atiende la misma API. No necesita Railway, Supabase, CDN ni computadora. El backend web existente se conserva por separado.
+La versión 2.1 empaqueta `restaurante-app/index.html`, sus pantallas y recursos dentro de Flutter. SQLite en la tablet de cocina atiende la misma API. No necesita Railway, Supabase, CDN ni computadora. El backend web existente se conserva por separado.
 
 ## Empezar
 
@@ -8,11 +8,21 @@ La versión 2.0 empaqueta `restaurante-app/index.html`, sus pantallas y recursos
 2. Conéctalas al mismo Wi-Fi. El router funciona sin Internet, pero no debe aislar dispositivos como una red de invitados. Conviene reservar la IP de cocina en el router.
 3. En cocina selecciona **Central de cocina** y crea el administrador. No hay contraseña predeterminada. Abre **Conexión** y copia el código `trespisos://…`.
 4. En meseros selecciona **Vincular tablet** y pega el código. El enlace inicial y el inicio de sesión requieren comunicación con cocina.
-5. Desde Administración registra tu menú y crea los usuarios de mesero y cocina. Después inicia sesión como cocina en la central.
+5. Desde Administración registra tu menú o pulsa **Importar menú** en Productos de la tablet central; después crea los usuarios de mesero y cocina. Después inicia sesión como cocina en la central.
 6. Mantén la app abierta en cocina y la tablet conectada a corriente. La app mantiene activa la pantalla mientras se utiliza. No se promete operación en segundo plano, con Android suspendido, la app cerrada o la tablet apagada.
 7. Prueba con tus tres tablets: dos comensales, extras, cancelación, cobro, reinicio y desconexión de Internet del router antes de atender clientes.
 
-**Esta instalación crea una base local nueva. Los datos de Railway no se copian automáticamente.** No borres el PostgreSQL anterior: se necesita su exportación para preparar una importación de usuarios, menú e historial. Los respaldos de esta app recuperan instalaciones de esta misma versión.
+**Esta instalación crea una base local nueva, con usuarios y ventas nuevos.** Solo se necesita el menú real con sus precios; los ocho productos de ejemplo del repositorio no se cargan automáticamente. No se requiere migrar el historial de Railway. Los respaldos completos recuperan instalaciones de esta app y son independientes de la importación del menú.
+
+## Cargar únicamente el menú
+
+En la tablet central inicia sesión como administrador y abre **Productos → Importar menú**. Selecciona un archivo UTF-8 `.csv` o `.json`. La vista previa muestra cada producto, categoría, disponibilidad y precio en MXN; indica cuáles se crearán o actualizarán. Solo se guarda al pulsar **Guardar menú**. Cancelar no cambia nada.
+
+CSV: encabezados `nombre,precio,categoria,activo`. Nombre y precio son obligatorios; categoría vacía usa General y disponibilidad vacía usa true. Usa precios sin símbolo de moneda ni separadores de miles, con un máximo de dos decimales. Se acepta coma decimal cuando las columnas están separadas por punto y coma. Disponibilidad: true/false, 1/0 o sí/no. JSON: lista de productos o un objeto con `productos`; precios numéricos o texto decimal con punto. Si se incluye `moneda`, debe ser MXN. Límite: 2000 productos y 2 MB.
+
+Se identifican coincidencias por nombre y categoría, ignorando mayúsculas. Se conservan los IDs locales: los IDs externos no se importan. Los productos ausentes del archivo permanecen; las cuentas existentes conservan sus precios. No se importan usuarios, pedidos ni ventas. Duplicados ambiguos o precios inválidos bloquean el archivo entero. Si alguien cambia el catálogo durante la revisión, hay que revisarlo de nuevo.
+
+**Guardar archivo del menú** permite compartir un JSON que contiene únicamente el catálogo y volver a importarlo. No sustituye al respaldo completo. La edición manual permite escribir categorías propias; todos los filtros incluyen las categorías activas del catálogo.
 
 ## Funciones
 

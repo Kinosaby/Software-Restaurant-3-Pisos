@@ -8,6 +8,29 @@ const CATEGORIAS = [
   'Gringas','Bebidas','Postres','General'
 ];
 
+// Keep the familiar category order and include every category in the real menu.
+function categoriasMenu(productos = State.productos) {
+  const presentes = new Set(productos.map(p => p.categoria || 'General'));
+  return [...CATEGORIAS.filter(c => presentes.has(c)),
+    ...[...presentes].filter(c => !CATEGORIAS.includes(c)).sort((a,b) => a.localeCompare(b, 'es'))];
+}
+
+function renderCategoryTabs(element, productos, selected, onSelect) {
+  element.replaceChildren();
+  for (const category of [null, ...categoriasMenu(productos)]) {
+    const button = document.createElement('button');
+    button.className = 'cat-tab' + (category === selected ? ' active' : '');
+    button.append(document.createTextNode((category ?? 'Todas') + ' '));
+    const count = document.createElement('span');
+    count.className = 'cat-tab-count';
+    count.textContent = category === null ? productos.length
+      : productos.filter(p => (p.categoria || 'General') === category).length;
+    button.append(count);
+    button.onclick = () => onSelect(category);
+    element.append(button);
+  }
+}
+
 // ── Configuración de mesas ─────────────────────────────────────
 const TOTAL_MESAS = 13;   // <── Cambia este número si el restaurante tiene más/menos mesas
 
@@ -133,7 +156,7 @@ async function loadMeseroData() {
 }
 
 /* ── Catálogo ───────────────────────────────── */
-let _filtroCategoria = 'Todas';
+let _filtroCategoria = null;
 let _busqueda = '';
 
 function renderCatalogo() {
@@ -144,25 +167,13 @@ function renderCatalogo() {
 
   const activos = State.productos.filter(p => p.activo !== false);
 
-  // Categorías que tienen productos
-  const catsConProductos = ['Todas', ...CATEGORIAS.filter(c =>
-    activos.some(p => (p.categoria || 'General') === c)
-  )];
-
-  // Tabs de categorías
-  if (tabsEl) {
-    tabsEl.innerHTML = catsConProductos.map(c => {
-      const count = c === 'Todas' ? activos.length
-        : activos.filter(p => (p.categoria || 'General') === c).length;
-      return `<button class="cat-tab${c === _filtroCategoria ? ' active' : ''}"
-        onclick="filtrarCategoria('${c}')">
-        ${c} <span class="cat-tab-count">${count}</span>
-      </button>`;
-    }).join('');
+  if (_filtroCategoria !== null && !categoriasMenu(activos).includes(_filtroCategoria)) {
+    _filtroCategoria = null;
   }
+  if (tabsEl) renderCategoryTabs(tabsEl, activos, _filtroCategoria, filtrarCategoria);
 
   // Filtrar por categoría y búsqueda
-  let filtrados = _filtroCategoria === 'Todas'
+  let filtrados = _filtroCategoria === null
     ? activos
     : activos.filter(p => (p.categoria || 'General') === _filtroCategoria);
 
@@ -680,7 +691,7 @@ function verDetallePedido(id) {
 /* ── Agregar productos a pedido activo ──────── */
 let _pedidoAgregarId   = null;
 let _carritoAgregar    = [];
-let _agrCat            = 'Todas';
+let _agrCat            = null;
 let _agrBusqueda       = '';
 
 let _agregarTabActiva = 'productos';
@@ -702,7 +713,7 @@ function setAgregarTab(tab) {
 function abrirAgregarProductos(pedidoId) {
   _pedidoAgregarId = pedidoId;
   _carritoAgregar  = [];
-  _agrCat          = 'Todas';
+  _agrCat          = null;
   _agrBusqueda     = '';
   const p = State.pedidos.find(x => x.id === pedidoId);
   if (!p) return;
@@ -736,22 +747,19 @@ function _renderAgrTabs() {
   const tabsEl = document.getElementById('agr-tabs');
   if (!tabsEl) return;
   const activos = State.productos.filter(x => x.activo !== false);
-  const cats = ['Todas', ...CATEGORIAS.filter(c => activos.some(p => (p.categoria||'General') === c))];
-  tabsEl.innerHTML = cats.map(c => {
-    const count = c === 'Todas' ? activos.length
-      : activos.filter(p => (p.categoria||'General') === c).length;
-    return `<button class="cat-tab${c === _agrCat ? ' active' : ''}"
-      onclick="_agrCat='${c}';this.parentNode.querySelectorAll('.cat-tab').forEach(b=>b.classList.remove('active'));this.classList.add('active');renderAgregarGrid()">
-      ${c} <span class="cat-tab-count">${count}</span>
-    </button>`;
-  }).join('');
+  if (_agrCat !== null && !categoriasMenu(activos).includes(_agrCat)) _agrCat = null;
+  renderCategoryTabs(tabsEl, activos, _agrCat, category => {
+    _agrCat = category;
+    _renderAgrTabs();
+    renderAgregarGrid();
+  });
 }
 
 function renderAgregarGrid() {
   const grid = document.getElementById('agregar-grid');
   if (!grid) return;
   let prods = State.productos.filter(x => x.activo !== false);
-  if (_agrCat !== 'Todas') prods = prods.filter(p => (p.categoria||'General') === _agrCat);
+  if (_agrCat !== null) prods = prods.filter(p => (p.categoria||'General') === _agrCat);
   if (_agrBusqueda.trim()) {
     const q = _agrBusqueda.trim().toLowerCase();
     prods = prods.filter(p => p.nombre.toLowerCase().includes(q));

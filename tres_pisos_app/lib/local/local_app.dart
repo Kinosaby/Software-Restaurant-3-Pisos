@@ -15,6 +15,7 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import 'pos_engine.dart';
 import 'pos_server.dart';
+import 'menu_file.dart';
 
 class LocalPosApp extends StatelessWidget {
   const LocalPosApp({super.key});
@@ -96,6 +97,7 @@ class _LocalPosScreenState extends State<LocalPosScreen>
   PosServer? server;
   WebViewController? web;
   bool busy = true, centralChoice = true, hasAccounts = false;
+  bool menuBusy = false;
   String? error;
   @override
   void initState() {
@@ -214,6 +216,21 @@ class _LocalPosScreenState extends State<LocalPosScreen>
           }
           if (d['action'] == 'backup') {
             await exportBackup(d['token']);
+          }
+          if (d['action'] == 'import-menu' || d['action'] == 'export-menu') {
+            if (menuBusy) {
+              return;
+            }
+            menuBusy = true;
+            try {
+              if (d['action'] == 'import-menu') {
+                await importMenu(d['token']);
+              } else {
+                await exportMenu(d['token']);
+              }
+            } finally {
+              menuBusy = false;
+            }
           }
         } catch (e) {
           if (mounted) {
@@ -421,6 +438,150 @@ class _LocalPosScreenState extends State<LocalPosScreen>
         ],
       ),
     );
+  }
+
+  Future<void> checkMenuAccess(String? token) async {
+    if (server?.central != true) {
+      throw PosError(
+        400,
+        'Abre Administración en la tablet central para importar o guardar el menú',
+      );
+    }
+    final result = await engine!.call(
+      'GET',
+      Uri.parse('/api/auth/me'),
+      token: token,
+    );
+    engine!.require(Json.from(result['user'] as Map), ['admin']);
+  }
+
+  Future<void> importMenu(String? token) async {
+    await checkMenuAccess(token);
+    final selected = await FilePicker.platform.pickFiles(
+      dialogTitle: 'Menú en CSV o JSON',
+      type: FileType.any,
+    );
+    if (selected == null) {
+      return;
+    }
+    final file = selected.files.single;
+    if (file.size > MenuFile.maxBytes) {
+      throw PosError(400, 'El menú debe pesar menos de 2 MB');
+    }
+    final bytes =
+        file.bytes ??
+        (file.path == null ? null : await File(file.path!).readAsBytes());
+    if (bytes == null) {
+      throw PosError(400, 'No se pudo leer el archivo del menú');
+    }
+    final products = MenuFile.parse(bytes);
+    final plan = await engine!.previewMenu(products, token);
+    if (!mounted) {
+      return;
+    }
+    final changes = plan['cambios'] as List;
+    String price(dynamic value) =>
+        '\$${(PosEngine.money(value) / 100).toStringAsFixed(2)}';
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Revisar menú · MXN'),
+        content: SizedBox(
+          width: 560,
+          height: 420,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${plan['nuevos']} nuevos · ${plan['actualizados']} actualizados · ${plan['sin_cambios']} sin cambios',
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text(
+                  'Se unen por nombre y categoría. Los demás productos permanecen. Revisa los precios antes de guardar.',
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: changes.length,
+                  itemBuilder: (context, i) {
+                    final change = changes[i],
+                        p = change['producto'],
+                        old = change['anterior'];
+                    final action = {
+                      'nuevo': 'Nuevo',
+                      'actualizar': 'Actualizar',
+                      'sin_cambios': 'Sin cambios',
+                    }[change['accion']];
+                    final previous = old == null
+                        ? ''
+                        : 'Antes: ${old['nombre']} · ${old['categoria']} · ${price(old['precio'])} · ${old['activo'] == true ? 'Activo' : 'Inactivo'}\n';
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('${p['nombre']} · ${price(p['precio'])}'),
+                      subtitle: Text(
+                        '$previous${p['categoria']} · ${p['activo'] == true ? 'Activo' : 'Inactivo'} · $action',
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Guardar menú'),
+          ),
+        ],
+      ),
+    );
+    if (accepted != true) {
+      return;
+    }
+    final result = await engine!.call(
+      'POST',
+      Uri.parse('/api/local/menu/import'),
+      body: {'productos': products, 'revision': plan['revision']},
+      token: token,
+      operationId: randomKey(),
+    );
+    await web?.runJavaScript("window.dispatchEvent(new Event('pos-refresh'))");
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Menú guardado: ${result['nuevos']} nuevos y ${result['actualizados']} actualizados',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> exportMenu(String? token) async {
+    await checkMenuAccess(token);
+    final data = await engine!.call(
+      'GET',
+      Uri.parse('/api/local/menu'),
+      token: token,
+    );
+    if ((data['productos'] as List).isEmpty) {
+      throw PosError(400, 'Todavía no hay productos para guardar');
+    }
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/menu-3-pisos.json');
+    await file.writeAsString(
+      const JsonEncoder.withIndent('  ').convert(data),
+      flush: true,
+    );
+    await Share.shareXFiles([
+      XFile(file.path),
+    ], text: 'Menú de 3 Pisos · precios en MXN');
   }
 
   Future<void> exportBackup(String? token) async {

@@ -4,6 +4,8 @@ import 'dart:math';
 import 'package:cryptography/cryptography.dart';
 import 'package:sqflite_common/sqlite_api.dart';
 
+import 'menu_file.dart';
+
 typedef Json = Map<String, dynamic>;
 
 class PosError implements Exception {
@@ -339,6 +341,23 @@ class PosEngine {
     if (path == '/api/productos') {
       return {'productos': await records(tx, 'products')};
     }
+    if (path == '/api/local/menu') {
+      require(actor, ['admin']);
+      return {
+        'format': '3pisos-menu-v1',
+        'moneda': 'MXN',
+        'productos': (await records(tx, 'products'))
+            .map(
+              (p) => {
+                'nombre': p['nombre'],
+                'precio': (money(p['precio']) / 100).toStringAsFixed(2),
+                'categoria': p['categoria'],
+                'activo': p['activo'],
+              },
+            )
+            .toList(),
+      };
+    }
     if (path == '/api/auth/usuarios') {
       require(actor, ['admin']);
       return {
@@ -452,6 +471,98 @@ class PosEngine {
     throw PosError(404, 'Ruta no encontrada');
   }
 
+  String menuIdentity(Json p) => jsonEncode([
+    p['nombre'].toString().trim().toLowerCase(),
+    p['categoria'].toString().trim().toLowerCase(),
+  ]);
+
+  Future<Json> planMenu(DatabaseExecutor tx, dynamic raw) async {
+    if (raw is! List || raw.isEmpty || raw.length > MenuFile.maxProducts) {
+      throw PosError(400, 'Selecciona entre 1 y 2000 productos');
+    }
+    final current = await records(tx, 'products');
+    final revision = base64UrlEncode(
+      (await Sha256().hash(utf8.encode(jsonEncode(current)))).bytes,
+    );
+    final index = <String, List<Json>>{};
+    for (final p in current) {
+      index.putIfAbsent(menuIdentity(p), () => []).add(p);
+    }
+    final seen = <String>{}, changes = <Json>[];
+    var added = 0, updated = 0;
+    for (var i = 0; i < raw.length; i++) {
+      try {
+        final row = raw[i];
+        if (row is! Map) {
+          throw PosError(400, 'Producto inválido');
+        }
+        final cents = money(row['precio']);
+        if (cents <= 0) {
+          throw PosError(400, 'El precio debe ser mayor a cero');
+        }
+        final product = <String, dynamic>{
+          'nombre': label(row['nombre']),
+          'precio': cents / 100,
+          'categoria': label(
+            row['categoria'] == null ||
+                    row['categoria'].toString().trim().isEmpty
+                ? 'General'
+                : row['categoria'],
+            max: 50,
+          ),
+          'activo': row['activo'] ?? true,
+        };
+        if (product['activo'] is! bool) {
+          throw PosError(400, 'Disponibilidad inválida');
+        }
+        final identity = menuIdentity(product);
+        if (!seen.add(identity)) {
+          throw PosError(400, 'Nombre y categoría repetidos en el archivo');
+        }
+        final matches = index[identity] ?? [];
+        if (matches.length > 1) {
+          throw PosError(
+            409,
+            'Hay varios productos con ese nombre y categoría. Corrígelos antes de importar',
+          );
+        }
+        final old = matches.isEmpty ? null : matches.single;
+        final changed =
+            old != null && product.keys.any((k) => product[k] != old[k]);
+        if (old == null) {
+          added++;
+        }
+        if (changed) {
+          updated++;
+        }
+        changes.add({
+          'producto': product,
+          'anterior': old,
+          'accion': old == null
+              ? 'nuevo'
+              : changed
+              ? 'actualizar'
+              : 'sin_cambios',
+        });
+      } on PosError catch (e) {
+        throw PosError(e.status, 'Producto ${i + 1}: ${e.message}');
+      }
+    }
+    return {
+      'revision': revision,
+      'cambios': changes,
+      'nuevos': added,
+      'actualizados': updated,
+      'sin_cambios': changes.length - added - updated,
+    };
+  }
+
+  Future<Json> previewMenu(List<Json> products, String? token) =>
+      db.transaction((tx) async {
+        require(await user(tx, token), ['admin']);
+        return planMenu(tx, products);
+      });
+
   Future<List<Json>> makeItems(DatabaseExecutor tx, dynamic raw) async {
     if (raw is! List || raw.isEmpty || raw.length > 100) {
       throw PosError(400, 'Agrega de 1 a 100 productos');
@@ -515,6 +626,31 @@ class PosEngine {
     Json actor,
   ) async {
     final path = uri.path;
+    if (path == '/api/local/menu/import' && method == 'POST') {
+      require(actor, ['admin']);
+      final plan = await planMenu(tx, b['productos']);
+      if (b['revision'] != plan['revision']) {
+        throw PosError(
+          409,
+          'El menú cambió mientras lo revisabas. Vuelve a abrir el archivo para revisar los cambios',
+        );
+      }
+      for (final change in plan['cambios'] as List) {
+        if (change['accion'] == 'sin_cambios') {
+          continue;
+        }
+        final product = Json.from(change['producto'] as Map);
+        product['id'] =
+            change['anterior']?['id'] ?? await nextId(tx, 'products');
+        await save(tx, 'products', product);
+      }
+      await event(tx, 'catalogo_actualizado', {});
+      return {
+        'nuevos': plan['nuevos'],
+        'actualizados': plan['actualizados'],
+        'sin_cambios': plan['sin_cambios'],
+      };
+    }
     if (path == '/api/auth/logout') {
       await tx.delete('sessions', where: 'user_id=?', whereArgs: [actor['id']]);
       return {};

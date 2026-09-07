@@ -63,6 +63,12 @@ if(window.LOCAL_POS){
  document.getElementById('history-filter').onclick=()=>{page=0;history();};document.getElementById('history-prev').onclick=()=>{page=Math.max(0,page-1);history();};document.getElementById('history-next').onclick=()=>{page++;history();};
  const oldDeleteOrder=adminDeletePedido;adminDeletePedido=async function(id){await oldDeleteOrder(id);if(!_soloHoyAdmin)await history();};
  const backup=document.createElement('button');backup.className='btn btn-gold btn-sm';backup.textContent='Guardar respaldo';backup.onclick=()=>window.PosNative?.postMessage(JSON.stringify({action:'backup',token:Auth.token}));document.querySelector('#screen-admin .container').prepend(backup);
+ const menuTools=document.createElement('div');menuTools.style='display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px';
+ for(const [action,label] of [['import-menu','Importar menú'],['export-menu','Guardar archivo del menú']]){
+  const button=document.createElement('button');button.className='btn btn-outline btn-sm';button.textContent=label;
+  button.onclick=()=>window.PosNative?.postMessage(JSON.stringify({action,token:Auth.token}));menuTools.append(button);
+ }
+ document.querySelector('#admin-products .pane-header').after(menuTools);
  setInterval(async()=>{try{const d=await get('/api/local/status');status.classList.toggle('local-stale',!d.connected);document.getElementById('local-status-text').textContent=(d.central?'Central de cocina · operación local':d.connected?'Enlace local con cocina activo':'Sin enlace con cocina')+(d.pending.length?' · '+d.pending.length+' envíos pendientes':'');pendingPanel.replaceChildren();
   for(const e of d.pending){const line=document.createElement('p');line.textContent=(e.status==='blocked'?'Requiere revisión: '+e.error:'Pendiente de recibir en cocina')+' · '+(e.body.pedidos||[e.body]).map(p=>'Mesa '+p.mesa+' / '+(p.comensal||'Cuenta')).join(', ');pendingPanel.append(line);if(e.status==='blocked'){const retry=document.createElement('button');retry.className='btn btn-gold btn-sm';retry.textContent='Reintentar este envío';retry.onclick=async()=>{try{await post('/api/local/retry',{id:e.id});toastInfo('Envío revisado. Consulta su estado aquí.');}catch(err){toastErr(err.message);}};pendingPanel.append(retry);}}
   if(!d.pending.length)pendingPanel.textContent='Sin envíos pendientes';}catch(_){}},2000);

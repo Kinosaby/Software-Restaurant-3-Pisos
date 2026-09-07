@@ -132,6 +132,15 @@ async function deleteUser(id, name) {
 
 /* ── Productos ──────────────────────────────── */
 function renderAdminProducts() {
+  const categories = document.getElementById('menu-categories');
+  if (categories) {
+    categories.replaceChildren();
+    for (const name of new Set([...CATEGORIAS, ...categoriasMenu()])) {
+      const option = document.createElement('option');
+      option.value = name;
+      categories.append(option);
+    }
+  }
   const tbody = document.querySelector('#table-products tbody');
   if (!tbody) return;
   if (!State.productos.length) { tbody.innerHTML = '<tr class="empty-row"><td colspan="6">Sin productos</td></tr>'; return; }
@@ -167,7 +176,7 @@ async function submitProduct() {
   const body = {
     nombre:    document.getElementById('p-name').value.trim(),
     precio:    parseFloat(document.getElementById('p-price').value),
-    categoria: document.getElementById('p-cat').value || 'General',
+    categoria: document.getElementById('p-cat').value.trim() || 'General',
     activo:    document.getElementById('p-disp').checked,
   };
   if (!body.nombre || isNaN(body.precio)) { toastErr('Nombre y precio son requeridos'); return; }

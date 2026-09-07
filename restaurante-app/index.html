@@ -313,23 +313,8 @@
       <div class="field"><label>Precio</label><input id="p-price" type="number" step="0.01" min="0.01" placeholder="0.00" required></div>
       <div class="field">
         <label>Categoría</label>
-        <select id="p-cat">
-          <option value="">-- Seleccionar --</option>
-          <option>Tortas</option>
-          <option>Guajolotes</option>
-          <option>Pambazos</option>
-          <option>Quesadillas</option>
-          <option>Enchiladas</option>
-          <option>Tostadas</option>
-          <option>Volcanes</option>
-          <option>Tacos</option>
-          <option>Asada Fries</option>
-          <option>Burritos</option>
-          <option>Gringas</option>
-          <option>Bebidas</option>
-          <option>Postres</option>
-          <option>General</option>
-        </select>
+        <input id="p-cat" type="text" list="menu-categories" maxlength="50" placeholder="Selecciona o escribe una categoría">
+        <datalist id="menu-categories"></datalist>
       </div>
       <div class="field" style="flex-direction:row;align-items:center;gap:10px">
         <input id="p-disp" type="checkbox" checked style="width:18px;height:18px">

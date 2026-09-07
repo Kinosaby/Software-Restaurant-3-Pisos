@@ -74,6 +74,125 @@ void main() {
     });
   });
   tearDown(() async => db.close());
+  test(
+    'Menu import is admin-only, atomic and preserves accounts and local IDs',
+    () async {
+      final account = await order(2);
+      final products = <Json>[
+        {
+          'id': 999,
+          'nombre': 'Taco',
+          'precio': '15.75',
+          'categoria': 'Tacos',
+          'activo': true,
+        },
+        {
+          'id': 1,
+          'nombre': 'Pozole',
+          'precio': '75.50',
+          'categoria': 'Platillos',
+          'activo': true,
+        },
+      ];
+      await expectLater(pos.previewMenu(products, waiter), rejects(403));
+      final plan = await pos.previewMenu(products, admin);
+      expect(plan['nuevos'], 1);
+      expect(plan['actualizados'], 1);
+      expect((await call('GET', '/api/productos'))['productos'], hasLength(1));
+      final body = {
+        'productos': products,
+        'revision': plan['revision'],
+        'usuarios': [
+          {'username': 'old'},
+        ],
+      };
+      await expectLater(
+        call('POST', '/api/local/menu/import', body, kitchen),
+        rejects(403),
+      );
+      final operation = randomKey();
+      final first = await call(
+        'POST',
+        '/api/local/menu/import',
+        body,
+        admin,
+        operation,
+      );
+      expect(
+        await call('POST', '/api/local/menu/import', body, admin, operation),
+        first,
+      );
+      final saved = (await call('GET', '/api/productos'))['productos'] as List;
+      expect(saved.map((p) => p['id']), [1, 2]);
+      expect(saved.first['precio'], 15.75);
+      expect(
+        (await call('GET', '/api/pedidos/${account['id']}'))['pedido']['total'],
+        25.0,
+      );
+      expect(
+        (await call('GET', '/api/auth/usuarios'))['usuarios'],
+        hasLength(3),
+      );
+      expect((await pos.previewMenu(products, admin))['sin_cambios'], 2);
+      final exported = await call('GET', '/api/local/menu');
+      expect(exported.keys.toSet(), {'format', 'moneda', 'productos'});
+      expect(exported['productos'][0]['precio'], '15.75');
+      expect(exported['productos'][0].containsKey('id'), false);
+      await expectLater(
+        call('GET', '/api/local/menu', {}, waiter),
+        rejects(403),
+      );
+    },
+  );
+
+  test(
+    'Invalid rows and changes after preview never partially replace the menu',
+    () async {
+      final products = <Json>[
+        {'nombre': 'Agua', 'precio': '20.00', 'categoria': 'Bebidas'},
+      ];
+      final plan = await pos.previewMenu(products, admin);
+      for (final bad in [
+        {'nombre': 'Taco', 'precio': '-1'},
+        {'nombre': 'Taco', 'precio': '1.234'},
+        {'nombre': 'Taco', 'precio': '0'},
+        {'nombre': 'Taco', 'precio': '12', 'activo': 'false'},
+        {'nombre': '<script>', 'precio': 12},
+        {'nombre': 'agua', 'precio': 25, 'categoria': 'bebidas'},
+      ]) {
+        await expectLater(
+          call('POST', '/api/local/menu/import', {
+            'productos': [...products, bad],
+            'revision': plan['revision'],
+          }),
+          rejects(400),
+        );
+        expect(
+          (await call('GET', '/api/productos'))['productos'],
+          hasLength(1),
+        );
+      }
+      await call('PUT', '/api/productos/1', {'precio': 13});
+      await expectLater(
+        call('POST', '/api/local/menu/import', {
+          'productos': products,
+          'revision': plan['revision'],
+        }),
+        rejects(409),
+      );
+      expect((await call('GET', '/api/productos'))['productos'], hasLength(1));
+      final current = await pos.previewMenu(products, admin);
+      await call('POST', '/api/local/menu/import', {
+        'productos': products,
+        'revision': current['revision'],
+      });
+      expect((await call('GET', '/api/productos'))['productos'], hasLength(2));
+      expect(
+        (await call('GET', '/api/productos'))['productos'][0]['precio'],
+        13.0,
+      );
+    },
+  );
   test('Roles, passwords, last administrator and session revocation', () async {
     await expectLater(
       call('GET', '/api/auth/usuarios', {}, waiter),
