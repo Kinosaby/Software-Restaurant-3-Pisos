@@ -452,7 +452,8 @@ void main() {
       (await call('GET', '/api/pedidos?scope=history&page=6'))['pedidos'],
       hasLength(1),
     );
-    final backup = await call('GET', '/api/local/backup');
+    final backup =
+        jsonDecode(jsonEncode(await call('GET', '/api/local/backup'))) as Json;
     // A 2.1 backup used the full request as its receipt fingerprint.
     for (final receipt in backup['receipts'] as List) {
       if (receipt['key'] == op) {
