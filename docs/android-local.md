@@ -1,6 +1,6 @@
 # Android local: web completa
 
-La versión 2.1 empaqueta `restaurante-app/index.html`, sus pantallas y recursos dentro de Flutter. SQLite en la tablet de cocina atiende la misma API. No necesita Railway, Supabase, CDN ni computadora. El backend web existente se conserva por separado.
+La versión 2.2 empaqueta `restaurante-app/index.html`, sus pantallas y recursos dentro de Flutter. SQLite en la tablet de cocina atiende la misma API. No necesita Railway, Supabase, CDN ni computadora. El backend web existente se conserva por separado.
 
 ## Empezar
 
@@ -8,11 +8,27 @@ La versión 2.1 empaqueta `restaurante-app/index.html`, sus pantallas y recursos
 2. Conéctalas al mismo Wi-Fi. El router funciona sin Internet, pero no debe aislar dispositivos como una red de invitados. Conviene reservar la IP de cocina en el router.
 3. En cocina selecciona **Central de cocina** y crea el administrador. No hay contraseña predeterminada. Abre **Conexión** y copia el código `trespisos://…`.
 4. En meseros selecciona **Vincular tablet** y pega el código. El enlace inicial y el inicio de sesión requieren comunicación con cocina.
-5. Desde Administración registra tu menú o pulsa **Importar menú** en Productos de la tablet central; después crea los usuarios de mesero y cocina. Después inicia sesión como cocina en la central.
+5. El menú del propietario ya se carga en centrales nuevas: 54 productos, 53 disponibles y Birria de $100 desactivada. Desde Administración crea los usuarios de mesero y cocina. Después inicia sesión como cocina en la central.
 6. Mantén la app abierta en cocina y la tablet conectada a corriente. La app mantiene activa la pantalla mientras se utiliza. No se promete operación en segundo plano, con Android suspendido, la app cerrada o la tablet apagada.
 7. Prueba con tus tres tablets: dos comensales, extras, cancelación, cobro, reinicio y desconexión de Internet del router antes de atender clientes.
 
-**Esta instalación crea una base local nueva, con usuarios y ventas nuevos.** Solo se necesita el menú real con sus precios; los ocho productos de ejemplo del repositorio no se cargan automáticamente. No se requiere migrar el historial de Railway. Los respaldos completos recuperan instalaciones de esta app y son independientes de la importación del menú.
+**Las instalaciones nuevas ya incluyen el menú transcrito de las tres capturas del propietario, sin ventas ni pedidos anteriores.** Se conservan nombres, precios, categorías y disponibilidad. Los IDs de las capturas solo documentan el origen. El menú integrado no sobrescribe un catálogo existente: para actualizarlo abre Productos → Cargar menú del restaurante y revisa los cambios. No se requiere migrar el historial de Railway. Los respaldos completos recuperan instalaciones de esta app y son independientes de la importación del menú.
+
+## Accesos del restaurante
+
+El APK público no contiene claves predeterminadas. Para instalar las cuentas preparadas del propietario, en una **central nueva** selecciona **Cargar accesos o respaldo**, abre el archivo privado `Inicio-3-Pisos.3pisos` e introduce su clave. Los usuarios y contraseñas se entregan por separado en `Accesos-3-Pisos.txt`; ese documento y el archivo privado no se guardan en GitHub. Luego pulsa **Iniciar central** sin crear otra cuenta.
+
+| Cuenta | Rol y operaciones |
+|---|---|
+| admin | Menú, usuarios, reportes, respaldo y acceso a meseros/cocina |
+| cocina | Preparación, productos listos, extras y cancelación antes de listo |
+| mesero1 / mesero2 | Pedidos, comensales, notas, extras, cancelación y cobro |
+
+Los meseros no pueden editar menú/usuarios, preparar pedidos ni abrir reportes o respaldos. Cocina no puede tomar pedidos ni cobrar. Cada tablet de mesero usa su propia cuenta. Iniciar sesión requiere comunicación con la central, pero **no Internet**. Una sesión ya iniciada permite consultar lo descargado y guardar pedidos pendientes si se pierde el Wi-Fi. Para comprobar permisos se rechazan también las llamadas directas a la API.
+
+Las claves entregadas solo funcionan después de cargar el archivo privado en una central vacía. No reemplazan claves de instalaciones anteriores. Si la central ya contiene datos, conserva sus accesos y su respaldo; un administrador puede crear o modificar las cuentas desde Usuarios. La restauración no sobrescribe una central existente.
+
+Desde 2.2, los comprobantes de reintento guardan una huella SHA-256 de la solicitud. Las actualizaciones de bases y la restauración de respaldos anteriores convierten esos comprobantes para no retener claves en texto claro. Las contraseñas de las cuentas se almacenan con PBKDF2 y sal individual.
 
 ## Cargar únicamente el menú
 
@@ -56,7 +72,7 @@ Tablets completamente aisladas no pueden intercambiar pedidos. No se implementa 
 
 En la central, inicia sesión como administrador y pulsa **Guardar respaldo**. Usa una contraseña de al menos ocho caracteres y guarda el archivo `.3pisos` fuera de la tablet. Comprueba que quedó guardado en el destino: abrir Compartir no garantiza que se haya copiado. El archivo contiene usuarios, menú, pedidos, extras, ventas y comprobantes de reintento; no incluye sesiones ni claves de enlace. Conserva la contraseña: no existe servicio de recuperación.
 
-En una instalación nueva pulsa **Restaurar un respaldo local** y proporciona archivo y contraseña. Luego inicia la central, entra con los usuarios restaurados y vincula de nuevo los meseros. No mantengas dos centrales activas para un restaurante. Antes de cambiarla, verifica que los meseros no tengan pendientes: el respaldo solo contiene lo recibido en cocina. Los respaldos en la nube no están configurados.
+En una instalación nueva pulsa **Cargar accesos o respaldo** y proporciona archivo y contraseña. Luego inicia la central, entra con los usuarios restaurados y vincula de nuevo los meseros. No mantengas dos centrales activas para un restaurante. Antes de cambiarla, verifica que los meseros no tengan pendientes: el respaldo solo contiene lo recibido en cocina. Los respaldos en la nube no están configurados.
 
 ## Desarrollo
 
@@ -72,7 +88,7 @@ flutter build apk --release
 
 Flutter 3.47.2; workflow `android-apk.yml`. El punto de entrada es `LocalPosApp`; las pantallas Flutter anteriores permanecen como referencia y no se utilizan. Los recursos se reconstruyen desde la web y los lockfiles. El historial se pagina en grupos de 100 y los datos comerciales no se purgan. Reportes con UTC-6 para Hidalgo.
 
-Pruebas: roles, lotes atómicos, reintentos, precios, edición concurrente, extras, cobro conjunto, 601 pedidos, historial, respaldo/restauración y recuperación de cola después de perder una confirmación. No sustituyen pruebas de cobertura Wi-Fi y capacidad en las tablets reales.
+Pruebas: menú completo de 54 productos, conservación de ediciones, migración de comprobantes, tres dispositivos simulados con Internet bloqueado, cuatro accesos, permisos por API, pérdida y recuperación del enlace, roles, lotes atómicos, reintentos, precios, edición concurrente, extras, cobro conjunto, 601 pedidos, historial, respaldo/restauración y recuperación de cola después de perder una confirmación. No sustituyen pruebas de cobertura Wi-Fi y capacidad en las tablets reales.
 
 El APK de pruebas usa la firma de depuración del proyecto. Antes de distribuir actualizaciones permanentes debe configurarse una clave estable guardada fuera del repositorio. Firmas distintas pueden impedir actualizar una instalación anterior. **Nunca desinstales la central sin guardar y comprobar un respaldo.**
 

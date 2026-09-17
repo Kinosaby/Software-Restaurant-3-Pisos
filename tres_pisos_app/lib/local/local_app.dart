@@ -21,16 +21,16 @@ class LocalPosApp extends StatelessWidget {
   const LocalPosApp({super.key});
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: '3 Pisos',
-    debugShowCheckedModeBanner: false,
-    theme: ThemeData.dark(useMaterial3: true).copyWith(
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: const Color(0xffc99b48),
-        brightness: Brightness.dark,
-      ),
-    ),
-    home: const LocalPosScreen(),
-  );
+        title: '3 Pisos',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData.dark(useMaterial3: true).copyWith(
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color(0xffc99b48),
+            brightness: Brightness.dark,
+          ),
+        ),
+        home: const LocalPosScreen(),
+      );
 }
 
 ({Uri address, String key, String id}) parsePairing(String text) {
@@ -45,8 +45,7 @@ class LocalPosApp extends StatelessWidget {
   if (parts.length != 4 || parts.any((n) => n == null || n < 0 || n > 255)) {
     throw PosError(400, 'El enlace debe usar una dirección de la red local');
   }
-  final private =
-      parts[0] == 10 ||
+  final private = parts[0] == 10 ||
       (parts[0] == 172 && parts[1]! >= 16 && parts[1]! <= 31) ||
       (parts[0] == 192 && parts[1] == 168);
   final key = uri.queryParameters['key'] ?? '',
@@ -69,15 +68,14 @@ class LocalPosApp extends StatelessWidget {
 }
 
 Future<String> backupKey(String password, String salt) async {
-  final k =
-      await Pbkdf2(
-        macAlgorithm: Hmac.sha256(),
-        iterations: 210000,
-        bits: 256,
-      ).deriveKey(
-        secretKey: SecretKey(utf8.encode(password)),
-        nonce: utf8.encode(salt),
-      );
+  final k = await Pbkdf2(
+    macAlgorithm: Hmac.sha256(),
+    iterations: 210000,
+    bits: 256,
+  ).deriveKey(
+    secretKey: SecretKey(utf8.encode(password)),
+    nonce: utf8.encode(salt),
+  );
   return base64UrlEncode(await k.extractBytes());
 }
 
@@ -132,17 +130,23 @@ class _LocalPosScreenState extends State<LocalPosScreen>
       final dir = await getApplicationSupportDirectory();
       final db = await openDatabase(
         '${dir.path}/local-pos-v2.db',
-        version: 1,
+        version: 2,
         onCreate: PosEngine.createSchema,
+        onUpgrade: PosEngine.upgradeSchema,
         onConfigure: (db) async {
           await db.rawQuery('PRAGMA journal_mode=WAL');
           await db.execute('PRAGMA synchronous=FULL');
+          await db.execute('PRAGMA secure_delete=ON');
         },
       );
+      await db.rawQuery('PRAGMA wal_checkpoint(TRUNCATE)');
       engine = PosEngine(db);
       hasAccounts = (await engine!.records(db, 'users')).isNotEmpty;
       final mode = await engine!.setting('mode');
       if (mode != null) {
+        if (mode == 'central') {
+          await engine!.seedMenuIfEmpty(await restaurantMenu());
+        }
         final key = await storage.read(key: 'lan-key'),
             id = await engine!.setting('hub-id');
         if (key == null || id == null) {
@@ -217,14 +221,21 @@ class _LocalPosScreenState extends State<LocalPosScreen>
           if (d['action'] == 'backup') {
             await exportBackup(d['token']);
           }
-          if (d['action'] == 'import-menu' || d['action'] == 'export-menu') {
+          if ([
+            'import-menu',
+            'export-menu',
+            'restaurant-menu',
+          ].contains(d['action'])) {
             if (menuBusy) {
               return;
             }
             menuBusy = true;
             try {
-              if (d['action'] == 'import-menu') {
-                await importMenu(d['token']);
+              if (d['action'] != 'export-menu') {
+                await importMenu(
+                  d['token'],
+                  bundled: d['action'] == 'restaurant-menu',
+                );
               } else {
                 await exportMenu(d['token']);
               }
@@ -305,6 +316,7 @@ class _LocalPosScreenState extends State<LocalPosScreen>
           await engine!.bootstrap(username.text, password.text);
           hasAccounts = true;
         }
+        await engine!.seedMenuIfEmpty(await restaurantMenu());
         final key = randomKey(), id = randomKey();
         await storage.write(key: 'lan-key', value: key);
         await engine!.setSetting('hub-id', id);
@@ -328,7 +340,9 @@ class _LocalPosScreenState extends State<LocalPosScreen>
         await launch(false, p.key, p.id, p.address.toString());
       }
     } catch (e) {
-      error = e is PosError ? e.message : 'No se pudo conectar. Revisa el código y que las tablets estén en el mismo Wi-Fi.';
+      error = e is PosError
+          ? e.message
+          : 'No se pudo conectar. Revisa el código y que las tablets estén en el mismo Wi-Fi.';
     }
     if (mounted) {
       setState(() => busy = false);
@@ -455,26 +469,36 @@ class _LocalPosScreenState extends State<LocalPosScreen>
     engine!.require(Json.from(result['user'] as Map), ['admin']);
   }
 
-  Future<void> importMenu(String? token) async {
+  Future<List<Json>> restaurantMenu() async => MenuFile.parse(
+        (await rootBundle.load('assets/menu/restaurante.json'))
+            .buffer
+            .asUint8List(),
+      );
+
+  Future<void> importMenu(String? token, {bool bundled = false}) async {
     await checkMenuAccess(token);
-    final selected = await FilePicker.platform.pickFiles(
-      dialogTitle: 'Menú en CSV o JSON',
-      type: FileType.any,
-    );
-    if (selected == null) {
-      return;
+    final List<Json> products;
+    if (bundled) {
+      products = await restaurantMenu();
+    } else {
+      final selected = await FilePicker.platform.pickFiles(
+        dialogTitle: 'Menú en CSV o JSON',
+        type: FileType.any,
+      );
+      if (selected == null) {
+        return;
+      }
+      final file = selected.files.single;
+      if (file.size > MenuFile.maxBytes) {
+        throw PosError(400, 'El menú debe pesar menos de 2 MB');
+      }
+      final bytes = file.bytes ??
+          (file.path == null ? null : await File(file.path!).readAsBytes());
+      if (bytes == null) {
+        throw PosError(400, 'No se pudo leer el archivo del menú');
+      }
+      products = MenuFile.parse(bytes);
     }
-    final file = selected.files.single;
-    if (file.size > MenuFile.maxBytes) {
-      throw PosError(400, 'El menú debe pesar menos de 2 MB');
-    }
-    final bytes =
-        file.bytes ??
-        (file.path == null ? null : await File(file.path!).readAsBytes());
-    if (bytes == null) {
-      throw PosError(400, 'No se pudo leer el archivo del menú');
-    }
-    final products = MenuFile.parse(bytes);
     final plan = await engine!.previewMenu(products, token);
     if (!mounted) {
       return;
@@ -633,7 +657,10 @@ class _LocalPosScreenState extends State<LocalPosScreen>
       if (selected == null || selected.files.single.path == null) {
         return;
       }
-      final pass = await ask('Contraseña del respaldo', secret: true);
+      final pass = await ask(
+        'Clave del archivo de accesos o respaldo',
+        secret: true,
+      );
       if (pass == null) {
         return;
       }
@@ -649,9 +676,11 @@ class _LocalPosScreenState extends State<LocalPosScreen>
       await engine!.restore(data);
       hasAccounts = true;
       centralChoice = true;
-      error = 'Respaldo recuperado. Inicia la central y entra con tus usuarios anteriores. Luego vincula de nuevo las tablets.';
+      error =
+          'Datos y accesos cargados. Pulsa Iniciar central y entra con los usuarios de este archivo. Luego vincula las tablets de meseros.';
     } catch (_) {
-      error = 'No se pudo restaurar. Revisa archivo y contraseña. No se modificaron los datos.';
+      error =
+          'No se pudo cargar. Revisa archivo y clave. No se modificaron los datos.';
     } finally {
       if (mounted) {
         setState(() => busy = false);
@@ -751,14 +780,14 @@ class _LocalPosScreenState extends State<LocalPosScreen>
                       busy
                           ? 'Preparando…'
                           : centralChoice
-                          ? 'Iniciar central'
-                          : 'Vincular con cocina',
+                              ? 'Iniciar central'
+                              : 'Vincular con cocina',
                     ),
                   ),
                   if (!hasAccounts && centralChoice)
                     TextButton(
                       onPressed: busy ? null : restoreBackup,
-                      child: const Text('Restaurar un respaldo local'),
+                      child: const Text('Cargar accesos o respaldo'),
                     ),
                   if (busy)
                     const Padding(

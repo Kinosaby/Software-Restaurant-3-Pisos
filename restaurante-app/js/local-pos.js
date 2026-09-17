@@ -64,7 +64,7 @@ if(window.LOCAL_POS){
  const oldDeleteOrder=adminDeletePedido;adminDeletePedido=async function(id){await oldDeleteOrder(id);if(!_soloHoyAdmin)await history();};
  const backup=document.createElement('button');backup.className='btn btn-gold btn-sm';backup.textContent='Guardar respaldo';backup.onclick=()=>window.PosNative?.postMessage(JSON.stringify({action:'backup',token:Auth.token}));document.querySelector('#screen-admin .container').prepend(backup);
  const menuTools=document.createElement('div');menuTools.style='display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px';
- for(const [action,label] of [['import-menu','Importar menú'],['export-menu','Guardar archivo del menú']]){
+ for(const [action,label] of [['restaurant-menu','Cargar menú del restaurante'],['import-menu','Importar menú'],['export-menu','Guardar archivo del menú']]){
   const button=document.createElement('button');button.className='btn btn-outline btn-sm';button.textContent=label;
   button.onclick=()=>window.PosNative?.postMessage(JSON.stringify({action,token:Auth.token}));menuTools.append(button);
  }

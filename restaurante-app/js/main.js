@@ -154,12 +154,13 @@ function enterAdmin() {
 }
 
 function enterMesero() {
-  if (getRole() === 'cocina') { toastErr('Acceso denegado.'); return; }
+  if (!['admin', 'mesero'].includes(getRole())) { toastErr('Acceso denegado.'); return; }
   show('screen-mesero');
   loadMeseroData();
 }
 
 function enterCocina() {
+  if (!['admin', 'cocina'].includes(getRole())) { toastErr('Acceso denegado.'); return; }
   if ("Notification" in window && Notification.permission === "default") {
     Notification.requestPermission();
   }

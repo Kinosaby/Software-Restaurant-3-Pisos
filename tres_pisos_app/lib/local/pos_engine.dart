@@ -25,7 +25,7 @@ class PosEngine {
   final Database db;
   final DateTime Function() clock;
   PosEngine(this.db, {DateTime Function()? clock})
-    : clock = clock ?? DateTime.now;
+      : clock = clock ?? DateTime.now;
   static Future<void> createSchema(Database db, int version) async {
     for (final sql in [
       'CREATE TABLE records(kind TEXT NOT NULL,id INTEGER NOT NULL,payload TEXT NOT NULL,estado TEXT,creado_en TEXT,PRIMARY KEY(kind,id))',
@@ -45,16 +45,58 @@ class PosEngine {
     }
   }
 
+  static Future<String> receiptFingerprint(String raw) async =>
+      'sha256:${base64UrlEncode((await Sha256().hash(utf8.encode(raw))).bytes)}';
+
+  static Future<void> upgradeSchema(
+    Database db,
+    int oldVersion,
+    int newVersion,
+  ) async {
+    if (oldVersion < 2) {
+      for (final receipt in await db.query('receipts')) {
+        final raw = receipt['fingerprint'] as String;
+        if (!raw.startsWith('sha256:')) {
+          await db.update(
+            'receipts',
+            {'fingerprint': await receiptFingerprint(raw)},
+            where: 'key=?',
+            whereArgs: [receipt['key']],
+          );
+        }
+      }
+    }
+  }
+
+  /// New installations receive the owner's catalog. Existing edits always win.
+  Future<bool> seedMenuIfEmpty(List<Json> products) =>
+      db.transaction((tx) async {
+        if ((await records(tx, 'products', limit: 1)).isNotEmpty) {
+          return false;
+        }
+        final plan = await planMenu(tx, products);
+        for (final change in plan['cambios'] as List) {
+          final product = Json.from(change['producto'] as Map);
+          product['id'] = await nextId(tx, 'products');
+          await save(tx, 'products', product);
+        }
+        await event(tx, 'catalogo_actualizado', {});
+        return true;
+      });
+
   Future<String?> setting(String key) async {
     final rows = await db.query('settings', where: 'key=?', whereArgs: [key]);
     return rows.isEmpty ? null : rows.first['value'] as String;
   }
 
   Future<void> setSetting(String key, String value) async {
-    await db.insert('settings', {
-      'key': key,
-      'value': value,
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await db.insert(
+        'settings',
+        {
+          'key': key,
+          'value': value,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<List<Json>> records(
@@ -86,13 +128,16 @@ class PosEngine {
   }
 
   Future<void> save(DatabaseExecutor tx, String kind, Json value) async {
-    await tx.insert('records', {
-      'kind': kind,
-      'id': value['id'],
-      'payload': jsonEncode(value),
-      'estado': value['estado'],
-      'creado_en': value['creado_en'] ?? value['fecha'],
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await tx.insert(
+        'records',
+        {
+          'kind': kind,
+          'id': value['id'],
+          'payload': jsonEncode(value),
+          'estado': value['estado'],
+          'creado_en': value['creado_en'] ?? value['fecha'],
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace);
     if (kind == 'orders') {
       await tx.delete(
         'order_items',
@@ -122,11 +167,11 @@ class PosEngine {
       kind,
     ]);
     return (await tx.query(
-          'sequences',
-          where: 'kind=?',
-          whereArgs: [kind],
-        )).first['value']
-        as int;
+      'sequences',
+      where: 'kind=?',
+      whereArgs: [kind],
+    ))
+        .first['value'] as int;
   }
 
   Future<void> event(DatabaseExecutor tx, String name, Json data) async {
@@ -184,10 +229,10 @@ class PosEngine {
   }
 
   Json publicUser(Json u) => {
-    'id': u['id'],
-    'username': u['username'],
-    'role': u['role'],
-  };
+        'id': u['id'],
+        'username': u['username'],
+        'role': u['role'],
+      };
   Future<Json> user(DatabaseExecutor tx, String? token) async {
     final s = await tx.query(
       'sessions',
@@ -211,11 +256,15 @@ class PosEngine {
       if ((await records(tx, 'users')).isNotEmpty) {
         throw PosError(409, 'La central ya está configurada');
       }
-      await writeUser(tx, null, {
-        'username': username,
-        'password': password,
-        'role': 'admin',
-      }, null);
+      await writeUser(
+          tx,
+          null,
+          {
+            'username': username,
+            'password': password,
+            'role': 'admin',
+          },
+          null);
     });
   }
 
@@ -272,67 +321,70 @@ class PosEngine {
     Json body = const {},
     String? token,
     String? operationId,
-  }) async => db.transaction((tx) async {
-    if (uri.path == '/api/auth/login' && method == 'POST') {
-      final matches = (await records(tx, 'users')).where(
-        (u) =>
-            u['username'].toString().toLowerCase() ==
-            (body['username'] ?? '').toString().trim().toLowerCase(),
-      );
-      if (matches.isEmpty) {
-        throw PosError(401, 'Usuario o contraseña incorrectos');
-      }
-      final u = matches.first;
-      if (await passwordHash((body['password'] ?? '').toString(), u['salt']) !=
-          u['password']) {
-        throw PosError(401, 'Usuario o contraseña incorrectos');
-      }
-      final key = randomKey();
-      await tx.delete('sessions', where: 'expires<=?', whereArgs: [now()]);
-      await tx.insert('sessions', {
-        'token': key,
-        'user_id': u['id'],
-        'expires': clock()
-            .toUtc()
-            .add(const Duration(days: 30))
-            .toIso8601String(),
+  }) async =>
+      db.transaction((tx) async {
+        if (uri.path == '/api/auth/login' && method == 'POST') {
+          final matches = (await records(tx, 'users')).where(
+            (u) =>
+                u['username'].toString().toLowerCase() ==
+                (body['username'] ?? '').toString().trim().toLowerCase(),
+          );
+          if (matches.isEmpty) {
+            throw PosError(401, 'Usuario o contraseña incorrectos');
+          }
+          final u = matches.first;
+          if (await passwordHash(
+                  (body['password'] ?? '').toString(), u['salt']) !=
+              u['password']) {
+            throw PosError(401, 'Usuario o contraseña incorrectos');
+          }
+          final key = randomKey();
+          await tx.delete('sessions', where: 'expires<=?', whereArgs: [now()]);
+          await tx.insert('sessions', {
+            'token': key,
+            'user_id': u['id'],
+            'expires':
+                clock().toUtc().add(const Duration(days: 30)).toIso8601String(),
+          });
+          return {'token': key, 'user': publicUser(u)};
+        }
+        final actor = await user(tx, token);
+        if (method == 'GET') {
+          return read(tx, uri, actor);
+        }
+        if (operationId == null ||
+            operationId.length < 16 ||
+            operationId.length > 128) {
+          throw PosError(400, 'Falta identificador de operación');
+        }
+        // Receipts must never retain registration/password-change plaintext.
+        final fingerprint = await receiptFingerprint(
+          jsonEncode([method, uri.path, body]),
+        );
+        final receipts = await tx.query(
+          'receipts',
+          where: 'key=?',
+          whereArgs: [operationId],
+        );
+        if (receipts.isNotEmpty) {
+          final r = receipts.first;
+          if (r['user_id'] != actor['id'] || r['fingerprint'] != fingerprint) {
+            throw PosError(409, 'Identificador reutilizado con otra operación');
+          }
+          return jsonDecode(r['response'] as String) as Json;
+        }
+        final result = {
+          'success': true,
+          ...await mutate(tx, method, uri, body, actor),
+        };
+        await tx.insert('receipts', {
+          'key': operationId,
+          'user_id': actor['id'],
+          'fingerprint': fingerprint,
+          'response': jsonEncode(result),
+        });
+        return result;
       });
-      return {'token': key, 'user': publicUser(u)};
-    }
-    final actor = await user(tx, token);
-    if (method == 'GET') {
-      return read(tx, uri, actor);
-    }
-    if (operationId == null ||
-        operationId.length < 16 ||
-        operationId.length > 128) {
-      throw PosError(400, 'Falta identificador de operación');
-    }
-    final fingerprint = jsonEncode([method, uri.path, body]);
-    final receipts = await tx.query(
-      'receipts',
-      where: 'key=?',
-      whereArgs: [operationId],
-    );
-    if (receipts.isNotEmpty) {
-      final r = receipts.first;
-      if (r['user_id'] != actor['id'] || r['fingerprint'] != fingerprint) {
-        throw PosError(409, 'Identificador reutilizado con otra operación');
-      }
-      return jsonDecode(r['response'] as String) as Json;
-    }
-    final result = {
-      'success': true,
-      ...await mutate(tx, method, uri, body, actor),
-    };
-    await tx.insert('receipts', {
-      'key': operationId,
-      'user_id': actor['id'],
-      'fingerprint': fingerprint,
-      'response': jsonEncode(result),
-    });
-    return result;
-  });
   Future<Json> read(DatabaseExecutor tx, Uri uri, Json actor) async {
     final path = uri.path;
     if (path == '/api/auth/me') {
@@ -368,7 +420,8 @@ class PosEngine {
       final after = int.tryParse(uri.queryParameters['after'] ?? '') ?? -1;
       final bounds = (await tx.rawQuery(
         'SELECT MIN(seq) AS first,MAX(seq) AS last FROM events',
-      )).first;
+      ))
+          .first;
       final last = bounds['last'] as int? ?? 0;
       final first = bounds['first'] as int? ?? 0;
       if (after < 0 || after > last || after < first - 1) {
@@ -472,9 +525,9 @@ class PosEngine {
   }
 
   String menuIdentity(Json p) => jsonEncode([
-    p['nombre'].toString().trim().toLowerCase(),
-    p['categoria'].toString().trim().toLowerCase(),
-  ]);
+        p['nombre'].toString().trim().toLowerCase(),
+        p['categoria'].toString().trim().toLowerCase(),
+      ]);
 
   Future<Json> planMenu(DatabaseExecutor tx, dynamic raw) async {
     if (raw is! List || raw.isEmpty || raw.length > MenuFile.maxProducts) {
@@ -541,8 +594,8 @@ class PosEngine {
           'accion': old == null
               ? 'nuevo'
               : changed
-              ? 'actualizar'
-              : 'sin_cambios',
+                  ? 'actualizar'
+                  : 'sin_cambios',
         });
       } on PosError catch (e) {
         throw PosError(e.status, 'Producto ${i + 1}: ${e.message}');
@@ -591,9 +644,9 @@ class PosEngine {
   }
 
   int total(List<dynamic> items) => items.fold(
-    0,
-    (sum, i) => sum + money(i['precio']) * integer(i['cantidad'], max: 999),
-  );
+        0,
+        (sum, i) => sum + money(i['precio']) * integer(i['cantidad'], max: 999),
+      );
   Future<Json> createOrder(DatabaseExecutor tx, Json b, Json actor) async {
     require(actor, ['admin', 'mesero']);
     final type = b['tipo'] ?? 'aqui';
@@ -672,7 +725,9 @@ class PosEngine {
                 (await records(
                       tx,
                       'users',
-                    )).where((u) => u['role'] == 'admin').length ==
+                    ))
+                        .where((u) => u['role'] == 'admin')
+                        .length ==
                     1)) {
           throw PosError(409, 'No puedes eliminar esta cuenta administradora');
         }
@@ -688,9 +743,8 @@ class PosEngine {
     if (path == '/api/productos' ||
         RegExp(r'^/api/productos/\d+$').hasMatch(path)) {
       require(actor, ['admin']);
-      final id = path == '/api/productos'
-          ? null
-          : integer(uri.pathSegments.last);
+      final id =
+          path == '/api/productos' ? null : integer(uri.pathSegments.last);
       final old = id == null ? null : await record(tx, 'products', id);
       if (!['POST', 'PUT', 'DELETE'].contains(method) ||
           (id == null && method != 'POST')) {
@@ -710,9 +764,8 @@ class PosEngine {
           b['categoria'] ?? old?['categoria'] ?? 'General',
           max: 50,
         ),
-        'activo': method == 'DELETE'
-            ? false
-            : b['activo'] ?? old?['activo'] ?? true,
+        'activo':
+            method == 'DELETE' ? false : b['activo'] ?? old?['activo'] ?? true,
       };
       if (product['activo'] is! bool) {
         throw PosError(400, 'Disponibilidad inválida');
@@ -828,12 +881,15 @@ class PosEngine {
           throw PosError(409, 'El pedido está cancelado');
         }
         if (p['estado'] == 'pagado') {
-          final next = await createOrder(tx, {
-            'mesa': p['mesa'],
-            'tipo': b['tipo'] ?? p['tipo'],
-            'comensal': p['comensal'],
-            'productos': b['productos'],
-          }, actor);
+          final next = await createOrder(
+              tx,
+              {
+                'mesa': p['mesa'],
+                'tipo': b['tipo'] ?? p['tipo'],
+                'comensal': p['comensal'],
+                'productos': b['productos'],
+              },
+              actor);
           return {'pedido': next, 'nueva_cuenta': true};
         }
         final items = await makeItems(tx, b['productos']);
@@ -879,9 +935,8 @@ class PosEngine {
           if (b['items'] is! List) {
             throw PosError(400, 'Edición inválida');
           }
-          final items = (p['productos'] as List)
-              .map((i) => Json.from(i as Map))
-              .toList();
+          final items =
+              (p['productos'] as List).map((i) => Json.from(i as Map)).toList();
           for (final change in b['items'] as List) {
             final found = items.where((i) => i['id'] == change['detalle_id']);
             if (found.isEmpty) {
@@ -986,19 +1041,18 @@ class PosEngine {
       v['pedidos']++;
       v['cents'] += money(s['total']);
     }
-    final series =
-        daily.values
-            .map(
-              (d) => {
-                'fecha': d['fecha'],
-                'pedidos': d['pedidos'],
-                'total': d['cents'] / 100,
-              },
-            )
-            .toList()
-          ..sort(
-            (a, b) => (a['fecha'] as String).compareTo(b['fecha'] as String),
-          );
+    final series = daily.values
+        .map(
+          (d) => {
+            'fecha': d['fecha'],
+            'pedidos': d['pedidos'],
+            'total': d['cents'] / 100,
+          },
+        )
+        .toList()
+      ..sort(
+        (a, b) => (a['fecha'] as String).compareTo(b['fecha'] as String),
+      );
     final d = {
       'total_ventas': (daily[today]?['cents'] ?? 0) / 100,
       'total_pedidos': counts.first['n'],
@@ -1088,7 +1142,12 @@ class PosEngine {
         await tx.insert('sequences', Json.from(r as Map));
       }
       for (final r in backup['receipts'] as List) {
-        await tx.insert('receipts', Json.from(r as Map));
+        final receipt = Json.from(r as Map);
+        final raw = receipt['fingerprint'] as String;
+        if (!raw.startsWith('sha256:')) {
+          receipt['fingerprint'] = await receiptFingerprint(raw);
+        }
+        await tx.insert('receipts', receipt);
       }
     });
   }

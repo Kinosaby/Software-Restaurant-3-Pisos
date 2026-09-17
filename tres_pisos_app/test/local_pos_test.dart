@@ -20,30 +20,38 @@ void main() {
     Json body = const {},
     String? token,
     String? id,
-  ]) => pos.call(
-    method,
-    Uri.parse(path),
-    body: body,
-    token: token ?? admin,
-    operationId: id ?? randomKey(),
-  );
+  ]) =>
+      pos.call(
+        method,
+        Uri.parse(path),
+        body: body,
+        token: token ?? admin,
+        operationId: id ?? randomKey(),
+      );
   Future<String> login(String user) async => (await call(
-    'POST',
-    '/api/auth/login',
-    {'username': user, 'password': 'test-password'},
-  ))['token'];
-  Future<Json> order([int count = 1]) async =>
-      (await call('POST', '/api/pedidos', {
+        'POST',
+        '/api/auth/login',
+        {'username': user, 'password': 'test-password'},
+      ))['token'];
+  Future<Json> order([int count = 1]) async => (await call(
+      'POST',
+      '/api/pedidos',
+      {
         'mesa': 1,
         'comensal': 'Ana',
         'productos': [
           {'producto_id': 1, 'cantidad': count, 'nota': 'Sin cebolla'},
         ],
-      }, waiter))['pedido'];
+      },
+      waiter))['pedido'];
   Future<void> ready(int id) async {
-    await call('PUT', '/api/pedidos/$id/estado', {
-      'estado': 'preparando',
-    }, kitchen);
+    await call(
+        'PUT',
+        '/api/pedidos/$id/estado',
+        {
+          'estado': 'preparando',
+        },
+        kitchen);
     await call('PUT', '/api/pedidos/$id/estado', {'estado': 'listo'}, kitchen);
   }
 
@@ -244,17 +252,21 @@ void main() {
       expect(results[0], results[1]);
       expect((await call('GET', '/api/pedidos'))['pedidos'], hasLength(2));
       await expectLater(
-        call('POST', '/api/pedidos/lote', {
-          'pedidos': [
-            (body['pedidos'] as List).first,
+        call(
+            'POST',
+            '/api/pedidos/lote',
             {
-              'mesa': 4,
-              'productos': [
-                {'producto_id': 999, 'cantidad': 1},
+              'pedidos': [
+                (body['pedidos'] as List).first,
+                {
+                  'mesa': 4,
+                  'productos': [
+                    {'producto_id': 999, 'cantidad': 1},
+                  ],
+                },
               ],
             },
-          ],
-        }, waiter),
+            waiter),
         rejects(404),
       );
       expect((await call('GET', '/api/pedidos'))['pedidos'], hasLength(2));
@@ -291,9 +303,13 @@ void main() {
       rejects(409),
     );
     await expectLater(
-      call('PUT', '/api/pedidos/${p['id']}/estado', {
-        'estado': 'listo',
-      }, waiter),
+      call(
+          'PUT',
+          '/api/pedidos/${p['id']}/estado',
+          {
+            'estado': 'listo',
+          },
+          waiter),
       rejects(403),
     );
   });
@@ -301,10 +317,14 @@ void main() {
     'Kitchen item checks and extras persist; payment waits for extras',
     () async {
       final p = await order(), id = p['id'];
-      await call('PATCH', '/api/pedidos/$id/item', {
-        'detalle_id': p['productos'][0]['id'],
-        'listo': true,
-      }, kitchen);
+      await call(
+          'PATCH',
+          '/api/pedidos/$id/item',
+          {
+            'detalle_id': p['productos'][0]['id'],
+            'listo': true,
+          },
+          kitchen);
       expect(
         (await call(
           'GET',
@@ -313,16 +333,24 @@ void main() {
         true,
       );
       await ready(id);
-      await call('PATCH', '/api/pedidos/$id/agregar', {
-        'productos': [
-          {'producto_id': 1, 'cantidad': 2},
-        ],
-      }, waiter);
+      await call(
+          'PATCH',
+          '/api/pedidos/$id/agregar',
+          {
+            'productos': [
+              {'producto_id': 1, 'cantidad': 2},
+            ],
+          },
+          waiter);
       final ex = (await call('GET', '/api/extras'))['extras'][0];
-      await call('PATCH', '/api/extras/${ex['id']}', {
-        'item': 0,
-        'listo': true,
-      }, kitchen);
+      await call(
+          'PATCH',
+          '/api/extras/${ex['id']}',
+          {
+            'item': 0,
+            'listo': true,
+          },
+          kitchen);
       expect(
         (await call('GET', '/api/extras'))['extras'][0]['_done']['0'],
         true,
@@ -350,11 +378,15 @@ void main() {
       await ready(a['id']);
       await ready(b['id']);
       await expectLater(
-        call('POST', '/api/pedidos/cobrar', {
-          'ids': [a['id'], b['id']],
-          'total_esperado': 25,
-          'recibido': 100,
-        }, waiter),
+        call(
+            'POST',
+            '/api/pedidos/cobrar',
+            {
+              'ids': [a['id'], b['id']],
+              'total_esperado': 25,
+              'recibido': 100,
+            },
+            waiter),
         rejects(409),
       );
       expect(
@@ -379,11 +411,15 @@ void main() {
         paid,
       );
       expect(paid['cambio'], 12.5);
-      final next = await call('PATCH', '/api/pedidos/${a['id']}/agregar', {
-        'productos': [
-          {'producto_id': 1, 'cantidad': 1},
-        ],
-      }, waiter);
+      final next = await call(
+          'PATCH',
+          '/api/pedidos/${a['id']}/agregar',
+          {
+            'productos': [
+              {'producto_id': 1, 'cantidad': 1},
+            ],
+          },
+          waiter);
       expect(next['nueva_cuenta'], true);
       expect(next['pedido']['id'], isNot(a['id']));
       expect(
@@ -417,6 +453,12 @@ void main() {
       hasLength(1),
     );
     final backup = await call('GET', '/api/local/backup');
+    // A 2.1 backup used the full request as its receipt fingerprint.
+    for (final receipt in backup['receipts'] as List) {
+      if (receipt['key'] == op) {
+        receipt['fingerprint'] = jsonEncode(['POST', '/api/pedidos', first]);
+      }
+    }
     final restoredDb = await databaseFactoryFfi.openDatabase(
       inMemoryDatabasePath,
       options: OpenDatabaseOptions(
@@ -486,15 +528,13 @@ void main() {
           hub: endpoint,
           asset: (_) async => [],
         );
-        final token =
-            (await client.request(
-                  'POST',
-                  '/api/auth/login',
-                  {'username': 'mesero', 'password': 'test-password'},
-                  null,
-                  randomKey(),
-                ))['token']
-                as String;
+        final token = (await client.request(
+          'POST',
+          '/api/auth/login',
+          {'username': 'mesero', 'password': 'test-password'},
+          null,
+          randomKey(),
+        ))['token'] as String;
         final wrong = PosServer(
           engine: PosEngine(clientDb),
           central: false,
