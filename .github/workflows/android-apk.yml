@@ -37,7 +37,9 @@ jobs:
         run: flutter analyze
       - name: Ejecutar pruebas
         run: flutter test
-      - name: Compilar APK local
+      - name: Compilar APK de validación (firma de prueba)
+        env:
+          POS_ALLOW_TEST_SIGNING: 'true'
         run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:

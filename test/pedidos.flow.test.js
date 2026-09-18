@@ -139,3 +139,22 @@ test('flujo completo: mesero crea, cocina prepara y mesero cobra', async () => {
   assert.equal(ventas.length, 1);
   assert.equal(Number(ventas[0].total), 170);
 });
+
+
+test('web tokens are invalid after password or role changes and account deletion', async () => {
+  const { login } = require('../src/services/auth.service');
+  const { verifySession } = require('../src/services/session.service');
+  const hash = await bcrypt.hash('test-password', 4);
+  const { rows: [user] } = await pool.query(
+    "INSERT INTO usuarios(username,password,role) VALUES('security-user',$1,'admin') RETURNING id", [hash]);
+  const first = await login('security-user', 'test-password');
+  assert.equal((await verifySession(first.token)).role, 'admin');
+  await pool.query("UPDATE usuarios SET role='mesero' WHERE id=$1", [user.id]);
+  await request(app).get('/api/auth/me').set('Authorization', `Bearer ${first.token}`).expect(401);
+  const second = await login('security-user', 'test-password');
+  await pool.query('UPDATE usuarios SET password=$1 WHERE id=$2', [await bcrypt.hash('new-password', 4), user.id]);
+  await assert.rejects(verifySession(second.token));
+  const third = await login('security-user', 'new-password');
+  await pool.query('DELETE FROM usuarios WHERE id=$1', [user.id]);
+  await assert.rejects(verifySession(third.token));
+});

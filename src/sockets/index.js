@@ -3,7 +3,7 @@
  * Exporta una función que recibe el servidor HTTP y devuelve io.
  */
 const { Server } = require('socket.io');
-const jwt        = require('jsonwebtoken');
+const { verifySession } = require('../services/session.service');
 const logger     = require('../utils/logger');
 const env        = require('../config/env');
 
@@ -17,7 +17,7 @@ function initSocket(httpServer) {
     transports: ['websocket', 'polling'],
   });
 
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     const authToken = socket.handshake.auth?.token;
     const header = socket.handshake.headers?.authorization;
     const headerToken = header?.startsWith('Bearer ') ? header.slice(7).trim() : header;
@@ -28,7 +28,7 @@ function initSocket(httpServer) {
     }
 
     try {
-      socket.data.user = jwt.verify(token, env.JWT_SECRET);
+      socket.data.user = await verifySession(token);
       return next();
     } catch (_) {
       return next(new Error('INVALID_TOKEN'));
@@ -41,7 +41,11 @@ function initSocket(httpServer) {
     socket.join(`user:${userId}`);
     logger.info('Socket conectado', { socketId: socket.id, userId, role });
 
+    const expires = Math.max(0, socket.data.user.exp * 1000 - Date.now());
+    const expiryTimer = setTimeout(() => socket.disconnect(true), Math.min(expires, 2147483647));
+    expiryTimer.unref();
     socket.on('disconnect', (reason) => {
+      clearTimeout(expiryTimer);
       logger.debug('Socket desconectado', { socketId: socket.id, reason });
     });
   });

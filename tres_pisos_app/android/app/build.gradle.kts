@@ -5,6 +5,14 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val releaseStore = System.getenv("POS_KEYSTORE_PATH")
+val releaseAlias = System.getenv("POS_KEY_ALIAS")
+val releaseStorePassword = System.getenv("POS_STORE_PASSWORD")
+val releaseKeyPassword = System.getenv("POS_KEY_PASSWORD")
+val hasReleaseKey = listOf(releaseStore, releaseAlias, releaseStorePassword, releaseKeyPassword)
+    .all { !it.isNullOrBlank() }
+val allowTestSigning = System.getenv("POS_ALLOW_TEST_SIGNING") == "true"
+
 android {
     namespace = "com.trespisos.tres_pisos_app"
     compileSdk = flutter.compileSdkVersion
@@ -30,11 +38,23 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("production") {
+                storeFile = file(releaseStore!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = when {
+                hasReleaseKey -> signingConfigs.getByName("production")
+                allowTestSigning -> signingConfigs.getByName("debug")
+                else -> null
+            }
         }
     }
 }
@@ -45,4 +65,16 @@ dependencies {
 
 flutter {
     source = "../.."
+}
+
+val requireReleaseKey = tasks.register("requireReleaseKey") {
+    doLast {
+        check(hasReleaseKey || allowTestSigning) {
+            "Configura POS_KEYSTORE_PATH, POS_KEY_ALIAS, POS_STORE_PASSWORD y POS_KEY_PASSWORD. " +
+                "Solo para validación se permite POS_ALLOW_TEST_SIGNING=true."
+        }
+    }
+}
+tasks.configureEach {
+    if (name == "preReleaseBuild") dependsOn(requireReleaseKey)
 }

@@ -2,15 +2,14 @@
  * auth.middleware.js — Autenticación JWT y autorización por roles.
  * Exporta: authMiddleware, requireRole(...roles), isAdmin, isCocina
  */
-const jwt = require('jsonwebtoken');
-const env = require('../config/env');
+const { verifySession } = require('../services/session.service');
 const AppError = require('../utils/AppError');
 
 /**
  * Verifica el token JWT del header Authorization.
  * Adjunta req.user = { id, username, role, iat, exp }
  */
-const authMiddleware = (req, res, next) => {
+const authMiddleware = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
 
   if (!authHeader) {
@@ -22,7 +21,7 @@ const authMiddleware = (req, res, next) => {
     : authHeader.trim();
 
   try {
-    const decoded = jwt.verify(token, env.JWT_SECRET);
+    const decoded = await verifySession(token);
     req.user = decoded;
     next();
   } catch (err) {

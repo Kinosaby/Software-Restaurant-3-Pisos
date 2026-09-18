@@ -30,12 +30,14 @@ exports.listarUsuarios = asyncHandler(async (req, res) => {
 /** PUT /api/auth/:id  (solo admin) */
 exports.actualizarUsuario = asyncHandler(async (req, res) => {
   const user = await authService.actualizarUsuario(req.params.id, req.body);
+  req.app.get('io')?.in?.(`user:${user.id}`).disconnectSockets(true);
   res.json({ success: true, user });
 });
 
 /** DELETE /api/auth/:id  (solo admin) */
 exports.eliminarUsuario = asyncHandler(async (req, res) => {
   const user = await authService.eliminarUsuario(req.params.id, req.user.id);
+  req.app.get('io')?.in?.(`user:${user.id}`).disconnectSockets(true);
   res.json({ success: true, mensaje: 'Usuario eliminado', user });
 });
 

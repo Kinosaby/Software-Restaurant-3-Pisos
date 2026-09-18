@@ -3,6 +3,7 @@
  * Columnas de la BD: id, username, password, role, created_at
  */
 const bcrypt   = require('bcryptjs');
+const { sessionVersion } = require('./session.service');
 const jwt      = require('jsonwebtoken');
 const pool     = require('../config/db');
 const env      = require('../config/env');
@@ -39,7 +40,7 @@ async function login(username, password) {
 
   const norm  = normalizar(user);
   const token = jwt.sign(
-    { id: norm.id, username: norm.username, role: norm.role },
+    { id: norm.id, username: norm.username, role: norm.role, sv: sessionVersion(user) },
     env.JWT_SECRET,
     { expiresIn: env.JWT_EXPIRES_IN }
   );

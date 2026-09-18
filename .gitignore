@@ -3,3 +3,14 @@ node_modules/
 .vscode/
 
 tres_pisos_app/assets/pos/
+
+# Private access, database and signing files
+*.3pisos
+*.jks
+*.keystore
+key.properties
+Accesos-*.txt
+installation-secrets.json
+*.db
+*.db-wal
+*.db-shm

@@ -336,8 +336,7 @@ class _LocalPosScreenState extends State<LocalPosScreen>
         }
         await storage.write(key: 'lan-key', value: p.key);
         await engine!.setSetting('hub-id', p.id);
-        await storage.write(key: 'lan-key', value: p.key);
-      await engine!.setSetting('hub-url', p.address.toString());
+        await engine!.setSetting('hub-url', p.address.toString());
         await engine!.setSetting('mode', 'client');
         await launch(false, p.key, p.id, p.address.toString());
       }
