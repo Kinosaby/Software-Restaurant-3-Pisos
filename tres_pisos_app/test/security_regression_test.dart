@@ -170,7 +170,7 @@ void main() {
     await hub.lanServer!.close(force: true); hub.lanServer = null;
     await expectLater(c.request('GET', '/api/productos', {}, token, null), denied(401));
     await c.engine.setSetting('session-user:expired', '2');
-    await c.engine.setSetting('session-expiry:expired', DateTime.now().subtract(const Duration(seconds: 1)).toIso8601String());
+    await c.engine.setSetting('session-expiry:expired', c.engine.clock().subtract(const Duration(seconds: 1)).toIso8601String());
     await expectLater(c.localUser('expired'), denied(401));
   });
   test('Restoring rejects injected HTML and repairs sequence collisions atomically', () async {
@@ -231,7 +231,7 @@ void main() {
     final cursor = (await call('GET', '/api/local/events'))['cursor'];
     await call('PATCH', '/api/pedidos/${open['id']}/cancelar', {}, waiter);
     final updates = (await call('GET', '/api/local/events?after=$cursor', {}, waiter))['events'];
-    expect(updates, contains({'name': 'pedido_eliminado', 'data': {'id': open['id']}}));
+    expect(updates, contains(equals({'name': 'pedido_eliminado', 'data': {'id': open['id']}})));
   });
 
   test('Moving a table updates pending extras atomically and keeps stale edits rejected', () async {
