@@ -40,6 +40,7 @@ class PosEngine {
       'CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)',
       'CREATE TABLE cache(key TEXT PRIMARY KEY,value TEXT NOT NULL)',
       'CREATE TABLE outbox(id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,token TEXT NOT NULL,path TEXT NOT NULL,body TEXT NOT NULL,status TEXT NOT NULL,error TEXT,created TEXT NOT NULL)',
+      'CREATE TABLE revocations(token TEXT PRIMARY KEY)',
     ]) {
       await db.execute(sql);
     }
@@ -65,6 +66,9 @@ class PosEngine {
           );
         }
       }
+    }
+    if (oldVersion < 3) {
+      await db.execute('CREATE TABLE IF NOT EXISTS revocations(token TEXT PRIMARY KEY)');
     }
   }
 
@@ -228,6 +232,14 @@ class PosEngine {
     return base64Encode(await k.extractBytes());
   }
 
+  static bool sameSecret(String a, String b) {
+    var difference = a.length ^ b.length;
+    for (var i = 0; i < a.length; i++) {
+      difference |= a.codeUnitAt(i) ^ (i < b.length ? b.codeUnitAt(i) : 0);
+    }
+    return difference == 0;
+  }
+
   Json publicUser(Json u) => {
         'id': u['id'],
         'username': u['username'],
@@ -324,29 +336,34 @@ class PosEngine {
   }) async =>
       db.transaction((tx) async {
         if (uri.path == '/api/auth/login' && method == 'POST') {
+          final name = body['username'], password = body['password'];
+          if (name is! String || name.trim().isEmpty || name.length > 100 ||
+              password is! String || password.isEmpty || password.length > 128) {
+            throw PosError(401, 'Usuario o contraseña incorrectos');
+          }
           final matches = (await records(tx, 'users')).where(
             (u) =>
                 u['username'].toString().toLowerCase() ==
                 (body['username'] ?? '').toString().trim().toLowerCase(),
           );
-          if (matches.isEmpty) {
-            throw PosError(401, 'Usuario o contraseña incorrectos');
-          }
-          final u = matches.first;
-          if (await passwordHash(
-                  (body['password'] ?? '').toString(), u['salt']) !=
-              u['password']) {
+          final u = matches.isEmpty ? null : matches.first;
+          final hash = await passwordHash(password, u?['salt'] ?? 'unregistered-account');
+          if (u == null || !sameSecret(hash, u['password'])) {
             throw PosError(401, 'Usuario o contraseña incorrectos');
           }
           final key = randomKey();
           await tx.delete('sessions', where: 'expires<=?', whereArgs: [now()]);
+          final expires = clock().toUtc().add(const Duration(days: 30)).toIso8601String();
           await tx.insert('sessions', {
             'token': key,
             'user_id': u['id'],
-            'expires':
-                clock().toUtc().add(const Duration(days: 30)).toIso8601String(),
+            'expires': expires,
           });
-          return {'token': key, 'user': publicUser(u)};
+          return {'token': key, 'user': publicUser(u), 'expires_at': expires};
+        }
+        if (uri.path == '/api/auth/logout' && method == 'POST') {
+          await tx.delete('sessions', where: 'token=?', whereArgs: [token ?? '']);
+          return {'success': true};
         }
         final actor = await user(tx, token);
         if (method == 'GET') {
@@ -704,10 +721,6 @@ class PosEngine {
         'sin_cambios': plan['sin_cambios'],
       };
     }
-    if (path == '/api/auth/logout') {
-      await tx.delete('sessions', where: 'user_id=?', whereArgs: [actor['id']]);
-      return {};
-    }
     if (path == '/api/auth/register' && method == 'POST') {
       require(actor, ['admin']);
       return writeUser(tx, null, b, actor);
@@ -791,12 +804,13 @@ class PosEngine {
     }
     if (path == '/api/pedidos/cobrar' && method == 'POST') {
       require(actor, ['admin', 'mesero']);
-      final ids = b['ids'];
-      if (ids is! List ||
-          ids.isEmpty ||
-          ids.length > 50 ||
-          ids.toSet().length != ids.length) {
+      final rawIds = b['ids'];
+      if (rawIds is! List || rawIds.isEmpty || rawIds.length > 50) {
         throw PosError(400, 'Cuentas inválidas');
+      }
+      final ids = rawIds.map((id) => integer(id)).toList();
+      if (ids.toSet().length != ids.length) {
+        throw PosError(400, 'La misma cuenta no se puede cobrar dos veces');
       }
       final extras = await records(
         tx,
@@ -844,6 +858,10 @@ class PosEngine {
     if (RegExp(r'^/api/extras/\d+$').hasMatch(path) && method == 'PATCH') {
       require(actor, ['admin', 'cocina']);
       final ex = await record(tx, 'extras', integer(uri.pathSegments.last));
+      if (ex['estado'] != 'pendiente' ||
+          (await record(tx, 'orders', ex['pedido_id']))['estado'] != 'listo') {
+        throw PosError(409, 'El extra ya no está pendiente');
+      }
       if (b['done'] == true) {
         ex['estado'] = 'listo';
       }
@@ -1103,6 +1121,86 @@ class PosEngine {
         backup['receipts'] is! List) {
       throw PosError(400, 'Respaldo inválido');
     }
+    final maxima = <String, int>{};
+    final seen = <String>{}, names = <String>{};
+    void id(String kind, dynamic value) {
+      if (value is! int) { throw PosError(400, 'Identificador inválido'); }
+      integer(value);
+      maxima[kind] = max(maxima[kind] ?? 0, value);
+    }
+    void date(dynamic value) {
+      if (value is! String || DateTime.tryParse(value) == null) {
+        throw PosError(400, 'Fecha inválida en el respaldo');
+      }
+    }
+    void items(dynamic raw) {
+      if (raw is! List || raw.isEmpty) { throw PosError(400, 'Productos inválidos'); }
+      final ids = <int>{};
+      for (final i in raw) {
+        if (i is! Map) { throw PosError(400, 'Producto inválido'); }
+        id('items', i['id']);
+        if (!ids.add(i['id'])) { throw PosError(400, 'Producto repetido'); }
+        integer(i['producto_id']); integer(i['cantidad'], max: 999);
+        label(i['nombre']); label(i['nota'], max: 500, empty: true);
+        if (money(i['precio']) <= 0 ||
+            (i['precio_unitario'] != null && money(i['precio_unitario']) != money(i['precio']))) {
+          throw PosError(400, 'Precio inválido');
+        }
+      }
+    }
+    for (final row in backup['records'] as List) {
+      if (row is! Map || row['payload'] is! String ||
+          !['users','products','orders','extras','sales'].contains(row['kind'])) {
+        throw PosError(400, 'Registro inválido');
+      }
+      final v = jsonDecode(row['payload']);
+      if (v is! Map || v['id'] != row['id'] || !seen.add('${row['kind']}:${row['id']}')) {
+        throw PosError(400, 'Registro repetido o inválido');
+      }
+      id(row['kind'], v['id']);
+      switch (row['kind']) {
+        case 'users':
+          final name = label(v['username'], max: 30).toLowerCase();
+          if (!names.add(name) || !['admin','mesero','cocina'].contains(v['role']) ||
+              v['salt'] is! String || v['password'] is! String ||
+              base64Url.decode(v['salt']).length != 32 || base64.decode(v['password']).length != 32) {
+            throw PosError(400, 'Cuenta inválida');
+          }
+        case 'products':
+          label(v['nombre']); label(v['categoria'], max: 50);
+          if (money(v['precio']) <= 0 || v['activo'] is! bool) { throw PosError(400, 'Producto inválido'); }
+        case 'orders':
+          integer(v['mesa'], max: 999); integer(v['version']); integer(v['usuario_id']);
+          label(v['comensal'], max: 50, empty: true);
+          if (!['aqui','llevar'].contains(v['tipo']) ||
+              !['pendiente','preparando','listo','pagado','cancelado'].contains(v['estado'])) {
+            throw PosError(400, 'Pedido inválido');
+          }
+          date(v['creado_en']); items(v['productos']);
+          if (money(v['total']) != total(v['productos'])) { throw PosError(400, 'Total inconsistente'); }
+        case 'extras':
+          integer(v['pedido_id']); integer(v['mesa'], max: 999);
+          if (v['_id'] != v['id'] || !['pendiente','listo','cancelado'].contains(v['estado']) ||
+              !['aqui','llevar'].contains(v['tipo'])) { throw PosError(400, 'Extra inválido'); }
+          label(v['comensal'], max: 50, empty: true); date(v['creado_en']); items(v['items']);
+          if (v['_done'] is! Map) { throw PosError(400, 'Extra inválido'); }
+          for (final e in (v['_done'] as Map).entries) {
+            integer(e.key, min: 0, max: (v['items'] as List).length - 1);
+            if (e.value is! bool) { throw PosError(400, 'Extra inválido'); }
+          }
+        case 'sales':
+          integer(v['pedido_id']); date(v['fecha']);
+          if (v['id'] != v['pedido_id'] || money(v['total']) <= 0) { throw PosError(400, 'Venta inválida'); }
+          maxima['orders'] = max(maxima['orders'] ?? 0, v['pedido_id'] as int);
+      }
+    }
+    final sequenceKinds = <String>{};
+    for (final row in backup['sequences'] as List) {
+      if (row is! Map || !['users','products','orders','extras','items','sales'].contains(row['kind']) ||
+          !sequenceKinds.add(row['kind'])) { throw PosError(400, 'Secuencia inválida'); }
+      final value = integer(row['value'], min: 0);
+      maxima[row['kind']] = max(maxima[row['kind']] ?? 0, value);
+    }
     await db.transaction((tx) async {
       if ((await tx.query('records', limit: 1)).isNotEmpty) {
         throw PosError(409, 'Solo se puede restaurar en una central nueva');
@@ -1138,8 +1236,9 @@ class PosEngine {
       if (admins == 0) {
         throw PosError(400, 'El respaldo no tiene administrador');
       }
-      for (final r in backup['sequences'] as List) {
-        await tx.insert('sequences', Json.from(r as Map));
+      for (final e in maxima.entries) {
+        await tx.insert('sequences', {'kind': e.key, 'value': e.value},
+            conflictAlgorithm: ConflictAlgorithm.replace);
       }
       for (final r in backup['receipts'] as List) {
         final receipt = Json.from(r as Map);

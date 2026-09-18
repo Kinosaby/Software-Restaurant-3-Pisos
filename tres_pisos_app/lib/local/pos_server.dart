@@ -40,11 +40,14 @@ class PosServer {
   final bool central;
   final String pairSecret, hubId;
   final Uri? hub;
+  final String uiSecret = randomKey();
   final Future<List<int>> Function(String path) asset;
   HttpServer? localServer, lanServer;
   Timer? timer;
   bool connected = false, syncing = false, closed = false;
   final Map<String, List<DateTime>> loginAttempts = {};
+  final Map<String, DateTime> challenges = {};
+  int activeRequests = 0;
   final HttpClient http = HttpClient()
     ..connectionTimeout = const Duration(seconds: 3);
   PosServer({
@@ -76,7 +79,9 @@ class PosServer {
 
   Future<Json> parseBody(HttpRequest r) async {
     final data = <int>[];
-    await for (final p in r) {
+    final elapsed = Stopwatch()..start();
+    await for (final p in r.timeout(const Duration(seconds: 8))) {
+      if (elapsed.elapsed > const Duration(seconds: 8)) { throw PosError(408, 'La solicitud tardó demasiado'); }
       data.addAll(p);
       if (data.length > 2 * 1024 * 1024) {
         throw PosError(413, 'La solicitud es demasiado grande');
@@ -93,17 +98,21 @@ class PosServer {
   }
 
   Future<void> jsonResponse(HttpRequest r, int status, Json data) async {
-    r.response.statusCode = status;
-    r.response.headers.contentType = ContentType.json;
-    r.response.write(jsonEncode(data));
-    await r.response.close();
+    try {
+      r.response.statusCode = status;
+      r.response.headers.contentType = ContentType.json;
+      r.response.write(jsonEncode(data));
+      await r.response.close();
+    } on IOException {
+      // A disconnected peer must not terminate the central's isolate.
+    }
   }
 
-  void throttle(String client) {
+  void throttle(String client, {int limit = 10}) {
     final now = DateTime.now();
     final attempts = loginAttempts.putIfAbsent(client, () => []);
     attempts.removeWhere((t) => now.difference(t) > const Duration(minutes: 5));
-    if (attempts.length >= 10) {
+    if (attempts.length >= limit) {
       throw PosError(429, 'Demasiados intentos. Espera cinco minutos');
     }
     attempts.add(now);
@@ -112,14 +121,48 @@ class PosServer {
     }
   }
 
+  void throttleLogin(Json body, String address) {
+    throttle('address:$address', limit: 60);
+    final name = (body['username'] ?? '').toString().trim().toLowerCase();
+    throttle('account:${name.length > 100 ? 'invalid' : name}');
+  }
+
+  Future<void> forgetSession(String token, {bool revoke = false}) async {
+    await engine.db.transaction((tx) async {
+      if (revoke) {
+        await tx.insert('revocations', {'token': token}, conflictAlgorithm: ConflictAlgorithm.ignore);
+      }
+      await tx.delete('settings', where: 'key IN (?,?)',
+          whereArgs: ['session-user:$token', 'session-expiry:$token']);
+      await tx.delete('cache', where: 'substr(key,1,?)=?',
+          whereArgs: ['$hubId|$token|'.length, '$hubId|$token|']);
+    });
+  }
+
+  Future<int> localUser(String? token) async {
+    final id = await engine.setting('session-user:$token');
+    final expiry = DateTime.tryParse(await engine.setting('session-expiry:$token') ?? '');
+    if (token == null || id == null || expiry == null || !expiry.isAfter(engine.clock().toUtc())) {
+      if (token != null) { await forgetSession(token); }
+      throw PosError(401, 'Inicia sesión de nuevo en la central');
+    }
+    return int.parse(id);
+  }
+
   Future<void> handle(HttpRequest req, bool lan) async {
     req.response.headers.set('X-Content-Type-Options', 'nosniff');
     req.response.headers.set('Cache-Control', 'no-store');
+    req.response.headers.set('Referrer-Policy', 'no-referrer');
+    activeRequests++;
     try {
+      if (activeRequests > 32) { throw PosError(503, 'Central ocupada; vuelve a intentar'); }
       if (lan) {
-        if (req.uri.path != '/link/rpc' || req.method != 'POST') {
+        if (!['/link/rpc', '/link/challenge'].contains(req.uri.path) || req.method != 'POST') {
           throw PosError(404, 'Ruta no encontrada');
         }
+        if (req.headers.contentType?.mimeType != 'application/json') { throw PosError(415, 'Se requiere JSON'); }
+        final address = req.connectionInfo?.remoteAddress.address ?? 'unknown';
+        throttle('lan:$address', limit: 2400);
         final cipher = LanCipher(pairSecret);
         Json call;
         try {
@@ -132,11 +175,34 @@ class PosServer {
           if (call['hub_id'] != hubId) {
             throw PosError(409, 'Esta no es la central vinculada');
           }
-          if (call['path'] == '/api/auth/login') {
-            throttle(
-              '${req.connectionInfo?.remoteAddress.address}:${call['body']?['username']}',
-            );
+          if (call['request_id'] is! String || (call['request_id'] as String).length != 44) {
+            throw PosError(400, 'Identificador de enlace inválido');
           }
+          final now = DateTime.now();
+          challenges.removeWhere((_, expiry) => !expiry.isAfter(now));
+          if (req.uri.path == '/link/challenge') {
+            if (challenges.length >= 256) { throw PosError(429, 'Demasiados enlaces pendientes'); }
+            final challenge = randomKey();
+            challenges[challenge] = now.add(const Duration(seconds: 20));
+            await jsonResponse(req, 200, await cipher.seal({
+              'status': 200, 'request_id': call['request_id'],
+              'body': {'challenge': challenge, 'protocol': 2},
+            }));
+            return;
+          }
+          // Consume before awaiting execution; restarting also invalidates challenges.
+          if (challenges.remove(call['challenge']) == null) {
+            throw PosError(409, 'Enlace vencido o repetido. Actualiza las tres tablets y vuelve a intentar');
+          }
+          if (call['path'] is! String || call['method'] is! String || call['body'] is! Map ||
+              (call['token'] != null && call['token'] is! String) ||
+              (call['operation_id'] != null && call['operation_id'] is! String)) {
+            throw PosError(400, 'Operación inválida');
+          }
+          if (Uri.parse(call['path']).path == '/api/local/backup') {
+            throw PosError(403, 'Guarda el respaldo desde la tablet central');
+          }
+          if (Uri.parse(call['path']).path == '/api/auth/login') { throttleLogin(Json.from(call['body']), address); }
           response = {
             'status': 200,
             'body': await execute(call),
@@ -152,23 +218,30 @@ class PosServer {
         await jsonResponse(req, 200, await cipher.seal(response));
         return;
       }
+      if (req.headers.value('host') != '127.0.0.1:${localServer!.port}') { throw PosError(403, 'Servidor local inválido'); }
       final origin = req.headers.value('origin');
       if (origin != null && origin != 'http://127.0.0.1:${localServer!.port}') {
         throw PosError(403, 'Origen no autorizado');
+      }
+      final nativeEntry = req.uri.path == '/' && req.method == 'GET' && req.headers.value('x-pos-ui-key') == uiSecret;
+      if (nativeEntry) {
+        req.response.headers.add('Set-Cookie', 'pos_ui=$uiSecret; Path=/; HttpOnly; SameSite=Strict');
+      } else if (!req.cookies.any((c) => c.name == 'pos_ui' && c.value == uiSecret)) {
+        throw PosError(403, 'Abre el sistema desde la aplicación');
       }
       if (req.uri.path.startsWith('/api/')) {
         final token = req.headers
             .value('authorization')
             ?.replaceFirst('Bearer ', '');
-        if (req.uri.path == '/api/local/status') {
-          final userId = await engine.setting('session-user:$token');
+        if (req.uri.path == '/api/local/status' && req.method == 'GET') {
+          final userId = central || token == null ? null : await localUser(token);
           final rows = userId == null
               ? <Map<String, Object?>>[]
               : await engine.db.query(
                   'outbox',
                   columns: ['id', 'status', 'error', 'created', 'body'],
                   where: 'user_id=?',
-                  whereArgs: [int.parse(userId)],
+                  whereArgs: [userId],
                   orderBy: 'created ASC',
                 );
           await jsonResponse(req, 200, {
@@ -188,10 +261,12 @@ class PosServer {
           });
           return;
         }
+        if (req.method != 'GET' && req.headers.contentType?.mimeType != 'application/json') { throw PosError(415, 'Se requiere JSON'); }
         final body = await parseBody(req);
         if (req.uri.path == '/api/local/retry' &&
             req.method == 'POST' &&
             !central) {
+          await localUser(token);
           final identity = await remote({
             'method': 'GET',
             'path': '/api/auth/me',
@@ -209,7 +284,7 @@ class PosServer {
           return;
         }
         if (req.uri.path == '/api/auth/login') {
-          throttle('local:${body['username']}');
+          throttleLogin(body, 'local');
         }
         final result = await request(
           req.method,
@@ -242,7 +317,7 @@ class PosServer {
         );
         req.response.headers.set(
           'Content-Security-Policy',
-          "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",
+          "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
         );
         req.response.add(bytes);
         await req.response.close();
@@ -253,6 +328,8 @@ class PosServer {
       await jsonResponse(req, 500, {
         'error': 'No se pudo completar la operación. Los datos guardados se conservan.',
       });
+    } finally {
+      activeRequests--;
     }
   }
 
@@ -270,12 +347,21 @@ class PosServer {
   }
 
   Future<Json> remote(Json call) async {
+    final challenge = await exchange('/link/challenge', {});
+    if (challenge['protocol'] != 2 || challenge['challenge'] is! String) {
+      throw PosError(409, 'Actualiza la app en las tres tablets');
+    }
+    return exchange('/link/rpc', {...call, 'challenge': challenge['challenge']});
+  }
+
+  Future<Json> exchange(String path, Json call) async {
     final cipher = LanCipher(pairSecret);
     final nonce = randomKey();
     final req = await http
-        .postUrl(hub!.resolve('/link/rpc'))
+        .postUrl(hub!.resolve(path))
         .timeout(const Duration(seconds: 4));
     req.headers.contentType = ContentType.json;
+    req.followRedirects = false;
     req.write(
       jsonEncode(
         await cipher.seal({...call, 'hub_id': hubId, 'request_id': nonce}),
@@ -285,10 +371,15 @@ class PosServer {
     if (res.statusCode == 403) {
       throw PosError(403, 'El código de enlace no coincide con la central');
     }
-    final raw = await utf8.decoder
-        .bind(res)
-        .join()
-        .timeout(const Duration(seconds: 8));
+    if (res.statusCode != 200) { throw PosError(res.statusCode, 'No se pudo validar el enlace con cocina'); }
+    final bytes = <int>[];
+    await (() async {
+      await for (final chunk in res) {
+        bytes.addAll(chunk);
+        if (bytes.length > 16 * 1024 * 1024) { throw PosError(413, 'Respuesta demasiado grande'); }
+      }
+    })().timeout(const Duration(seconds: 8));
+    final raw = utf8.decode(bytes);
     final result = await cipher.open(jsonDecode(raw) as Json);
     if (result['request_id'] != nonce) {
       throw PosError(409, 'Respuesta de enlace inválida');
@@ -317,6 +408,11 @@ class PosServer {
     if (central) {
       return execute(call);
     }
+    if (method == 'POST' && path == '/api/auth/logout') {
+      if (token != null) { await forgetSession(token, revoke: true); await sync(); }
+      return {'success': true};
+    }
+    if (path != '/api/auth/login') { await localUser(token); }
     final cacheKey = '$hubId|$token|$path';
     final queueable =
         method == 'POST' &&
@@ -335,7 +431,7 @@ class PosServer {
         whereArgs: [op],
       );
       if (existing.isNotEmpty &&
-          (existing.first['token'] != token ||
+          (existing.first['token'] != token || existing.first['path'] != path ||
               existing.first['body'] != jsonEncode(body))) {
         throw PosError(409, 'Operación pendiente diferente');
       }
@@ -357,6 +453,7 @@ class PosServer {
           'session-user:$newToken',
           '${result['user']['id']}',
         );
+        await engine.setSetting('session-expiry:$newToken', result['expires_at']);
         await engine.db.insert('cache', {
           'key': '$hubId|$newToken|/api/auth/me',
           'value': jsonEncode({'user': result['user']}),
@@ -381,6 +478,7 @@ class PosServer {
       }
       return result;
     } on PosError catch (e) {
+      if (e.status == 401 && token != null) { await forgetSession(token); }
       if (queueable) {
         await engine.db.update(
           'outbox',
@@ -433,6 +531,10 @@ class PosServer {
     syncing = true;
     try {
       await remote({'method': 'GET', 'path': '/api/local/ping', 'body': {}});
+      for (final row in await engine.db.query('revocations')) {
+        await remote({'method': 'POST', 'path': '/api/auth/logout', 'body': {}, 'token': row['token']});
+        await engine.db.delete('revocations', where: 'token=?', whereArgs: [row['token']]);
+      }
       for (final row in await engine.db.query(
         'outbox',
         where: 'status=?',

@@ -15,6 +15,10 @@ const State = {
 };
 
 /* ── UI Helpers ─────────────────────────────── */
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 function show(id)  { document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById(id)?.classList.add('active'); }
 function go(id)    { 
   if (id === 'screen-menu' && typeof updateMenuRoles === 'function') updateMenuRoles();
@@ -26,7 +30,7 @@ function toast(msg, type='info', icon='') {
   if (!c) return;
   const t = document.createElement('div');
   t.className = `toast toast-${type}`;
-  t.innerHTML = `<span class="toast-icon">${icon}</span><span>${msg}</span>`;
+  t.innerHTML = `<span class="toast-icon">${icon}</span><span>${escapeHtml(msg)}</span>`;
   c.appendChild(t);
   setTimeout(() => { t.classList.add('out'); setTimeout(()=>t.remove(), 250); }, 3500);
 }
@@ -53,10 +57,12 @@ function stateColor(estado) {
 }
 
 function badgeHtml(estado) {
+  if (!['pendiente','preparando','listo','pagado','cancelado'].includes(estado)) estado = 'pendiente';
   return `<span class="badge badge-${estado}">${estado}</span>`;
 }
 
 function chipRole(role) {
+  if (!['admin','mesero','cocina'].includes(role)) role = 'mesero';
   return `<span class="chip chip-${role}">${role}</span>`;
 }
 
@@ -92,6 +98,7 @@ async function doLogin() {
   try {
     const res = await api.auth.login(username, password);
     Auth.set(res);
+    document.getElementById('login-pass').value = '';
     initSocket();
     btn.disabled = false;
     btn.textContent = 'INGRESAR';
@@ -113,6 +120,9 @@ function showLoginError(msg) {
 function doLogout() {
   Auth.clear();
   State.carrito = [];
+  State.productos = []; State.pedidos = []; State.usuarios = []; State.extras = [];
+  closeModal();
+  document.getElementById('login-pass').value = '';
   if (State.socket) { State.socket.disconnect(); State.socket = null; }
   hideTopbar();
   go('screen-login');
@@ -233,9 +243,7 @@ function initSocket() {
   s.on('connect_error', (error) => {
     document.getElementById('socket-dot').className = 'socket-dot disconnected';
     if (error.message === 'NO_TOKEN' || error.message === 'INVALID_TOKEN') {
-      Auth.clear();
-      hideTopbar();
-      go('screen-login');
+      doLogout();
     }
   });
 

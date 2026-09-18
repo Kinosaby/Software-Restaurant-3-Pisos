@@ -82,8 +82,8 @@ function verDetalleCocina(pedidoId) {
     <div class="detalle-cocina-item">
       <div class="detalle-cocina-qty">${i.cantidad}×</div>
       <div style="flex:1">
-        <div class="detalle-cocina-nom">${i.nombre}${badgeLlevar}</div>
-        ${info.nota ? `<div class="detalle-cocina-nota"><i class="fa-solid fa-note-sticky"></i> ${info.nota}</div>` : ''}
+        <div class="detalle-cocina-nom">${escapeHtml(i.nombre)}${badgeLlevar}</div>
+        ${info.nota ? `<div class="detalle-cocina-nota"><i class="fa-solid fa-note-sticky"></i> ${escapeHtml(info.nota)}</div>` : ''}
       </div>
       <div class="detalle-cocina-precio">${fmt.currency(parseFloat(i.precio) * i.cantidad)}</div>
     </div>`;
@@ -165,7 +165,7 @@ function renderCocina() {
       const todoListoP  = marcadosP >= totalItemsP && totalItemsP > 0;
 
       const labelComensal = p.comensal
-        ? `<span class="badge-comensal" style="font-size:.75rem"><i class="fa-solid fa-user"></i> ${p.comensal}</span>`
+        ? `<span class="badge-comensal" style="font-size:.75rem"><i class="fa-solid fa-user"></i> ${escapeHtml(p.comensal)}</span>`
         : `<span class="muted text-xs">#${p.id}</span>`;
 
       const prodsHtml = (p.productos || []).map((i, iIdx) => {
@@ -181,8 +181,8 @@ function renderCocina() {
               onclick="toggleItemListo(${p.id}, ${iIdx}, ${totalItemsP})">
             <span class="pedido-item-qty">${i.cantidad}×</span>
             <div style="flex:1">
-              <span class="pedido-item-nom">${i.nombre}${badgeLlevar}</span>
-              ${info.nota ? `<div class="pedido-item-nota"><i class="fa-solid fa-note-sticky"></i> ${info.nota}</div>` : ''}
+              <span class="pedido-item-nom">${escapeHtml(i.nombre)}${badgeLlevar}</span>
+              ${info.nota ? `<div class="pedido-item-nota"><i class="fa-solid fa-note-sticky"></i> ${escapeHtml(info.nota)}</div>` : ''}
             </div>
           </div>`;
       }).join('');
@@ -235,7 +235,7 @@ function renderCocina() {
           <div>
             <div class="cocina-turno${isPrimero ? ' turno-primero' : ''}">#${turno} en cola</div>
             <div style="display:flex;align-items:center;gap:8px">
-              <span class="cocina-mesa">${title}</span>
+              <span class="cocina-mesa">${escapeHtml(title)}</span>
               ${pedidos[0].tipo === 'llevar' ? `<span class="badge badge-llevar"><i class="fa-solid fa-bag-shopping"></i> Para Llevar</span>` : `<span class="badge badge-aqui"><i class="fa-solid fa-utensils"></i> Comer Aquí</span>`}
             </div>
             ${pedidos.length > 1 ? `<div class="cocina-pedido-id" style="color:var(--blue)">${pedidos.length} comensales</div>` : `<div class="cocina-pedido-id">#${pedidos[0].id}</div>`}
@@ -275,7 +275,7 @@ function renderCocina() {
 
     const comensalesHtml = pedidos.map((p, ci) => {
       const labelComensal = p.comensal
-        ? `<span class="badge-comensal" style="font-size:.75rem"><i class="fa-solid fa-user"></i> ${p.comensal}</span>`
+        ? `<span class="badge-comensal" style="font-size:.75rem"><i class="fa-solid fa-user"></i> ${escapeHtml(p.comensal)}</span>`
         : `<span class="muted text-xs">#${p.id}</span>`;
 
       const prodsHtml = (p.productos || []).map(i => {
@@ -287,8 +287,8 @@ function renderCocina() {
         <div class="pedido-item item-done">
           <span class="pedido-item-qty">${i.cantidad}×</span>
           <div style="flex:1">
-            <span class="pedido-item-nom">${i.nombre}${badgeLlevar}</span>
-            ${info.nota ? `<div class="pedido-item-nota"><i class="fa-solid fa-note-sticky"></i> ${info.nota}</div>` : ''}
+            <span class="pedido-item-nom">${escapeHtml(i.nombre)}${badgeLlevar}</span>
+            ${info.nota ? `<div class="pedido-item-nota"><i class="fa-solid fa-note-sticky"></i> ${escapeHtml(info.nota)}</div>` : ''}
           </div>
           <span style="font-size:.82rem;color:var(--gold)">${fmt.currency(parseFloat(i.precio)*i.cantidad)}</span>
         </div>`;
@@ -315,7 +315,7 @@ function renderCocina() {
           <div>
             <div class="cocina-turno" style="color:#22c55e;font-size:.85rem">LISTO PARA COBRAR</div>
             <div style="display:flex;align-items:center;gap:8px">
-              <span class="cocina-mesa">${title}</span>
+              <span class="cocina-mesa">${escapeHtml(title)}</span>
               ${pedidos[0].tipo === 'llevar' ? `<span class="badge badge-llevar"><i class="fa-solid fa-bag-shopping"></i> Para Llevar</span>` : `<span class="badge badge-aqui"><i class="fa-solid fa-utensils"></i> Comer Aquí</span>`}
             </div>
             ${pedidos.length > 1 ? `<div class="cocina-pedido-id" style="color:var(--blue)">${pedidos.length} cuentas</div>` : ''}
@@ -332,9 +332,7 @@ function renderCocina() {
           <span class="cobrar-total-val">${fmt.currency(totalMesa)}</span>
         </div>
         <div class="pedido-footer">
-          <button class="btn btn-primary cocina-btn" style="flex:1" onclick="cobrarMesa('${key}')">
-            <i class="fa-solid fa-cash-register"></i> Cobrar
-          </button>
+          ${getRole() === 'admin' || !window.LOCAL_POS ? `<button class="btn btn-primary cocina-btn" style="flex:1" onclick="cobrarMesa('${key}')"><i class="fa-solid fa-cash-register"></i> Cobrar</button>` : '<span class="muted">Listo para entregar · el mesero cobra</span>'}
         </div>
       </div>`;
   }).join('');
@@ -426,8 +424,8 @@ function renderCocinaExtras() {
               onclick="toggleExtraItem(${ex._id}, ${idx}, ${ex.items.length})">
             <span class="pedido-item-qty">${i.cantidad}×</span>
             <div style="flex:1">
-              <span class="pedido-item-nom">${i.nombre}${badgeLlevar}</span>
-              ${info.nota ? `<div class="pedido-item-nota"><i class="fa-solid fa-note-sticky"></i> ${info.nota}</div>` : ''}
+              <span class="pedido-item-nom">${escapeHtml(i.nombre)}${badgeLlevar}</span>
+              ${info.nota ? `<div class="pedido-item-nota"><i class="fa-solid fa-note-sticky"></i> ${escapeHtml(info.nota)}</div>` : ''}
             </div>
           </div>`;
         }).join('');

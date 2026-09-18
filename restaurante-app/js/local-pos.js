@@ -17,7 +17,7 @@ if(window.LOCAL_POS){
  const status=document.createElement('div');status.id='local-status';status.innerHTML='<span id="local-status-text">Conectando con cocina…</span><div><button id="local-pending-toggle">Pendientes</button> <button id="local-settings">Conexión</button></div>';
  const pendingPanel=document.createElement('div');pendingPanel.id='pending-panel';pendingPanel.hidden=true;document.body.prepend(pendingPanel);document.body.prepend(status);
  document.getElementById('local-pending-toggle').onclick=()=>pendingPanel.hidden=!pendingPanel.hidden;
- document.getElementById('local-settings').onclick=()=>window.PosNative?.postMessage(JSON.stringify({action:'settings'}));
+ document.getElementById('local-settings').onclick=()=>window.PosNative?.postMessage(JSON.stringify({action:'settings',token:Auth.token}));
  function renderLocalItems(){for(const p of State.pedidos)_itemsListos[p.id]=new Set((p.productos||[]).map((i,n)=>i.listo?n:-1).filter(n=>n>=0));}
  async function loadLocalExtras(){const d=await get('/api/extras');State.extras=d.extras||[];_saveExtras();}
  let refreshing=false;
@@ -25,6 +25,7 @@ if(window.LOCAL_POS){
   if(!Auth.token||refreshing)return;refreshing=true;
   try{const p=await api.pedidos.listar();State.pedidos=p.pedidos||[];const products=await api.productos.listar();State.productos=products.productos||[];await loadLocalExtras();renderLocalItems();renderCocina();renderCocinaExtras();renderMeseroPedidos();renderMesaSelector();if(getRole()==='admin'){renderAdminProducts();renderAdminPedidos();scheduleMetricasRefresh();}if(getRole()!=='cocina')renderCatalogo();}catch(_){}finally{refreshing=false;}
  });
+ checkSession=async function(){if(!Auth.token){go('screen-login');return;}try{const result=await api.auth.me();Auth.set({token:Auth.token,user:result.user});updateTopbar();initSocket();goToRolePanel();}catch(e){if(e.status===401){await doLogout();}else{go('screen-login');showLoginError(e.message);}}};
  const oldInit=initSocket;
  initSocket=function(){if(State.socket)return;oldInit();
   State.socket.on('nuevo_pedido',()=>{State.pedidos=[...new Map(State.pedidos.map(p=>[p.id,p])).values()];renderCocina();renderMeseroPedidos();renderMesaSelector();renderAdminPedidos();});
@@ -38,7 +39,14 @@ if(window.LOCAL_POS){
  const saveDraft=()=>{if(Auth.user)localStorage.setItem(draftKey(),JSON.stringify({comensales:_comensales,active:_comensalActivo,mesa:_mesaSeleccionada,tipo:_tipoPedido}));};
  const oldRenderCart=renderCarrito;renderCarrito=function(){oldRenderCart();saveDraft();};
  const restored=new Set(),oldLoadMesero=loadMeseroData,oldLogout=doLogout;
- doLogout=function(){saveDraft();restored.clear();oldLogout();_comensales=[{nombre:'C1',items:[]}];_comensalActivo=0;limpiarMesaSeleccionada();_tipoPedido='aqui';pendingPanel.replaceChildren();};
+ let loggingOut=false;
+ doLogout=async function(){
+  if(loggingOut)return;loggingOut=true;saveDraft();
+  try{
+   if(Auth.token){const response=await fetch('/api/auth/logout',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+Auth.token},body:'{}'});if(!response.ok)throw new Error('No se pudo cerrar la sesión. Vuelve a intentar.');}
+   restored.clear();oldLogout();_comensales=[{nombre:'C1',items:[]}];_comensalActivo=0;limpiarMesaSeleccionada();_tipoPedido='aqui';pendingPanel.replaceChildren();localStorage.removeItem('cocina_extras');
+  }catch(e){toastErr(e.message);}finally{loggingOut=false;}
+ };
  const oldSetNota=setNota;setNota=function(id,note){oldSetNota(id,note);saveDraft();};document.addEventListener('change',saveDraft);
  loadMeseroData=async function(){
   if(!restored.has(draftKey())){restored.add(draftKey());try{const d=JSON.parse(localStorage.getItem(draftKey()));if(d){_comensales=d.comensales;_comensalActivo=d.active;_mesaSeleccionada=d.mesa;_tipoPedido=d.tipo;document.getElementById('mesa-num').value=d.mesa||'';document.getElementById('mesa-badge').classList.toggle('mesa-badge-activa',!!d.mesa);document.getElementById('mesa-badge-text').textContent=d.mesa===99?'Para Llevar':d.mesa?'Mesa '+d.mesa:'Seleccionar mesa';setTipoPedido(d.tipo);}}catch(_){}}
@@ -51,6 +59,7 @@ if(window.LOCAL_POS){
  };
  const oldEdit=api.pedidos.editar;api.pedidos.editar=(id,b)=>oldEdit(id,{...b,version:State.pedidos.find(p=>p.id===id)?.version});
  confirmarCobro=async function(){const btn=document.getElementById('btn-confirmar-cobro');btn.disabled=true;loading(true);try{const ids=_pedidoCobrarId===null?[..._cobroPendientesMesa]:[_pedidoCobrarId];const r=await post('/api/pedidos/cobrar',{ids,total_esperado:Number(_pedidoCobrarTotal.toFixed(2)),recibido:document.getElementById('cobro-pago').value});_cobroPendientesMesa=[];closeModal();toastOk('Cobro confirmado. Cambio: '+fmt.currency(r.cambio));await loadMeseroData();}catch(e){toastErr(e.message);window.dispatchEvent(new Event('pos-refresh'));}finally{btn.disabled=false;loading(false);}};
+ cobrarMesa=function(key){if(getRole()!=='admin'){toastErr('El cobro corresponde al mesero');return;}if(String(key).startsWith('llevar-'))abrirCobro(Number(String(key).split('-')[1]));else cobrarTodoMesa(Number(key));};
  const oldLoadCocina=loadCocinaData;loadCocinaData=async function(){await oldLoadCocina();try{await loadLocalExtras();}catch(_){}renderLocalItems();renderCocina();renderCocinaExtras();};
  toggleItemListo=async function(id,index){const item=State.pedidos.find(p=>p.id===id)?.productos[index];if(!item)return;try{const d=await patch(`/api/pedidos/${id}/item`,{detalle_id:item.id,listo:!item.listo});State.pedidos=State.pedidos.map(p=>p.id===id?d.pedido:p);renderLocalItems();renderCocina();}catch(e){toastErr(e.message);renderCocina();}};
  toggleExtraItem=async function(id,index){const ex=State.extras.find(e=>e._id===id);if(!ex)return;try{await patch(`/api/extras/${id}`,{item:index,listo:!ex._done?.[index]});await loadLocalExtras();renderCocinaExtras();}catch(e){toastErr(e.message);}};

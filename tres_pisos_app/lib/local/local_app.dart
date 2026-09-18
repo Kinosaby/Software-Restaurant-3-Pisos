@@ -130,7 +130,7 @@ class _LocalPosScreenState extends State<LocalPosScreen>
       final dir = await getApplicationSupportDirectory();
       final db = await openDatabase(
         '${dir.path}/local-pos-v2.db',
-        version: 2,
+        version: 3,
         onCreate: PosEngine.createSchema,
         onUpgrade: PosEngine.upgradeSchema,
         onConfigure: (db) async {
@@ -214,9 +214,10 @@ class _LocalPosScreenState extends State<LocalPosScreen>
       'PosNative',
       onMessageReceived: (m) async {
         try {
+          if (m.message.length > 4096) { throw PosError(400, 'Acción inválida'); }
           final d = jsonDecode(m.message) as Json;
           if (d['action'] == 'settings') {
-            await connectionDetails();
+            await connectionDetails(d['token']);
           }
           if (d['action'] == 'backup') {
             await exportBackup(d['token']);
@@ -255,7 +256,7 @@ class _LocalPosScreenState extends State<LocalPosScreen>
       await (controller.platform as AndroidWebViewController)
           .setMediaPlaybackRequiresUserGesture(false);
     }
-    await controller.loadRequest(Uri.parse(origin));
+    await controller.loadRequest(Uri.parse(origin), headers: {'X-Pos-UI-Key': next.uiSecret});
     await WakelockPlus.enable();
     if (mounted) {
       setState(() => web = controller);
@@ -322,7 +323,7 @@ class _LocalPosScreenState extends State<LocalPosScreen>
         await engine!.setSetting('hub-id', id);
         await engine!.setSetting('mode', 'central');
         await launch(true, key, id, null);
-        await connectionDetails();
+        // Pairing becomes available after administrator login.
       } else {
         final p = parsePairing(pairing.text);
         await probe(p);
@@ -335,7 +336,8 @@ class _LocalPosScreenState extends State<LocalPosScreen>
         }
         await storage.write(key: 'lan-key', value: p.key);
         await engine!.setSetting('hub-id', p.id);
-        await engine!.setSetting('hub-url', p.address.toString());
+        await storage.write(key: 'lan-key', value: p.key);
+      await engine!.setSetting('hub-url', p.address.toString());
         await engine!.setSetting('mode', 'client');
         await launch(false, p.key, p.id, p.address.toString());
       }
@@ -369,30 +371,30 @@ class _LocalPosScreenState extends State<LocalPosScreen>
     }
   }
 
-  Future<void> connectionDetails() async {
+  Future<void> connectionDetails(String? token) async {
     final current = server!;
     if (!current.central) {
       final code = await ask(
         'Actualizar enlace con la misma cocina',
-        initial:
-            'trespisos://${current.hub!.host}:8787?key=${current.pairSecret}&id=${current.hubId}',
       );
       if (code == null) {
         return;
       }
       final p = parsePairing(code);
-      if (p.id != current.hubId || p.key != current.pairSecret) {
+      if (p.id != current.hubId) {
         throw PosError(
           409,
           'Usa la misma central para conservar los envíos pendientes',
         );
       }
       await probe(p);
+      await storage.write(key: 'lan-key', value: p.key);
       await engine!.setSetting('hub-url', p.address.toString());
       await current.stop();
       await launch(false, p.key, p.id, p.address.toString());
       return;
     }
+    await checkMenuAccess(token);
     final interfaces = await NetworkInterface.list(
       type: InternetAddressType.IPv4,
     );
@@ -408,7 +410,7 @@ class _LocalPosScreenState extends State<LocalPosScreen>
     if (!mounted) {
       return;
     }
-    await showDialog<void>(
+    final action = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Esta tablet es la central'),
@@ -445,6 +447,7 @@ class _LocalPosScreenState extends State<LocalPosScreen>
           ),
         ),
         actions: [
+          TextButton(onPressed: () => Navigator.pop(context, 'rotate'), child: const Text('Renovar código de enlace')),
           FilledButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Continuar'),
@@ -452,6 +455,24 @@ class _LocalPosScreenState extends State<LocalPosScreen>
         ],
       ),
     );
+    if (action == 'rotate') {
+      final confirmed = await ask(
+        '¿Renovar el enlace? Termina primero los envíos pendientes en los meseros. '
+        'El código anterior dejará de funcionar y se cerrarán las otras sesiones. '
+        'Después pega el nuevo código en Conexión de cada mesero e inicia sesión de nuevo. '
+        'Los pedidos guardados se conservan.', confirmOnly: true);
+      if (confirmed == null) { return; }
+      await checkMenuAccess(token);
+      await engine!.db.transaction((tx) async {
+        engine!.require(await engine!.user(tx, token), ['admin']);
+        await tx.delete('sessions', where: 'token<>?', whereArgs: [token]);
+      });
+      final key = randomKey();
+      await storage.write(key: 'lan-key', value: key);
+      await current.stop();
+      await launch(true, key, current.hubId, null);
+      await connectionDetails(token);
+    }
   }
 
   Future<void> checkMenuAccess(String? token) async {
@@ -615,11 +636,7 @@ class _LocalPosScreenState extends State<LocalPosScreen>
         'Guarda el respaldo desde la tablet central con sesión de administrador',
       );
     }
-    final data = await engine!.call(
-      'GET',
-      Uri.parse('/api/local/backup'),
-      token: token,
-    );
+    await checkMenuAccess(token);
     final pass = await ask(
       'Contraseña del respaldo (mínimo 8 caracteres). Guárdala para restaurar.',
       secret: true,
@@ -630,6 +647,7 @@ class _LocalPosScreenState extends State<LocalPosScreen>
     if (pass.length < 8) {
       throw PosError(400, 'Usa al menos 8 caracteres');
     }
+    final data = await engine!.call('GET', Uri.parse('/api/local/backup'), token: token);
     final salt = randomKey();
     final cipher = LanCipher(await backupKey(pass, salt));
     final dir = await getTemporaryDirectory();
@@ -657,6 +675,7 @@ class _LocalPosScreenState extends State<LocalPosScreen>
       if (selected == null || selected.files.single.path == null) {
         return;
       }
+      if (selected.files.single.size > 64 * 1024 * 1024) { throw PosError(413, 'El respaldo supera el límite de 64 MB'); }
       final pass = await ask(
         'Clave del archivo de accesos o respaldo',
         secret: true,
