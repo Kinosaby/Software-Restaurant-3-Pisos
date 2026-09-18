@@ -95,7 +95,7 @@ void main() {
       final req = await http.postUrl(c.hub!.resolve('/link/rpc'));
       req.headers.contentType = ContentType.json; req.write(jsonEncode(box));
       final res = await req.close(), raw = await utf8.decoder.bind(res).join();
-      return res.statusCode == 200 ? cipher.open(jsonDecode(raw) as Json) : {'status': res.statusCode};
+      return res.statusCode == 200 ? await cipher.open(jsonDecode(raw) as Json) : <String, dynamic>{'status': res.statusCode};
     }
     try {
       expect((await send(envelope))['status'], 200); expect((await send(envelope))['status'], 409);
