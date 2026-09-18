@@ -1,6 +1,6 @@
 # Android local: web completa
 
-La versión 2.3 empaqueta `restaurante-app/index.html`, sus pantallas y recursos dentro de Flutter. SQLite en la tablet de cocina atiende la misma API. No necesita Railway, Supabase, CDN ni computadora. El backend web existente se conserva por separado.
+La versión 2.3.1 empaqueta `restaurante-app/index.html`, sus pantallas y recursos dentro de Flutter. SQLite en la tablet de cocina atiende la misma API. No necesita Railway, Supabase, CDN ni computadora. El backend web existente se conserva por separado.
 
 ## Empezar
 

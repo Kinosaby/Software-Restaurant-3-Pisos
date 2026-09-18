@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,17 +6,38 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:tres_pisos_app/local/pos_engine.dart';
 import 'package:tres_pisos_app/local/pos_server.dart';
 
+class DelayedOrderClient extends PosServer {
+  final started = Completer<void>(), rejected = Completer<void>();
+  bool delayed = false;
+  DelayedOrderClient(PosEngine local, PosServer central)
+      : super(engine: local, central: false, pairSecret: central.pairSecret,
+          hubId: central.hubId, hub: Uri.parse('http://127.0.0.1:${central.lanServer!.port}'),
+          asset: (_) async => []);
+
+  @override
+  Future<Json> remote(Json call) async {
+    if (!delayed && call['method'] == 'POST' && call['path'] == '/api/pedidos') {
+      delayed = true;
+      started.complete();
+      await rejected.future;
+      throw PosError(401, 'La sesión anterior venció');
+    }
+    return super.remote(call);
+  }
+}
+
 void main() {
   sqfliteFfiInit();
   final databases = <Database>[], servers = <PosServer>[];
   late PosEngine engine;
   late PosServer hub;
   late String admin;
+  late DateTime time;
   Matcher denied(int status) => throwsA(isA<PosError>().having((e) => e.status, 'status', status));
   Future<PosEngine> database([String path = inMemoryDatabasePath]) async {
     final db = await databaseFactoryFfi.openDatabase(path, options: OpenDatabaseOptions(
       singleInstance: false, version: 3, onCreate: PosEngine.createSchema, onUpgrade: PosEngine.upgradeSchema));
-    databases.add(db); return PosEngine(db);
+    databases.add(db); return PosEngine(db, clock: () => time);
   }
   Future<Json> call(String method, String path, [Json body = const {}, String? token]) =>
     engine.call(method, Uri.parse(path), body: body, token: token ?? admin, operationId: randomKey());
@@ -34,6 +56,7 @@ void main() {
     await call('PUT', '/api/pedidos/$id/estado', {'estado': 'listo'});
   }
   setUp(() async {
+    time = DateTime.now().toUtc();
     engine = await database(); await engine.bootstrap('admin', 'test-password');
     admin = (await engine.call('POST', Uri.parse('/api/auth/login'),
       body: {'username': 'admin', 'password': 'test-password'}))['token'];
@@ -166,4 +189,102 @@ void main() {
     await call('PATCH', '/api/pedidos/${p['id']}/cancelar');
     await expectLater(call('PATCH', '/api/extras/1', {'done': true}), denied(409));
   });
+
+  test('History permissions apply to state filters, IDs, mutations and event snapshots', () async {
+    await call('POST', '/api/auth/register', {'username': 'cocina', 'password': 'test-password', 'role': 'cocina'});
+    final waiter = await login(hub), cook = await login(hub, 'cocina');
+    final paid = await order(), cancelled = await order(), open = await order();
+    await ready(paid['id']);
+    await call('PATCH', '/api/pedidos/${paid['id']}/agregar', {'productos': [{'producto_id': 1, 'cantidad': 1}]});
+    await call('PATCH', '/api/extras/1', {'done': true});
+    await call('POST', '/api/pedidos/cobrar', {'ids': [paid['id']], 'total_esperado': 36, 'recibido': 40});
+    await call('PATCH', '/api/pedidos/${cancelled['id']}/cancelar');
+    time = time.add(const Duration(days: 2));
+    final current = await order();
+    await ready(current['id']);
+    await call('POST', '/api/pedidos/cobrar', {'ids': [current['id']], 'total_esperado': 18, 'recibido': 20});
+    for (final token in [waiter, cook]) {
+      await expectLater(call('GET', '/api/pedidos?scope=history', {}, token), denied(403));
+      expect((await call('GET', '/api/pedidos?estado=pagado', {}, token))['pedidos'].map((p) => p['id']), [current['id']]);
+      expect((await call('GET', '/api/pedidos?estado=cancelado', {}, token))['pedidos'], isEmpty);
+      expect((await call('GET', '/api/pedidos', {}, token))['pedidos'].map((p) => p['id']), [open['id'], current['id']]);
+      for (final old in [paid, cancelled]) {
+        await expectLater(call('GET', '/api/pedidos/${old['id']}', {}, token), denied(403));
+      }
+      expect((await call('GET', '/api/pedidos/${open['id']}', {}, token))['pedido']['id'], open['id']);
+      final feed = await call('GET', '/api/local/events?after=0', {}, token);
+      for (final event in feed['events']) {
+        if (['nuevo_pedido', 'pedido_actualizado'].contains(event['name'])) {
+          expect([open['id'], current['id']], contains(event['data']['id']));
+        }
+        expect(event['name'], isNot('extra_pedido'));
+      }
+      expect((await call('GET', '/api/local/events?after=${feed['cursor']}', {}, token))['events'], isEmpty);
+    }
+    await expectLater(call('PATCH', '/api/pedidos/${paid['id']}/agregar', {
+      'productos': [{'producto_id': 1, 'cantidad': 1}]}, waiter), denied(403));
+    expect((await call('GET', '/api/pedidos?estado=pagado'))['pedidos'], hasLength(2));
+    expect((await call('GET', '/api/pedidos/${paid['id']}'))['pedido']['id'], paid['id']);
+    expect((await call('GET', '/api/pedidos?scope=history'))['pedidos'], hasLength(4));
+    // Closing a still-open old order removes it from the operating view without
+    // revealing its historical payload through the event stream.
+    final cursor = (await call('GET', '/api/local/events'))['cursor'];
+    await call('PATCH', '/api/pedidos/${open['id']}/cancelar', {}, waiter);
+    final updates = (await call('GET', '/api/local/events?after=$cursor', {}, waiter))['events'];
+    expect(updates, contains({'name': 'pedido_eliminado', 'data': {'id': open['id']}}));
+  });
+
+  test('Moving a table updates pending extras atomically and keeps stale edits rejected', () async {
+    final p = await order(); await ready(p['id']);
+    await call('PATCH', '/api/pedidos/${p['id']}/agregar', {'productos': [{'producto_id': 1, 'cantidad': 1}]});
+    final original = (await call('GET', '/api/pedidos/${p['id']}'))['pedido'];
+    final cursor = (await call('GET', '/api/local/events'))['cursor'];
+    final moved = (await call('PATCH', '/api/pedidos/${p['id']}/editar', {'mesa': 99, 'version': original['version']}))['pedido'];
+    var extra = (await call('GET', '/api/extras'))['extras'].single;
+    expect(extra['mesa'], 99); expect(extra['tipo'], 'llevar');
+    expect(extra['items'], hasLength(1)); expect(extra['_done'], isEmpty);
+    expect((await call('GET', '/api/local/events?after=$cursor'))['events'].map((e) => e['name']), contains('extras_actualizados'));
+    await expectLater(call('PATCH', '/api/pedidos/${p['id']}/editar', {'mesa': 5, 'version': original['version']}), denied(409));
+    // Invalid edits must roll back both the order and any changed extras.
+    await expectLater(call('PATCH', '/api/pedidos/${p['id']}/editar', {'mesa': 5, 'version': moved['version'], 'items': []}), denied(409));
+    extra = (await call('GET', '/api/extras'))['extras'].single;
+    expect(extra['mesa'], 99);
+    expect((await call('GET', '/api/pedidos/${p['id']}'))['pedido']['mesa'], 99);
+    await call('PATCH', '/api/pedidos/${p['id']}/editar', {'mesa': 5, 'version': moved['version']});
+    extra = (await call('GET', '/api/extras'))['extras'].single;
+    expect(extra['mesa'], 5); expect(extra['tipo'], 'aqui');
+    await call('PATCH', '/api/extras/${extra['id']}', {'done': true});
+    expect((await call('POST', '/api/pedidos/cobrar', {'ids': [p['id']], 'total_esperado': 36, 'recibido': 40}))['total'], 36);
+  });
+
+  for (final background in [true, false]) {
+    test('A stale ${background ? "background" : "foreground"} rejection cannot block a newly authenticated outbox entry', () async {
+      final local = await database(), c = DelayedOrderClient(local, hub);
+      servers.add(c);
+      final token = await login(c), op = randomKey();
+      final body = {'mesa': 2, 'productos': [{'producto_id': 1, 'cantidad': 1}]};
+      await local.db.insert('outbox', {'id': op, 'user_id': 2, 'token': token,
+        'path': '/api/pedidos', 'body': jsonEncode(body), 'status': 'pending', 'created': engine.now()});
+      final Future<dynamic> sending = background ? c.sync() : c.request('POST', '/api/pedidos', body, token, op);
+      try {
+        await c.started.future.timeout(const Duration(seconds: 10));
+        await call('POST', '/api/auth/logout', {}, token);
+        final fresh = await login(c);
+        expect(fresh, isNot(token));
+        c.rejected.complete();
+        final response = await sending;
+        if (!background) { expect(response['blocked'], false); }
+        final pending = (await local.db.query('outbox')).single;
+        expect(pending['token'], fresh); expect(pending['status'], 'pending');
+        expect(await c.localUser(fresh), 2);
+        await expectLater(c.localUser(token), denied(401));
+        await c.sync(); await c.sync();
+        expect(await local.db.query('outbox'), isEmpty);
+        expect(await engine.records(engine.db, 'orders'), hasLength(1));
+      } finally {
+        if (!c.rejected.isCompleted) { c.rejected.complete(); }
+        await sending;
+      }
+    });
+  }
 }

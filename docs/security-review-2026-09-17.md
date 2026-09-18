@@ -1,6 +1,6 @@
 # Revisión de seguridad y funcionamiento
 
-Iniciada el 17 y actualizada el 18 de septiembre de 2026. Rama `app-android`, versión 2.3.0+5.
+Iniciada el 17 y actualizada el 18 de septiembre de 2026. Rama `app-android`, versión 2.3.1+6.
 
 Se revisaron el motor SQLite, HTTP local, protocolo LAN, puente nativo, acceso por roles, respaldos, pantallas web empaquetadas, configuración Android, autenticación del backend web conservado y dependencias Node. No es una certificación de ausencia de vulnerabilidades.
 
@@ -21,6 +21,17 @@ Se revisaron el motor SQLite, HTTP local, protocolo LAN, puente nativo, acceso p
 | Cocina mostraba un botón de cobro; administrador usaba una ruta anterior | Funcional | Cocina solo indica entrega; administrador usa diálogo y cobro atómico vigente. |
 | JWT del backend conservado mantenía permisos después de modificar la cuenta | Alto si se desplegara ese backend | Token ligado por HMAC a contraseña/rol actuales; consulta de BD en HTTP y conexión Socket.IO; desconexión tras cambios y control de expiración. |
 | Release usaba firma de prueba implícita | Distribución | Release exige firma privada. Pruebas con excepción explícita y flujo separado para firma permanente. Falta configurar secretos del propietario. |
+| Filtrar por estado o consultar un ID evitaba el permiso de historial | Medio: exposición de cuentas antiguas a meseros/cocina | La restricción también se aplica a filtros, detalle y operaciones sobre cuentas cerradas anteriores al día actual; los pedidos todavía abiertos siguen accesibles. Los eventos consultan el estado actual antes de entregar instantáneas antiguas. |
+| Cambiar una cuenta lista de mesa no actualizaba sus extras pendientes | Funcional: cocina podía entregar en la mesa equivocada | Mesa y tipo de entrega de extras se actualizan en la misma transacción que el pedido, con aviso de actualización; se conservan productos y preparación. |
+| Un rechazo tardío podía bloquear un pedido después de renovar su sesión | Funcional y sesiones: pedidos retenidos innecesariamente | El rechazo solo cambia la cola si todavía coincide el token enviado y sigue pendiente. Un rechazo 401 de sincronización también invalida el acceso local antiguo. |
+
+## Segunda revisión: 2.3.1
+
+Se agregaron cuatro pruebas de regresión: historial por roles, filtros, IDs y eventos; traslado de extras con rechazo de ediciones antiguas y reversión de cambios inválidos; y renovación de sesión mientras hay un envío pendiente, tanto en primer plano como en segundo plano. La prueba de concurrencia retiene deliberadamente la respuesta antigua, inicia una sesión real nueva y luego libera el rechazo: el pedido debe permanecer pendiente y llegar una sola vez a la central.
+
+El corte del día conserva la regla existente de las 06:00 UTC. La restricción de historial usa la fecha de creación y el estado actual de la cuenta. Los eventos ocultos avanzan el cursor y envían solo la instrucción de retirar el ID de la vista operativa, sin productos, nombres ni importes. No cambia el esquema SQLite ni el protocolo LAN 2.
+
+La validación de esta revisión se registra en GitHub Actions para el commit publicado; no debe confundirse con los resultados de la revisión anterior que se describen abajo.
 
 ## Evidencia
 

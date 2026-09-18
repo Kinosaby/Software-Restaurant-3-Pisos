@@ -402,6 +402,11 @@ class PosEngine {
         });
         return result;
       });
+  bool canReadOrder(Json actor, Json order) =>
+      actor['role'] == 'admin' ||
+      !['pagado', 'cancelado'].contains(order['estado']) ||
+      (order['creado_en'] as String).compareTo(dayStart) >= 0;
+
   Future<Json> read(DatabaseExecutor tx, Uri uri, Json actor) async {
     final path = uri.path;
     if (path == '/api/auth/me') {
@@ -451,16 +456,30 @@ class PosEngine {
         orderBy: 'seq ASC',
         limit: 300,
       );
+      final visible = <Json>[];
+      final permitted = <int, bool>{};
+      for (final row in rows) {
+        final name = row['name'];
+        final data = jsonDecode(row['payload'] as String) as Json;
+        if (actor['role'] != 'admin' &&
+            ['nuevo_pedido', 'pedido_actualizado', 'extra_pedido'].contains(name)) {
+          final id = (name == 'extra_pedido' ? data['pedido_id'] : data['id']) as int;
+          if (!permitted.containsKey(id)) {
+            final current = await records(tx, 'orders', extra: 'AND id=?', args: [id]);
+            permitted[id] = current.isNotEmpty && canReadOrder(actor, current.single);
+          }
+          if (!permitted[id]!) {
+            // Advance the cursor without leaking archived snapshots. Also remove
+            // an old open account that has just closed from the tablet's view.
+            visible.add({'name': 'pedido_eliminado', 'data': {'id': id}});
+            continue;
+          }
+        }
+        visible.add({'name': name, 'data': data});
+      }
       return {
         'cursor': rows.isEmpty ? last : rows.last['seq'],
-        'events': rows
-            .map(
-              (r) => {
-                'name': r['name'],
-                'data': jsonDecode(r['payload'] as String),
-              },
-            )
-            .toList(),
+        'events': visible,
       };
     }
     if (path == '/api/extras') {
@@ -507,22 +526,24 @@ class PosEngine {
         };
       }
       final state = uri.queryParameters['estado'];
+      final restrictHistory = state == null || actor['role'] != 'admin';
       return {
         'pedidos': await records(
           tx,
           'orders',
-          extra: state == null
-              ? "AND (estado NOT IN ('pagado','cancelado') OR creado_en>=?)"
-              : 'AND estado=?',
-          args: state == null ? [dayStart] : [state],
+          extra: '${restrictHistory ? "AND (estado NOT IN ('pagado','cancelado') OR creado_en>=?)" : ""}'
+              '${state == null ? "" : " AND estado=?"}',
+          args: [if (restrictHistory) dayStart, if (state != null) state],
           order: 'creado_en ASC,id ASC',
         ),
       };
     }
     if (RegExp(r'^/api/pedidos/\d+$').hasMatch(path)) {
-      return {
-        'pedido': await record(tx, 'orders', integer(uri.pathSegments.last)),
-      };
+      final order = await record(tx, 'orders', integer(uri.pathSegments.last));
+      if (!canReadOrder(actor, order)) {
+        throw PosError(403, 'El historial requiere acceso de administrador');
+      }
+      return {'pedido': order};
     }
     if (path.startsWith('/api/metricas/')) {
       require(actor, ['admin']);
@@ -880,6 +901,9 @@ class PosEngine {
     if (uri.pathSegments.length >= 3 && uri.pathSegments[1] == 'pedidos') {
       final id = integer(uri.pathSegments[2]);
       final p = await record(tx, 'orders', id);
+      if (!canReadOrder(actor, p)) {
+        throw PosError(403, 'El historial requiere acceso de administrador');
+      }
       final action = uri.pathSegments.length > 3 ? uri.pathSegments[3] : '';
       if (method == 'DELETE' && action.isEmpty) {
         require(actor, ['admin']);
@@ -945,6 +969,18 @@ class PosEngine {
         if (b.containsKey('mesa')) {
           p['mesa'] = integer(b['mesa'], max: 999);
           p['tipo'] = p['mesa'] == 99 ? 'llevar' : 'aqui';
+          var movedExtras = false;
+          for (final ex in await records(tx, 'extras', extra: 'AND estado=?', args: ['pendiente'])) {
+            if (ex['pedido_id'] == id) {
+              ex['mesa'] = p['mesa'];
+              ex['tipo'] = p['tipo'];
+              await save(tx, 'extras', ex);
+              movedExtras = true;
+            }
+          }
+          if (movedExtras) {
+            await event(tx, 'extras_actualizados', {});
+          }
         }
         if (b.containsKey('items')) {
           if (p['estado'] == 'listo') {

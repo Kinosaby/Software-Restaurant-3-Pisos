@@ -480,15 +480,15 @@ class PosServer {
     } on PosError catch (e) {
       if (e.status == 401 && token != null) { await forgetSession(token); }
       if (queueable) {
-        await engine.db.update(
+        final blocked = await engine.db.update(
           'outbox',
           {'status': 'blocked', 'error': e.message},
-          where: 'id=?',
-          whereArgs: [op],
+          where: 'id=? AND token=? AND status=?',
+          whereArgs: [op, token, 'pending'],
         );
         return {
           'queued': true,
-          'blocked': true,
+          'blocked': blocked > 0,
           'operation_id': op,
           'mensaje': e.message,
         };
@@ -555,11 +555,16 @@ class PosServer {
             whereArgs: [row['id']],
           );
         } on PosError catch (e) {
+          // A new login may have replaced the token while this send was in
+          // flight. An old rejection must not block the renewed operation.
+          if (e.status == 401) {
+            await forgetSession(row['token'] as String);
+          }
           await engine.db.update(
             'outbox',
             {'status': 'blocked', 'error': e.message},
-            where: 'id=?',
-            whereArgs: [row['id']],
+            where: 'id=? AND token=? AND status=?',
+            whereArgs: [row['id'], row['token'], 'pending'],
           );
         }
       }
