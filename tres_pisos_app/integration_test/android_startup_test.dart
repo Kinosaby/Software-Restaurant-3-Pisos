@@ -65,7 +65,7 @@ void main() {
     expect(find.textContaining('DatabaseException'), findsNothing);
     await tester.enterText(find.byType(TextField).at(0), 'setup-admin');
     await tester.enterText(find.byType(TextField).at(1), 'setup-fixture-password');
-    await tester.testTextInput.hide();
+    await SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
     await tester.ensureVisible(find.text('Iniciar central'));
     await tester.tap(find.text('Iniciar central'));
     await until(() async => find.byType(WebViewWidget).evaluate().isNotEmpty);
