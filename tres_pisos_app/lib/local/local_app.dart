@@ -8,7 +8,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:sqflite/sqflite.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
@@ -16,6 +15,7 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'pos_engine.dart';
 import 'pos_server.dart';
 import 'menu_file.dart';
+import 'local_database.dart';
 
 class LocalPosApp extends StatelessWidget {
   const LocalPosApp({super.key});
@@ -128,18 +128,7 @@ class _LocalPosScreenState extends State<LocalPosScreen>
   Future<void> initialize() async {
     try {
       final dir = await getApplicationSupportDirectory();
-      final db = await openDatabase(
-        '${dir.path}/local-pos-v2.db',
-        version: 3,
-        onCreate: PosEngine.createSchema,
-        onUpgrade: PosEngine.upgradeSchema,
-        onConfigure: (db) async {
-          await db.rawQuery('PRAGMA journal_mode=WAL');
-          await db.execute('PRAGMA synchronous=FULL');
-          await db.execute('PRAGMA secure_delete=ON');
-        },
-      );
-      await db.rawQuery('PRAGMA wal_checkpoint(TRUNCATE)');
+      final db = await openPosDatabase('${dir.path}/local-pos-v2.db');
       engine = PosEngine(db);
       hasAccounts = (await engine!.records(db, 'users')).isNotEmpty;
       final mode = await engine!.setting('mode');

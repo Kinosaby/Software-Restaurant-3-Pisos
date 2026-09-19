@@ -1,6 +1,14 @@
 # Revisión de seguridad y funcionamiento
 
-Iniciada el 17 y actualizada el 18 de septiembre de 2026. Rama `app-android`, versión 2.3.1+6.
+Iniciada el 17 y actualizada el 19 de septiembre de 2026. Rama `app-android`, versión 2.3.2+7.
+
+## Incidencia de arranque Android: 2.3.2
+
+La primera prueba del propietario en una tablet detectó `DatabaseException` al abrir SQLite: `PRAGMA secure_delete=ON` devuelve una fila y Android rechaza ejecutarlo mediante `execute`/`execSQL`. Las pruebas previas de escritorio no ejercitaban esta diferencia del controlador nativo. No era un problema de contraseña ni de conexión.
+
+La apertura de la app usa ahora `openPosDatabase`, con `rawQuery` para `secure_delete`, manteniendo WAL, sincronización FULL y borrado seguro. Se conserva el archivo `local-pos-v2.db` y la versión 3 del esquema; no hay borrado ni recreación de registros.
+
+Se agrega una prueba de integración en Android API 35 que reproduce el fallo anterior, ejecuta la apertura real, comprueba los tres PRAGMAs, crea un administrador y un pedido y verifica los datos al reabrir. Una segunda prueba usa la pantalla nativa de configuración y la WebView real para iniciar la central, entrar y consultar los 54 productos. El workflow debe superar estas pruebas antes de publicar el APK. Su resultado se consulta en la ejecución del commit correspondiente; aún es necesaria la comprobación en la tablet física del propietario.
 
 Se revisaron el motor SQLite, HTTP local, protocolo LAN, puente nativo, acceso por roles, respaldos, pantallas web empaquetadas, configuración Android, autenticación del backend web conservado y dependencias Node. No es una certificación de ausencia de vulnerabilidades.
 

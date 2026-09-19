@@ -1,7 +1,7 @@
 name: tres_pisos_app
 description: Sistema POS Restaurante 3 Pisos
 publish_to: 'none'
-version: 2.3.1+6
+version: 2.3.2+7
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -43,6 +43,8 @@ dependencies:
   file_picker: ^8.3.7
 
 dev_dependencies:
+  integration_test:
+    sdk: flutter
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0

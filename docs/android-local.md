@@ -1,6 +1,8 @@
 # Android local: web completa
 
-La versión 2.3.1 empaqueta `restaurante-app/index.html`, sus pantallas y recursos dentro de Flutter. SQLite en la tablet de cocina atiende la misma API. No necesita Railway, Supabase, CDN ni computadora. El backend web existente se conserva por separado.
+La versión 2.3.2 empaqueta `restaurante-app/index.html`, sus pantallas y recursos dentro de Flutter. SQLite en la tablet de cocina atiende la misma API. No necesita Railway, Supabase, CDN ni computadora. El backend web existente se conserva por separado.
+
+La versión 2.3.2 corrige el error `PRAGMA secure_delete=ON` durante la apertura en Android. Actualiza la app sin borrar almacenamiento. Si Android rechaza la actualización por la firma, conserva la instalación y sus datos hasta resolver la firma; no desinstales una central que tenga información sin un respaldo comprobado.
 
 ## Empezar
 
