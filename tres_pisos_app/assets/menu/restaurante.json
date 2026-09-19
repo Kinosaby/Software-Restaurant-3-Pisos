@@ -1,0 +1,385 @@
+{
+  "format": "3pisos-menu-v1",
+  "moneda": "MXN",
+  "fuente": "Capturas del propietario, 17 septiembre 2026",
+  "productos": [
+    {
+      "id_origen": 25,
+      "nombre": "Torta al Pastor",
+      "precio": "60.00",
+      "categoria": "Tortas",
+      "activo": true
+    },
+    {
+      "id_origen": 26,
+      "nombre": "Torta de Carne Asada",
+      "precio": "75.00",
+      "categoria": "Tortas",
+      "activo": true
+    },
+    {
+      "id_origen": 27,
+      "nombre": "Tortas de suadero",
+      "precio": "70.00",
+      "categoria": "Tortas",
+      "activo": true
+    },
+    {
+      "id_origen": 28,
+      "nombre": "Guajolote Sencillo",
+      "precio": "45.00",
+      "categoria": "Guajolotes",
+      "activo": true
+    },
+    {
+      "id_origen": 29,
+      "nombre": "Guajolote con Guisado",
+      "precio": "50.00",
+      "categoria": "Guajolotes",
+      "activo": true
+    },
+    {
+      "id_origen": 30,
+      "nombre": "Guajolote de Carne Asada o Pastor",
+      "precio": "65.00",
+      "categoria": "Guajolotes",
+      "activo": true
+    },
+    {
+      "id_origen": 31,
+      "nombre": "Quesadilla de Tinga",
+      "precio": "30.00",
+      "categoria": "Quesadillas",
+      "activo": true
+    },
+    {
+      "id_origen": 32,
+      "nombre": "Quesadilla de Champiñón",
+      "precio": "30.00",
+      "categoria": "Quesadillas",
+      "activo": true
+    },
+    {
+      "id_origen": 33,
+      "nombre": "Quesadilla de Queso",
+      "precio": "30.00",
+      "categoria": "Quesadillas",
+      "activo": true
+    },
+    {
+      "id_origen": 34,
+      "nombre": "Quesadilla de Huitlacoche",
+      "precio": "30.00",
+      "categoria": "Quesadillas",
+      "activo": true
+    },
+    {
+      "id_origen": 35,
+      "nombre": "Quesadilla de Picadillo",
+      "precio": "30.00",
+      "categoria": "Quesadillas",
+      "activo": true
+    },
+    {
+      "id_origen": 36,
+      "nombre": "Quesadilla de Papa con Chorizo",
+      "precio": "30.00",
+      "categoria": "Quesadillas",
+      "activo": true
+    },
+    {
+      "id_origen": 37,
+      "nombre": "Quesadilla de Flor de Calabaza",
+      "precio": "30.00",
+      "categoria": "Quesadillas",
+      "activo": true
+    },
+    {
+      "id_origen": 38,
+      "nombre": "Quesadilla de Carne al Pastor",
+      "precio": "40.00",
+      "categoria": "Quesadillas",
+      "activo": true
+    },
+    {
+      "id_origen": 39,
+      "nombre": "Quesadilla de Carne de Res",
+      "precio": "50.00",
+      "categoria": "Quesadillas",
+      "activo": true
+    },
+    {
+      "id_origen": 40,
+      "nombre": "Chalupas",
+      "precio": "30.00",
+      "categoria": "Enchiladas",
+      "activo": true
+    },
+    {
+      "id_origen": 41,
+      "nombre": "Enchiladas",
+      "precio": "30.00",
+      "categoria": "Enchiladas",
+      "activo": true
+    },
+    {
+      "id_origen": 42,
+      "nombre": "Tostadas de Tinga",
+      "precio": "40.00",
+      "categoria": "Tostadas",
+      "activo": true
+    },
+    {
+      "id_origen": 43,
+      "nombre": "Tostada de Picadillo",
+      "precio": "40.00",
+      "categoria": "Tostadas",
+      "activo": true
+    },
+    {
+      "id_origen": 44,
+      "nombre": "Volcan de Carne al Pastor",
+      "precio": "40.00",
+      "categoria": "Volcanes",
+      "activo": true
+    },
+    {
+      "id_origen": 45,
+      "nombre": "Volcan de Carne Asada de Res",
+      "precio": "50.00",
+      "categoria": "Volcanes",
+      "activo": true
+    },
+    {
+      "id_origen": 46,
+      "nombre": "Taco de Carne al Pastor",
+      "precio": "18.00",
+      "categoria": "Tacos",
+      "activo": true
+    },
+    {
+      "id_origen": 47,
+      "nombre": "Taco de Longaniza",
+      "precio": "18.00",
+      "categoria": "Tacos",
+      "activo": true
+    },
+    {
+      "id_origen": 48,
+      "nombre": "Taco de Carne de Asada de Res",
+      "precio": "20.00",
+      "categoria": "Tacos",
+      "activo": true
+    },
+    {
+      "id_origen": 49,
+      "nombre": "Taco de Suadero",
+      "precio": "20.00",
+      "categoria": "Tacos",
+      "activo": true
+    },
+    {
+      "id_origen": 50,
+      "nombre": "Asada Fries con Carne Asada",
+      "precio": "90.00",
+      "categoria": "Asada Fries",
+      "activo": true
+    },
+    {
+      "id_origen": 51,
+      "nombre": "Asada Fries con Pastor",
+      "precio": "75.00",
+      "categoria": "Asada Fries",
+      "activo": true
+    },
+    {
+      "id_origen": 52,
+      "nombre": "Burrito de Carne Asada",
+      "precio": "80.00",
+      "categoria": "Burritos",
+      "activo": true
+    },
+    {
+      "id_origen": 53,
+      "nombre": "Burrito de Cualquier otra Carne",
+      "precio": "75.00",
+      "categoria": "Burritos",
+      "activo": true
+    },
+    {
+      "id_origen": 54,
+      "nombre": "Gringa de Carne Asada",
+      "precio": "50.00",
+      "categoria": "Gringas",
+      "activo": true
+    },
+    {
+      "id_origen": 55,
+      "nombre": "Gringa Cualquier otra Carne",
+      "precio": "45.00",
+      "categoria": "Gringas",
+      "activo": true
+    },
+    {
+      "id_origen": 56,
+      "nombre": "Helado",
+      "precio": "25.00",
+      "categoria": "Postres",
+      "activo": true
+    },
+    {
+      "id_origen": 57,
+      "nombre": "Flan Napolitano",
+      "precio": "45.00",
+      "categoria": "Postres",
+      "activo": true
+    },
+    {
+      "id_origen": 58,
+      "nombre": "Boing",
+      "precio": "30.00",
+      "categoria": "Bebidas",
+      "activo": true
+    },
+    {
+      "id_origen": 59,
+      "nombre": "Jarrito",
+      "precio": "25.00",
+      "categoria": "Bebidas",
+      "activo": true
+    },
+    {
+      "id_origen": 60,
+      "nombre": "Coca-Cola de Vidrio",
+      "precio": "25.00",
+      "categoria": "Bebidas",
+      "activo": true
+    },
+    {
+      "id_origen": 61,
+      "nombre": "Coca-Cola desechable",
+      "precio": "30.00",
+      "categoria": "Bebidas",
+      "activo": true
+    },
+    {
+      "id_origen": 62,
+      "nombre": "Café de Olla",
+      "precio": "20.00",
+      "categoria": "Bebidas",
+      "activo": true
+    },
+    {
+      "id_origen": 63,
+      "nombre": "Té Frio",
+      "precio": "30.00",
+      "categoria": "Bebidas",
+      "activo": true
+    },
+    {
+      "id_origen": 64,
+      "nombre": "Té Caliente",
+      "precio": "20.00",
+      "categoria": "Bebidas",
+      "activo": true
+    },
+    {
+      "id_origen": 65,
+      "nombre": "Nescafé",
+      "precio": "25.00",
+      "categoria": "Bebidas",
+      "activo": true
+    },
+    {
+      "id_origen": 66,
+      "nombre": "Pambazo Sencillo",
+      "precio": "45.00",
+      "categoria": "Pambazos",
+      "activo": true
+    },
+    {
+      "id_origen": 67,
+      "nombre": "Pambazo con Guisado",
+      "precio": "50.00",
+      "categoria": "Pambazos",
+      "activo": true
+    },
+    {
+      "id_origen": 68,
+      "nombre": "Pambazo de Asada",
+      "precio": "65.00",
+      "categoria": "Pambazos",
+      "activo": true
+    },
+    {
+      "id_origen": 69,
+      "nombre": "Pambazo al Pastor",
+      "precio": "65.00",
+      "categoria": "Pambazos",
+      "activo": true
+    },
+    {
+      "id_origen": 70,
+      "nombre": "Quesadilla suadero",
+      "precio": "50.00",
+      "categoria": "Quesadillas",
+      "activo": true
+    },
+    {
+      "id_origen": 71,
+      "nombre": "Quesadilla de Chicharron",
+      "precio": "30.00",
+      "categoria": "Quesadillas",
+      "activo": true
+    },
+    {
+      "id_origen": 72,
+      "nombre": "Birria",
+      "precio": "100.00",
+      "categoria": "General",
+      "activo": false
+    },
+    {
+      "id_origen": 73,
+      "nombre": "Quesadilla de Birria",
+      "precio": "50.00",
+      "categoria": "Quesadillas",
+      "activo": true
+    },
+    {
+      "id_origen": 74,
+      "nombre": "Burrito Campechano",
+      "precio": "80.00",
+      "categoria": "Burritos",
+      "activo": true
+    },
+    {
+      "id_origen": 75,
+      "nombre": "Papas a la Francesa",
+      "precio": "65.00",
+      "categoria": "Postres",
+      "activo": true
+    },
+    {
+      "id_origen": 76,
+      "nombre": "Choriqueso",
+      "precio": "75.00",
+      "categoria": "Postres",
+      "activo": true
+    },
+    {
+      "id_origen": 77,
+      "nombre": "Boing de Caja",
+      "precio": "35.00",
+      "categoria": "Bebidas",
+      "activo": true
+    },
+    {
+      "id_origen": 78,
+      "nombre": "Bagel",
+      "precio": "45.00",
+      "categoria": "General",
+      "activo": true
+    }
+  ]
+}

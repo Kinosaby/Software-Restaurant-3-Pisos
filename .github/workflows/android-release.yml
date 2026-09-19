@@ -1,0 +1,58 @@
+name: APK Android con firma permanente
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  release:
+    if: github.ref == 'refs/heads/app-android'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tres_pisos_app
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Comprobar firma privada
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE" && test -n "$STORE_PASSWORD" && test -n "$KEY_ALIAS" && test -n "$KEY_PASSWORD" || { echo 'Configura los cuatro secretos de firma descritos en docs/android-local.md'; exit 1; }
+          umask 077
+          printf '%s' "$KEYSTORE" | base64 --decode > "$RUNNER_TEMP/3-pisos-release.jks"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Empaquetar web
+        working-directory: .
+        run: npm ci && node scripts/build-android-web.mjs
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.2'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - name: Compilar con firma permanente
+        env:
+          POS_KEYSTORE_PATH: ${{ runner.temp }}/3-pisos-release.jks
+          POS_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          POS_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          POS_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: flutter build apk --release
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tres-pisos-android-firma-permanente
+          path: tres_pisos_app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+      - name: Borrar copia temporal de la firma
+        if: always()
+        run: rm -f "$RUNNER_TEMP/3-pisos-release.jks"

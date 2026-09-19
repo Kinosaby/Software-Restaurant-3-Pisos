@@ -15,6 +15,10 @@ const State = {
 };
 
 /* ── UI Helpers ─────────────────────────────── */
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 function show(id)  { document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById(id)?.classList.add('active'); }
 function go(id)    { 
   if (id === 'screen-menu' && typeof updateMenuRoles === 'function') updateMenuRoles();
@@ -26,7 +30,7 @@ function toast(msg, type='info', icon='') {
   if (!c) return;
   const t = document.createElement('div');
   t.className = `toast toast-${type}`;
-  t.innerHTML = `<span class="toast-icon">${icon}</span><span>${msg}</span>`;
+  t.innerHTML = `<span class="toast-icon">${icon}</span><span>${escapeHtml(msg)}</span>`;
   c.appendChild(t);
   setTimeout(() => { t.classList.add('out'); setTimeout(()=>t.remove(), 250); }, 3500);
 }
@@ -53,10 +57,12 @@ function stateColor(estado) {
 }
 
 function badgeHtml(estado) {
+  if (!['pendiente','preparando','listo','pagado','cancelado'].includes(estado)) estado = 'pendiente';
   return `<span class="badge badge-${estado}">${estado}</span>`;
 }
 
 function chipRole(role) {
+  if (!['admin','mesero','cocina'].includes(role)) role = 'mesero';
   return `<span class="chip chip-${role}">${role}</span>`;
 }
 
@@ -92,6 +98,8 @@ async function doLogin() {
   try {
     const res = await api.auth.login(username, password);
     Auth.set(res);
+    document.getElementById('login-pass').value = '';
+    initSocket();
     btn.disabled = false;
     btn.textContent = 'INGRESAR';
     updateTopbar();
@@ -112,6 +120,9 @@ function showLoginError(msg) {
 function doLogout() {
   Auth.clear();
   State.carrito = [];
+  State.productos = []; State.pedidos = []; State.usuarios = []; State.extras = [];
+  closeModal();
+  document.getElementById('login-pass').value = '';
   if (State.socket) { State.socket.disconnect(); State.socket = null; }
   hideTopbar();
   go('screen-login');
@@ -153,12 +164,13 @@ function enterAdmin() {
 }
 
 function enterMesero() {
-  if (getRole() === 'cocina') { toastErr('Acceso denegado.'); return; }
+  if (!['admin', 'mesero'].includes(getRole())) { toastErr('Acceso denegado.'); return; }
   show('screen-mesero');
   loadMeseroData();
 }
 
 function enterCocina() {
+  if (!['admin', 'cocina'].includes(getRole())) { toastErr('Acceso denegado.'); return; }
   if ("Notification" in window && Notification.permission === "default") {
     Notification.requestPermission();
   }
@@ -213,7 +225,10 @@ function sendWebNotification(title, body) {
 function initSocket() {
   if (State.socket) return;
   // socket.io se carga desde CDN en el HTML
-  const s = io({ transports: ['websocket','polling'] });
+  const s = io({
+    transports: ['websocket','polling'],
+    auth: { token: Auth.token },
+  });
   State.socket = s;
 
   s.on('connect', () => {
@@ -223,6 +238,13 @@ function initSocket() {
 
   s.on('disconnect', () => {
     document.getElementById('socket-dot').className = 'socket-dot disconnected';
+  });
+
+  s.on('connect_error', (error) => {
+    document.getElementById('socket-dot').className = 'socket-dot disconnected';
+    if (error.message === 'NO_TOKEN' || error.message === 'INVALID_TOKEN') {
+      doLogout();
+    }
   });
 
   s.on('nuevo_pedido', (pedido) => {
@@ -313,7 +335,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('form-pedido').addEventListener('submit', e => { e.preventDefault(); submitPedido(); });
 
   checkSession();
-  initSocket();
 
   if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
     Notification.requestPermission();

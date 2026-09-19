@@ -1,27 +1,29 @@
 // lib/core/services/socket_service.dart
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:socket_io_client/socket_io_client.dart' as sio;
 import '../constants/api_constants.dart';
+import 'auth_service.dart';
 
 class SocketService {
-  static IO.Socket? _socket;
+  static sio.Socket? _socket;
   static bool _connected = false;
 
-  static IO.Socket get socket {
-    _socket ??= IO.io(
+  static Future<void> connect() async {
+    if (_connected || _socket != null) return;
+    final token = await AuthService.getToken();
+    if (token == null || token.isEmpty) return;
+
+    _socket = sio.io(
       ApiConstants.baseUrl,
-      IO.OptionBuilder()
+      sio.OptionBuilder()
           .setTransports(['websocket', 'polling'])
+          .setAuth({'token': token})
           .disableAutoConnect()
           .build(),
     );
-    return _socket!;
-  }
-
-  static void connect() {
-    if (_connected) return;
-    socket.connect();
-    socket.onConnect((_) => _connected = true);
-    socket.onDisconnect((_) => _connected = false);
+    _socket!.onConnect((_) => _connected = true);
+    _socket!.onDisconnect((_) => _connected = false);
+    _socket!.onConnectError((_) => _connected = false);
+    _socket!.connect();
   }
 
   static void disconnect() {
@@ -33,10 +35,11 @@ class SocketService {
   static bool get isConnected => _connected;
 
   static void on(String event, Function(dynamic) handler) {
-    socket.on(event, handler);
+    _socket?.off(event);
+    _socket?.on(event, handler);
   }
 
   static void off(String event) {
-    socket.off(event);
+    _socket?.off(event);
   }
 }

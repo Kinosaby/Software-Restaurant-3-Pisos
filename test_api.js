@@ -1,8 +1,15 @@
 async function testFlow() {
-  const BASE_URL = 'http://localhost:3000/api';
+  require('dotenv').config();
+  const BASE_URL = process.env.TEST_API_URL || 'http://localhost:3000/api';
+  const username = process.env.TEST_USERNAME;
+  const password = process.env.TEST_PASSWORD;
   
   try {
     console.log('---  Iniciando Pruebas de Integración ---');
+
+    if (!username || !password) {
+      throw new Error('Configura TEST_USERNAME y TEST_PASSWORD para ejecutar esta prueba manual.');
+    }
 
     // 0. Autenticarse para obtener token
     console.log('0. Iniciando sesión...');
@@ -10,27 +17,15 @@ async function testFlow() {
     let resLogin = await fetch(`${BASE_URL}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+      body: JSON.stringify({ username, password })
     });
     
     let loginData = await resLogin.json();
     if (loginData.success) {
       token = loginData.token;
-      console.log('✅ Autenticado con éxito (password: admin123).');
+      console.log('✅ Autenticado con éxito.');
     } else {
-      // Intentar con la contraseña de schema.sql
-      resLogin = await fetch(`${BASE_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'admin', password: 'Admin3Pisos' })
-      });
-      loginData = await resLogin.json();
-      if (loginData.success) {
-        token = loginData.token;
-        console.log('✅ Autenticado con éxito (password: Admin3Pisos).');
-      } else {
-        throw new Error('No se pudo autenticar con las contraseñas por defecto.');
-      }
+      throw new Error(loginData.error || 'No se pudo autenticar.');
     }
 
     const headers = {

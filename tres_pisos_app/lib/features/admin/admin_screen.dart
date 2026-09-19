@@ -357,6 +357,9 @@ class _ProductosTab extends ConsumerWidget {
                               style: const TextStyle(
                                   color: AppColors.amber,
                                   fontWeight: FontWeight.w700)),
+                          Text(p.categoria,
+                              style: const TextStyle(
+                                  color: AppColors.muted, fontSize: 11)),
                         ])),
                     IconButton(
                         icon: const Icon(Icons.edit_outlined,
@@ -406,6 +409,8 @@ class _ProductosTab extends ConsumerWidget {
     final nameCtrl = TextEditingController(text: producto?.nombre ?? '');
     final priceCtrl =
         TextEditingController(text: producto?.precio.toString() ?? '');
+    final categoryCtrl =
+        TextEditingController(text: producto?.categoria ?? 'General');
     bool activo = producto?.activo ?? true;
 
     showDialog(
@@ -430,6 +435,11 @@ class _ProductosTab extends ConsumerWidget {
                           decoration: const InputDecoration(
                               labelText: 'Precio', prefixText: '\$')),
                       const SizedBox(height: 12),
+                      TextField(
+                          controller: categoryCtrl,
+                          decoration: const InputDecoration(
+                              labelText: 'Categoría')),
+                      const SizedBox(height: 12),
                       Row(children: [
                         Switch(
                             value: activo,
@@ -451,6 +461,9 @@ class _ProductosTab extends ConsumerWidget {
                       final body = {
                         'nombre': nameCtrl.text.trim(),
                         'precio': double.tryParse(priceCtrl.text) ?? 0,
+                        'categoria': categoryCtrl.text.trim().isEmpty
+                            ? 'General'
+                            : categoryCtrl.text.trim(),
                         'activo': activo
                       };
                       try {
