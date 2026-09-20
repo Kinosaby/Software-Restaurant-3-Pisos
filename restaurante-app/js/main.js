@@ -296,7 +296,7 @@ function initSocket() {
     if (role === 'cocina') {
       // Agregar al listado local de extras y re-renderizar
       if (!State.extras) State.extras = [];
-      State.extras.push({ ...extra, _id: Date.now() });
+      State.extras.push({ ...extra, _id: extra.id || extra._id || Date.now() });
       // Guardar en localStorage para que persista si la pantalla se recarga
       if (typeof _saveExtras === 'function') _saveExtras();
       renderCocinaExtras();

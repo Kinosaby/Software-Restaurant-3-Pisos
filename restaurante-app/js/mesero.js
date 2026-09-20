@@ -588,15 +588,18 @@ function abrirCobro(pedidoId) {
 }
 
 function calcularCambio() {
-  const pago   = parseFloat(document.getElementById('cobro-pago')?.value) || 0;
-  const cambio = pago - _pedidoCobrarTotal;
+  const pagoVal = parseFloat(document.getElementById('cobro-pago')?.value) || 0;
+  const pagoCentavos = Math.round(pagoVal * 100);
+  const totalCentavos = Math.round((_pedidoCobrarTotal || 0) * 100);
+  const cambioCentavos = pagoCentavos - totalCentavos;
+  const cambio = cambioCentavos / 100;
   const wrap   = document.getElementById('cobro-cambio-wrap');
   const val    = document.getElementById('cobro-cambio');
   const btn    = document.getElementById('btn-confirmar-cobro');
 
   if (!wrap || !val || !btn) return;
 
-  if (pago <= 0) {
+  if (pagoCentavos <= 0) {
     wrap.style.display = 'none';
     btn.disabled = true;
     return;
@@ -604,8 +607,8 @@ function calcularCambio() {
 
   wrap.style.display = 'block';
   val.textContent = fmt.currency(Math.max(0, cambio));
-  val.className   = 'cobro-cambio-val ' + (cambio >= 0 ? 'cambio-ok' : 'cambio-err');
-  btn.disabled    = cambio < 0;
+  val.className   = 'cobro-cambio-val ' + (cambioCentavos >= 0 ? 'cambio-ok' : 'cambio-err');
+  btn.disabled    = cambioCentavos < 0;
 }
 
 async function confirmarCobro() {
@@ -613,8 +616,11 @@ async function confirmarCobro() {
   if (btn) btn.disabled = true;
   try {
     loading(true);
-    const pago   = parseFloat(document.getElementById('cobro-pago')?.value) || 0;
-    const cambio = pago - _pedidoCobrarTotal;
+    const pagoVal = parseFloat(document.getElementById('cobro-pago')?.value) || 0;
+    const pagoCentavos = Math.round(pagoVal * 100);
+    const totalCentavos = Math.round((_pedidoCobrarTotal || 0) * 100);
+    const cambioCentavos = pagoCentavos - totalCentavos;
+    const cambio = Math.max(0, cambioCentavos / 100);
 
     if (_pedidoCobrarId !== null) {
       // Cobro individual

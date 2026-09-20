@@ -1,5 +1,47 @@
 /* Reuse the full web UI, replacing only operations that need local durability. */
 if(window.LOCAL_POS){
+ // ── Web Audio API: Campana KDS de cocina (Sonido de alerta sintetizado) ──
+ let _kdsAudioCtx = null;
+ function playKdsBell() {
+  try {
+   const AudioContext = window.AudioContext || window.webkitAudioContext;
+   if (!AudioContext) return;
+   if (!_kdsAudioCtx || _kdsAudioCtx.state === 'closed') {
+    _kdsAudioCtx = new AudioContext();
+   }
+   if (_kdsAudioCtx.state === 'suspended') {
+    _kdsAudioCtx.resume();
+   }
+   const ctx = _kdsAudioCtx;
+   const now = ctx.currentTime;
+   // Doble campana de comanda: fundamental 880Hz (A5) + armónico 1760Hz, y repique 1046.5Hz (C6)
+   const tones = [
+    { freq: 880, start: now, dur: 0.75, gain: 0.35 },
+    { freq: 1760, start: now, dur: 0.45, gain: 0.15 },
+    { freq: 1046.5, start: now + 0.13, dur: 0.95, gain: 0.40 },
+    { freq: 2093, start: now + 0.13, dur: 0.55, gain: 0.18 }
+   ];
+   for (const t of tones) {
+    const osc = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(t.freq, t.start);
+    gainNode.gain.setValueAtTime(0.0001, t.start);
+    gainNode.gain.exponentialRampToValueAtTime(t.gain, t.start + 0.015);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, t.start + t.dur);
+    osc.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    osc.start(t.start);
+    osc.stop(t.start + t.dur);
+   }
+  } catch (err) {
+   console.warn('No se pudo reproducir campana KDS:', err);
+  }
+ }
+ document.addEventListener('click', () => {
+  if (_kdsAudioCtx && _kdsAudioCtx.state === 'suspended') { _kdsAudioCtx.resume(); }
+ }, { once: false });
+
  const originalRequest=request;
  request=async function(method,path,body=null){
   if(method==='GET')return originalRequest(method,path,body);
@@ -28,11 +70,17 @@ if(window.LOCAL_POS){
  checkSession=async function(){if(!Auth.token){go('screen-login');return;}try{const result=await api.auth.me();Auth.set({token:Auth.token,user:result.user});updateTopbar();initSocket();goToRolePanel();}catch(e){if(e.status===401){await doLogout();}else{go('screen-login');showLoginError(e.message);}}};
  const oldInit=initSocket;
  initSocket=function(){if(State.socket)return;oldInit();
-  State.socket.on('nuevo_pedido',()=>{State.pedidos=[...new Map(State.pedidos.map(p=>[p.id,p])).values()];renderCocina();renderMeseroPedidos();renderMesaSelector();renderAdminPedidos();});
+  State.socket.on('nuevo_pedido',()=>{
+   if(getRole()==='cocina'||getRole()==='admin') playKdsBell();
+   State.pedidos=[...new Map(State.pedidos.map(p=>[p.id,p])).values()];renderCocina();renderMeseroPedidos();renderMesaSelector();renderAdminPedidos();
+  });
   State.socket.on('connect_error',e=>{if(e.message==='INVALID_TOKEN')doLogout();});
   State.socket.on('pedido_actualizado',()=>{renderLocalItems();renderCocina();});
   State.socket.on('pedido_eliminado',d=>{State.pedidos=State.pedidos.filter(p=>p.id!==d.id);renderMeseroPedidos();renderCocina();renderAdminPedidos();scheduleMetricasRefresh();});
-  for(const event of ['extras_actualizados','extra_pedido'])State.socket.on(event,async()=>{await loadLocalExtras();renderCocinaExtras();});
+  for(const event of ['extras_actualizados','extra_pedido'])State.socket.on(event,async()=>{
+   if(event==='extra_pedido'&&(getRole()==='cocina'||getRole()==='admin')) playKdsBell();
+   await loadLocalExtras();renderCocinaExtras();
+  });
   State.socket.on('catalogo_actualizado',()=>window.dispatchEvent(new Event('pos-refresh')));
  };
  const draftKey=()=> 'local-cart:'+(Auth.user?.id||'none');
@@ -55,10 +103,154 @@ if(window.LOCAL_POS){
  submitPedido=async function(){
   const diners=_comensales.filter(c=>c.items.length),mesa=Number(document.getElementById('mesa-num').value);if(!mesa||!diners.length){toastErr('Selecciona mesa y productos');return;}if(!confirm('¿Guardar y enviar este pedido a cocina?'))return;
   const btn=document.getElementById('btn-enviar-pedido');btn.disabled=true;loading(true);
-  try{const d=await post('/api/pedidos/lote',{pedidos:diners.map(c=>({mesa,tipo:_tipoPedido,comensal:c.nombre,productos:c.items.map(i=>({producto_id:i.producto_id,cantidad:i.cantidad,nota:(i.esLlevar?'[LLEVAR] ':'')+(i.nota||'')}))}))});clearCarrito();limpiarMesaSeleccionada();saveDraft();toastInfo(d.blocked?'Guardado: revisa Pendientes para corregir el envío':d.queued?'Guardado aquí: PENDIENTE DE RECIBIR EN COCINA':'Cocina recibió el pedido');await loadMeseroData();}catch(e){toastErr(e.message);}finally{btn.disabled=false;loading(false);}
+  const tempOrders=diners.map(c=>({
+   id: -Date.now() - Math.floor(Math.random()*1000),
+   mesa,
+   tipo: _tipoPedido,
+   comensal: c.nombre,
+   estado: 'pendiente',
+   creado_en: new Date().toISOString(),
+   _optimistic: true,
+   productos: c.items.map((i,idx)=>({
+    id: idx+1,
+    producto_id: i.producto_id,
+    nombre: i.nombre || (State.productos.find(pr=>pr.id===i.producto_id)?.nombre ?? 'Producto'),
+    precio: i.precio || (State.productos.find(pr=>pr.id===i.producto_id)?.precio ?? 0),
+    cantidad: i.cantidad,
+    nota: (i.esLlevar?'[LLEVAR] ':'')+(i.nota||''),
+    listo: false
+   })),
+   total: c.items.reduce((s,i)=>s+(i.precio*i.cantidad),0)
+  }));
+  try{
+   const d=await post('/api/pedidos/lote',{pedidos:diners.map(c=>({mesa,tipo:_tipoPedido,comensal:c.nombre,productos:c.items.map(i=>({producto_id:i.producto_id,cantidad:i.cantidad,nota:(i.esLlevar?'[LLEVAR] ':'')+(i.nota||'')}))}))});
+   clearCarrito();limpiarMesaSeleccionada();saveDraft();
+   if(d.queued&&!d.blocked){
+    for(const to of tempOrders){ if(!State.pedidos.some(p=>p.id===to.id)) State.pedidos.unshift(to); }
+    renderMeseroPedidos();renderMesaSelector();
+   }
+   toastInfo(d.blocked?'Guardado: revisa Pendientes para corregir el envío':d.queued?'Guardado aquí: PENDIENTE DE RECIBIR EN COCINA':'Cocina recibió el pedido');
+   await loadMeseroData();
+  }catch(e){
+   // Offline sends resolve as queued; a thrown error means nothing was saved,
+   // so the cart must stay intact for the waiter to fix and retry.
+   toastErr(e.message);
+  }finally{btn.disabled=false;loading(false);}
  };
- const oldEdit=api.pedidos.editar;api.pedidos.editar=(id,b)=>oldEdit(id,{...b,version:State.pedidos.find(p=>p.id===id)?.version});
- confirmarCobro=async function(){const btn=document.getElementById('btn-confirmar-cobro');btn.disabled=true;loading(true);try{const ids=_pedidoCobrarId===null?[..._cobroPendientesMesa]:[_pedidoCobrarId];const r=await post('/api/pedidos/cobrar',{ids,total_esperado:Number(_pedidoCobrarTotal.toFixed(2)),recibido:document.getElementById('cobro-pago').value});_cobroPendientesMesa=[];closeModal();toastOk('Cobro confirmado. Cambio: '+fmt.currency(r.cambio));await loadMeseroData();}catch(e){toastErr(e.message);window.dispatchEvent(new Event('pos-refresh'));}finally{btn.disabled=false;loading(false);}};
+
+ // ── Optimistic UI: Editar pedidos ──
+ const oldEdit=api.pedidos.editar;
+ api.pedidos.editar=async function(id,b){
+  const p=State.pedidos.find(x=>x.id===id);
+  if(p){
+   if(b.mesa!==undefined) p.mesa=b.mesa;
+   if(b.tipo!==undefined) p.tipo=b.tipo;
+   if(b.comensal!==undefined) p.comensal=b.comensal;
+   p._optimistic=true;
+   renderMeseroPedidos();renderMesaSelector();renderCocina();
+  }
+  try{
+   return await oldEdit(id,{...b,version:p?.version});
+  }catch(e){
+   // Nothing was saved: drop the optimistic edit and let the caller report it.
+   window.dispatchEvent(new Event('pos-refresh'));
+   throw e;
+  }
+ };
+
+ // ── Optimistic UI: Agregar productos a pedido ──
+ if(typeof confirmarAgregarProductos==='function'){
+  const oldConfirmarAgregar=confirmarAgregarProductos;
+  confirmarAgregarProductos=async function(){
+   if(!_carritoAgregar.length){toastErr('Selecciona al menos un producto');return;}
+   const btn=document.getElementById('btn-confirmar-agregar');
+   if(btn) btn.disabled=true;
+   loading(true);
+   const pId=_pedidoAgregarId;
+   const itemsToAdd=_carritoAgregar.map(i=>({
+    producto_id: i.producto_id,
+    nombre: i.nombre || (State.productos.find(pr=>pr.id===i.producto_id)?.nombre ?? 'Producto'),
+    precio: i.precio || (State.productos.find(pr=>pr.id===i.producto_id)?.precio ?? 0),
+    cantidad: i.cantidad,
+    nota: i.esLlevar ? '[LLEVAR] ' + (i.nota||'').trim() : (i.nota||''),
+    esLlevar: i.esLlevar
+   }));
+   // Actualización optimista inmediata en memoria
+   const p=State.pedidos.find(x=>x.id===pId);
+   if(p){
+    p.productos=p.productos||[];
+    for(const item of itemsToAdd){
+     p.productos.push({
+      id: Date.now()+Math.random(),
+      producto_id: item.producto_id,
+      nombre: item.nombre,
+      precio: item.precio,
+      cantidad: item.cantidad,
+      nota: item.nota,
+      listo: false
+     });
+    }
+    p.total=(p.total||0)+itemsToAdd.reduce((s,i)=>s+(i.precio*i.cantidad),0);
+    p._optimistic=true;
+   }
+   closeModal();
+   _carritoAgregar=[];
+   renderMeseroPedidos();renderMesaSelector();
+   try{
+    const r=await api.pedidos.agregar(pId,{
+     productos: itemsToAdd.map(i=>({producto_id:i.producto_id,cantidad:i.cantidad,nota:i.nota}))
+    });
+    if(r?.blocked)toastErr(r.mensaje||'No se pudo agregar; revisa Pendientes');
+    else if(r?.queued)toastInfo('Guardado aquí: PENDIENTE DE RECIBIR EN COCINA');
+    else toastOk('Productos agregados al pedido');
+   }catch(e){
+    toastErr(e.message);
+   }finally{
+    if(btn) btn.disabled=false;
+    loading(false);
+    await loadMeseroData();
+   }
+  };
+ }
+
+ // ── Optimistic UI: Cobro inmediato de pedidos ──
+ confirmarCobro=async function(){
+  const btn=document.getElementById('btn-confirmar-cobro');
+  if(btn) btn.disabled=true;
+  loading(true);
+  try{
+   const ids=_pedidoCobrarId===null?[..._cobroPendientesMesa]:[_pedidoCobrarId];
+   const totalEsperado=Number(_pedidoCobrarTotal.toFixed(2));
+   const pagoInput=document.getElementById('cobro-pago');
+   const recibidoVal=pagoInput?pagoInput.value:totalEsperado;
+   const recibido=Number(recibidoVal)||totalEsperado;
+   const cambio=Math.max(0,recibido-totalEsperado);
+   // Actualización optimista: marcar pedidos como pagados de inmediato en la UI
+   for(const id of ids){
+    const p=State.pedidos.find(x=>x.id===id);
+    if(p){ p.estado='pagado'; p._optimistic=true; }
+   }
+   _cobroPendientesMesa=[];
+   closeModal();
+   renderMeseroPedidos();renderMesaSelector();
+   try{
+    const r=await post('/api/pedidos/cobrar',{ids,total_esperado:totalEsperado,recibido:recibidoVal});
+    if(r?.blocked)toastErr(r.mensaje||'No se pudo cobrar; revisa Pendientes');
+    else if(r?.queued)toastInfo('Cobro guardado aquí: PENDIENTE DE CONFIRMAR EN COCINA. Cambio: '+fmt.currency(cambio));
+    else toastOk('Cobro confirmado. Cambio: '+fmt.currency(r?.cambio??cambio));
+   }catch(payErr){
+    // Rejected before being saved: nothing was charged, so undo the paid state.
+    toastErr(payErr.message);
+   }
+   await loadMeseroData();
+  }catch(e){
+   toastErr(e.message);
+   window.dispatchEvent(new Event('pos-refresh'));
+  }finally{
+   if(btn) btn.disabled=false;
+   loading(false);
+  }
+ };
  cobrarMesa=function(key){if(getRole()!=='admin'){toastErr('El cobro corresponde al mesero');return;}if(String(key).startsWith('llevar-'))abrirCobro(Number(String(key).split('-')[1]));else cobrarTodoMesa(Number(key));};
  const oldLoadCocina=loadCocinaData;loadCocinaData=async function(){await oldLoadCocina();try{await loadLocalExtras();}catch(_){}renderLocalItems();renderCocina();renderCocinaExtras();};
  toggleItemListo=async function(id,index){const item=State.pedidos.find(p=>p.id===id)?.productos[index];if(!item)return;try{const d=await patch(`/api/pedidos/${id}/item`,{detalle_id:item.id,listo:!item.listo});State.pedidos=State.pedidos.map(p=>p.id===id?d.pedido:p);renderLocalItems();renderCocina();}catch(e){toastErr(e.message);renderCocina();}};
