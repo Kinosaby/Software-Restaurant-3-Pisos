@@ -58,12 +58,55 @@ class PosServer {
     required this.asset,
     this.hub,
   });
+
+  bool isQueueable(String method, String path) {
+    final p = Uri.tryParse(path)?.path ?? path;
+    if (method == 'POST') {
+      return p == '/api/pedidos' ||
+          p == '/api/pedidos/lote' ||
+          p == '/api/pedidos/cobrar';
+    }
+    if (method == 'PATCH') {
+      return RegExp(r'^/api/pedidos/\d+/(agregar|item|editar)$').hasMatch(p);
+    }
+    if (method == 'DELETE') {
+      return RegExp(r'^/api/pedidos/\d+(/items/\d+)?$').hasMatch(p);
+    }
+    return false;
+  }
+
+  Future<void> releaseInFlight(String id) => engine.db.update(
+        'outbox',
+        {'status': 'pending'},
+        where: 'id=? AND status=?',
+        whereArgs: [id, 'in_flight'],
+      );
+
+  String resolveMethod(String path) {
+    final p = Uri.tryParse(path)?.path ?? path;
+    if (p.endsWith('/agregar') || p.endsWith('/item') || p.endsWith('/editar')) {
+      return 'PATCH';
+    }
+    if (RegExp(r'^/api/pedidos/\d+(/items/\d+)?$').hasMatch(p)) {
+      return 'DELETE';
+    }
+    return 'POST';
+  }
+
   Future<void> start({int uiPort = 8788, int lanPort = 8787}) async {
-    localServer = await HttpServer.bind(InternetAddress.loopbackIPv4, uiPort);
+    timer?.cancel();
+    localServer = await HttpServer.bind(InternetAddress.loopbackIPv4, uiPort, shared: true);
     localServer!.listen((r) => handle(r, false));
     if (central) {
-      lanServer = await HttpServer.bind(InternetAddress.anyIPv4, lanPort);
+      lanServer = await HttpServer.bind(InternetAddress.anyIPv4, lanPort, shared: true);
       lanServer!.listen((r) => handle(r, true));
+    } else {
+      await engine.db.update(
+        'outbox',
+        {'status': 'pending'},
+        where: 'status=?',
+        whereArgs: ['in_flight'],
+      );
     }
     connected = central;
     timer = Timer.periodic(const Duration(seconds: 4), (_) => sync());
@@ -155,7 +198,7 @@ class PosServer {
     req.response.headers.set('Referrer-Policy', 'no-referrer');
     activeRequests++;
     try {
-      if (activeRequests > 32) { throw PosError(503, 'Central ocupada; vuelve a intentar'); }
+      if (activeRequests > 64) { throw PosError(503, 'Central ocupada; vuelve a intentar'); }
       if (lan) {
         if (!['/link/rpc', '/link/challenge'].contains(req.uri.path) || req.method != 'POST') {
           throw PosError(404, 'Ruta no encontrada');
@@ -183,14 +226,13 @@ class PosServer {
           if (req.uri.path == '/link/challenge') {
             if (challenges.length >= 256) { throw PosError(429, 'Demasiados enlaces pendientes'); }
             final challenge = randomKey();
-            challenges[challenge] = now.add(const Duration(seconds: 20));
+            challenges[challenge] = now.add(const Duration(seconds: 60));
             await jsonResponse(req, 200, await cipher.seal({
               'status': 200, 'request_id': call['request_id'],
               'body': {'challenge': challenge, 'protocol': 2},
             }));
             return;
           }
-          // Consume before awaiting execution; restarting also invalidates challenges.
           if (challenges.remove(call['challenge']) == null) {
             throw PosError(409, 'Enlace vencido o repetido. Actualiza las tres tablets y vuelve a intentar');
           }
@@ -357,38 +399,44 @@ class PosServer {
   Future<Json> exchange(String path, Json call) async {
     final cipher = LanCipher(pairSecret);
     final nonce = randomKey();
-    final req = await http
-        .postUrl(hub!.resolve(path))
-        .timeout(const Duration(seconds: 4));
-    req.headers.contentType = ContentType.json;
-    req.followRedirects = false;
-    req.write(
-      jsonEncode(
-        await cipher.seal({...call, 'hub_id': hubId, 'request_id': nonce}),
-      ),
-    );
-    final res = await req.close().timeout(const Duration(seconds: 8));
-    if (res.statusCode == 403) {
-      throw PosError(403, 'El código de enlace no coincide con la central');
-    }
-    if (res.statusCode != 200) { throw PosError(res.statusCode, 'No se pudo validar el enlace con cocina'); }
-    final bytes = <int>[];
-    await (() async {
-      await for (final chunk in res) {
-        bytes.addAll(chunk);
-        if (bytes.length > 16 * 1024 * 1024) { throw PosError(413, 'Respuesta demasiado grande'); }
+    HttpClientRequest? req;
+    try {
+      req = await http
+          .postUrl(hub!.resolve(path))
+          .timeout(const Duration(seconds: 4));
+      req.headers.contentType = ContentType.json;
+      req.followRedirects = false;
+      req.write(
+        jsonEncode(
+          await cipher.seal({...call, 'hub_id': hubId, 'request_id': nonce}),
+        ),
+      );
+      final res = await req.close().timeout(const Duration(seconds: 8));
+      if (res.statusCode == 403) {
+        throw PosError(403, 'El código de enlace no coincide con la central');
       }
-    })().timeout(const Duration(seconds: 8));
-    final raw = utf8.decode(bytes);
-    final result = await cipher.open(jsonDecode(raw) as Json);
-    if (result['request_id'] != nonce) {
-      throw PosError(409, 'Respuesta de enlace inválida');
+      if (res.statusCode != 200) { throw PosError(res.statusCode, 'No se pudo validar el enlace con cocina'); }
+      final bytes = <int>[];
+      await (() async {
+        await for (final chunk in res) {
+          bytes.addAll(chunk);
+          if (bytes.length > 16 * 1024 * 1024) { throw PosError(413, 'Respuesta demasiado grande'); }
+        }
+      })().timeout(const Duration(seconds: 8));
+      final raw = utf8.decode(bytes);
+      final result = await cipher.open(jsonDecode(raw) as Json);
+      if (result['request_id'] != nonce) {
+        throw PosError(409, 'Respuesta de enlace inválida');
+      }
+      connected = true;
+      if ((result['status'] as int) >= 400) {
+        throw PosError(result['status'], result['body']['error']);
+      }
+      return Json.from(result['body']);
+    } catch (e) {
+      req?.abort();
+      rethrow;
     }
-    connected = true;
-    if ((result['status'] as int) >= 400) {
-      throw PosError(result['status'], result['body']['error']);
-    }
-    return Json.from(result['body']);
   }
 
   Future<Json> request(
@@ -414,9 +462,7 @@ class PosServer {
     }
     if (path != '/api/auth/login') { await localUser(token); }
     final cacheKey = '$hubId|$token|$path';
-    final queueable =
-        method == 'POST' &&
-        ['/api/pedidos', '/api/pedidos/lote'].contains(path);
+    final queueable = isQueueable(method, path);
     if (queueable) {
       if (token == null || op == null) {
         throw PosError(401, 'Inicia sesión antes de enviar');
@@ -441,9 +487,9 @@ class PosServer {
         'token': token,
         'path': path,
         'body': jsonEncode(body),
-        'status': 'pending',
+        'status': 'in_flight',
         'created': DateTime.now().toUtc().toIso8601String(),
-      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
     try {
       final result = await remote(call);
@@ -483,9 +529,14 @@ class PosServer {
         final blocked = await engine.db.update(
           'outbox',
           {'status': 'blocked', 'error': e.message},
-          where: 'id=? AND token=? AND status=?',
-          whereArgs: [op, token, 'pending'],
+          where: 'id=? AND token=? AND (status=? OR status=?)',
+          whereArgs: [op, token, 'pending', 'in_flight'],
         );
+        if (blocked == 0) {
+          // A new login replaced the token while this send was in flight; the
+          // stale rejection must not leave the renewed entry stuck.
+          await releaseInFlight(op!);
+        }
         return {
           'queued': true,
           'blocked': blocked > 0,
@@ -497,6 +548,12 @@ class PosServer {
     } catch (_) {
       connected = false;
       if (queueable) {
+        await engine.db.update(
+          'outbox',
+          {'status': 'pending'},
+          where: 'id=? AND status=?',
+          whereArgs: [op, 'in_flight'],
+        );
         return {
           'queued': true,
           'operation_id': op,
@@ -541,10 +598,20 @@ class PosServer {
         whereArgs: ['pending'],
         orderBy: 'created ASC',
       )) {
+        final updated = await engine.db.update(
+          'outbox',
+          {'status': 'in_flight'},
+          where: 'id=? AND status=?',
+          whereArgs: [row['id'], 'pending'],
+        );
+        if (updated == 0) {
+          continue;
+        }
         try {
+          final rowPath = row['path'] as String;
           await remote({
-            'method': 'POST',
-            'path': row['path'],
+            'method': resolveMethod(rowPath),
+            'path': rowPath,
             'body': jsonDecode(row['body'] as String),
             'token': row['token'],
             'operation_id': row['id'],
@@ -555,17 +622,21 @@ class PosServer {
             whereArgs: [row['id']],
           );
         } on PosError catch (e) {
-          // A new login may have replaced the token while this send was in
-          // flight. An old rejection must not block the renewed operation.
           if (e.status == 401) {
             await forgetSession(row['token'] as String);
           }
-          await engine.db.update(
+          final blocked = await engine.db.update(
             'outbox',
             {'status': 'blocked', 'error': e.message},
-            where: 'id=? AND token=? AND status=?',
-            whereArgs: [row['id'], row['token'], 'pending'],
+            where: 'id=? AND token=?',
+            whereArgs: [row['id'], row['token']],
           );
+          if (blocked == 0) {
+            await releaseInFlight(row['id'] as String);
+          }
+        } catch (_) {
+          await releaseInFlight(row['id'] as String);
+          rethrow;
         }
       }
     } catch (_) {

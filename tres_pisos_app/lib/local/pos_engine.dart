@@ -206,7 +206,7 @@ class PosEngine {
     final s = (v ?? '').toString().trim();
     if ((!empty && s.isEmpty) ||
         s.length > max ||
-        RegExp(r'''[<>"'`\\&\x00-\x1f]''').hasMatch(s)) {
+        RegExp(r'''[<>"'`\\\x00-\x1f]''').hasMatch(s)) {
       throw PosError(
         400,
         'Texto inválido: usa letras, números, espacios y puntuación simple',
@@ -216,7 +216,19 @@ class PosEngine {
   }
 
   static int money(dynamic v) {
-    final s = '$v';
+    if (v is num) {
+      if (!v.isFinite || v < 0 || v > 10000000) {
+        throw PosError(400, 'Importe fuera de rango');
+      }
+      // Tolerate binary floating-point noise (0.1 + 0.2) but never silently
+      // round a real fraction of a cent.
+      final cents = v * 100;
+      if ((cents - cents.round()).abs() > 1e-6) {
+        throw PosError(400, 'Importe inválido');
+      }
+      return cents.round();
+    }
+    final s = '$v'.trim();
     if (!RegExp(r'^\d{1,7}(\.\d{1,2})?$').hasMatch(s)) {
       throw PosError(400, 'Importe inválido');
     }
@@ -913,6 +925,11 @@ class PosEngine {
           whereArgs: ['orders', id],
         );
         await tx.delete('order_items', where: 'order_id=?', whereArgs: [id]);
+        await tx.delete(
+          'records',
+          where: 'kind=? AND id=?',
+          whereArgs: ['sales', id],
+        );
         await cancelExtras(tx, id);
         await event(tx, 'pedido_eliminado', {'id': id});
         return {'pedido': p};

@@ -197,6 +197,17 @@ void main() {
             (await call(clients[0], 'POST', '/api/pedidos/cobrar', tokens[0],
                 payment))['cambio'],
             14);
+        // A second account, ready before the link drops, is paid while offline.
+        final id2 = placed[1]['pedido']['id'] as int;
+        await call(hub, 'PUT', '/api/pedidos/$id2/estado', kitchen,
+            {'estado': 'preparando'});
+        await call(hub, 'PUT', '/api/pedidos/$id2/estado', kitchen,
+            {'estado': 'listo'});
+        final offlinePayment = {
+          'ids': [id2],
+          'total_esperado': 36,
+          'recibido': 50
+        };
         await hub.lanServer!.close(force: true);
         hub.lanServer = null;
         expect(
@@ -207,15 +218,17 @@ void main() {
             (await call(
                 clients[0], 'GET', '/api/auth/me', tokens[0]))['cached'],
             true);
-        await expectLater(
-            call(clients[0], 'POST', '/api/pedidos/cobrar', tokens[0], payment),
-            denied(503));
+        final payPending = randomKey();
+        final payRes = await call(clients[0], 'POST', '/api/pedidos/cobrar',
+            tokens[0], offlinePayment, payPending);
+        expect(payRes['queued'], true);
+
         final pending = randomKey();
         expect(
             (await call(clients[0], 'POST', '/api/pedidos', tokens[0], order(3),
                 pending))['queued'],
             true);
-        expect(await clients[0].engine.db.query('outbox'), hasLength(1));
+        expect(await clients[0].engine.db.query('outbox'), hasLength(2));
         hub.lanServer =
             await HttpServer.bind(InternetAddress.loopbackIPv4, port);
         hub.lanServer!.listen((r) => hub.handle(r, true));
@@ -226,7 +239,7 @@ void main() {
         expect(
             (await call(hub, 'GET', '/api/metricas/resumen', admin))['dia']
                 ['total_ventas'],
-            36);
+            72);
         expect(jsonEncode(await pos.db.query('receipts')),
             isNot(contains('fixture-password')));
         expect(network.hosts, isNotEmpty);

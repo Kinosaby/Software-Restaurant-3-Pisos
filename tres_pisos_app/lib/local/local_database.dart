@@ -12,7 +12,8 @@ Future<Database> openPosDatabase(String path) async {
     onUpgrade: PosEngine.upgradeSchema,
     onConfigure: (db) async {
       await db.rawQuery('PRAGMA journal_mode=WAL');
-      await db.execute('PRAGMA synchronous=FULL');
+      await db.execute('PRAGMA synchronous=NORMAL');
+      await db.execute('PRAGMA busy_timeout=5000');
       await db.rawQuery('PRAGMA secure_delete=ON');
     },
   );

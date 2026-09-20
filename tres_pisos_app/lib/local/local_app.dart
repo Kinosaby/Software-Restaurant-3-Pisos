@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:file_picker/file_picker.dart';
@@ -16,6 +17,19 @@ import 'pos_engine.dart';
 import 'pos_server.dart';
 import 'menu_file.dart';
 import 'local_database.dart';
+
+const kNoRouteToHostMsg =
+    'No se puede alcanzar la central de cocina (No route to host). Revisa que ambas tablets estén en la misma red Wi-Fi y que el router no tenga Aislamiento de AP activado.';
+
+bool isNetworkOrRouteError(Object e) {
+  final msg = '$e';
+  return e is SocketException ||
+      msg.contains('No route to host') ||
+      msg.contains('SocketException') ||
+      msg.contains('Network is unreachable') ||
+      msg.contains('Failed host lookup') ||
+      msg.contains('Connection refused');
+}
 
 class LocalPosApp extends StatelessWidget {
   const LocalPosApp({super.key});
@@ -34,7 +48,10 @@ class LocalPosApp extends StatelessWidget {
 }
 
 ({Uri address, String key, String id}) parsePairing(String text) {
-  final uri = Uri.tryParse(text.trim());
+  final cleanText = text
+      .replaceAll(RegExp(r'[\u200B-\u200D\uFEFF\u00A0]'), '')
+      .trim();
+  final uri = Uri.tryParse(cleanText);
   if (uri == null ||
       uri.scheme != 'trespisos' ||
       uri.port != 8787 ||
@@ -119,7 +136,11 @@ class _LocalPosScreenState extends State<LocalPosScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState s) {
     if (s == AppLifecycleState.resumed && server != null) {
-      WakelockPlus.enable();
+      if (server!.central) {
+        WakelockPlus.enable();
+      } else {
+        WakelockPlus.disable();
+      }
       server!.sync();
       web?.runJavaScript("window.dispatchEvent(new Event('pos-refresh'))");
     }
@@ -152,7 +173,13 @@ class _LocalPosScreenState extends State<LocalPosScreen>
         );
       }
     } catch (e) {
-      error = '$e';
+      if (isNetworkOrRouteError(e)) {
+        error = kNoRouteToHostMsg;
+      } else if (e is PosError) {
+        error = e.message;
+      } else {
+        error = '$e';
+      }
     }
     if (mounted) {
       setState(() => busy = false);
@@ -235,8 +262,11 @@ class _LocalPosScreenState extends State<LocalPosScreen>
           }
         } catch (e) {
           if (mounted) {
+            final text = isNetworkOrRouteError(e)
+                ? kNoRouteToHostMsg
+                : (e is PosError ? e.message : '$e');
             ScaffoldMessenger.of(context)
-                .showSnackBar(SnackBar(content: Text('$e')));
+                .showSnackBar(SnackBar(content: Text(text)));
           }
         }
       },
@@ -246,7 +276,11 @@ class _LocalPosScreenState extends State<LocalPosScreen>
           .setMediaPlaybackRequiresUserGesture(false);
     }
     await controller.loadRequest(Uri.parse(origin), headers: {'X-Pos-UI-Key': next.uiSecret});
-    await WakelockPlus.enable();
+    if (central) {
+      await WakelockPlus.enable();
+    } else {
+      await WakelockPlus.disable();
+    }
     if (mounted) {
       setState(() => web = controller);
     }
@@ -330,9 +364,14 @@ class _LocalPosScreenState extends State<LocalPosScreen>
         await launch(false, p.key, p.id, p.address.toString());
       }
     } catch (e) {
-      error = e is PosError
-          ? e.message
-          : 'No se pudo conectar. Revisa el código y que las tablets estén en el mismo Wi-Fi.';
+      if (isNetworkOrRouteError(e)) {
+        error = kNoRouteToHostMsg;
+      } else if (e is PosError) {
+        error = e.message;
+      } else {
+        error =
+            'No se pudo conectar. Revisa el código y que las tablets estén en el mismo Wi-Fi.';
+      }
     }
     if (mounted) {
       setState(() => busy = false);
@@ -354,6 +393,15 @@ class _LocalPosScreenState extends State<LocalPosScreen>
         'path': '/api/local/ping',
         'body': {},
       });
+    } on SocketException catch (_) {
+      throw PosError(503, kNoRouteToHostMsg);
+    } on PosError {
+      rethrow;
+    } catch (e) {
+      if (isNetworkOrRouteError(e)) {
+        throw PosError(503, kNoRouteToHostMsg);
+      }
+      rethrow;
     } finally {
       await check.stop();
     }
@@ -515,13 +563,14 @@ class _LocalPosScreenState extends State<LocalPosScreen>
     final changes = plan['cambios'] as List;
     String price(dynamic value) =>
         '\$${(PosEngine.money(value) / 100).toStringAsFixed(2)}';
+    final media = MediaQuery.sizeOf(context);
     final accepted = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Revisar menú · MXN'),
         content: SizedBox(
-          width: 560,
-          height: 420,
+          width: min(560.0, media.width * 0.9),
+          height: min(420.0, media.height * 0.65),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -697,116 +746,126 @@ class _LocalPosScreenState extends State<LocalPosScreen>
 
   @override
   Widget build(BuildContext context) {
-    if (web != null) {
-      return Scaffold(
-        body: SafeArea(child: WebViewWidget(controller: web!)),
-      );
-    }
-    return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 520),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text(
-                    '3 PISOS',
-                    style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Sistema local del restaurante\nMeseros, cocina y administración completos. Sin servidor de pago.',
-                  ),
-                  const SizedBox(height: 24),
-                  SegmentedButton<bool>(
-                    segments: const [
-                      ButtonSegment(
-                        value: true,
-                        label: Text('Central de cocina'),
-                      ),
-                      ButtonSegment(
-                        value: false,
-                        label: Text('Vincular tablet'),
-                      ),
-                    ],
-                    selected: {centralChoice},
-                    onSelectionChanged: busy || hasAccounts
-                        ? null
-                        : (v) => setState(() => centralChoice = v.first),
-                  ),
-                  const SizedBox(height: 20),
-                  if (centralChoice) ...[
-                    const Text(
-                      'Configura una sola central: la tablet que permanecerá en cocina. Las otras tablets se vinculan a ella por Wi-Fi.',
-                    ),
-                    if (!hasAccounts) ...[
-                      TextField(
-                        controller: username,
-                        decoration: const InputDecoration(
-                          labelText: 'Nuevo usuario administrador',
+    final scaffold = web != null
+        ? Scaffold(
+            body: SafeArea(child: WebViewWidget(controller: web!)),
+          )
+        : Scaffold(
+            body: SafeArea(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 520),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text(
+                          '3 PISOS',
+                          style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold),
                         ),
-                        autocorrect: false,
-                      ),
-                      TextField(
-                        controller: password,
-                        decoration: const InputDecoration(
-                          labelText: 'Contraseña (mínimo 8 caracteres)',
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Sistema local del restaurante\nMeseros, cocina y administración completos. Sin servidor de pago.',
                         ),
-                        obscureText: true,
-                      ),
-                    ],
-                  ] else ...[
-                    const Text(
-                      'Abre Conexión en la tablet de cocina y copia su código. Ambas tablets deben estar en el mismo Wi-Fi.',
-                    ),
-                    TextField(
-                      controller: pairing,
-                      minLines: 3,
-                      maxLines: 5,
-                      decoration: const InputDecoration(
-                        labelText: 'Código trespisos://…',
-                      ),
-                      autocorrect: false,
-                    ),
-                  ],
-                  const SizedBox(height: 20),
-                  if (error != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Text(
-                        error!,
-                        style: const TextStyle(color: Colors.amber),
-                      ),
-                    ),
-                  FilledButton(
-                    onPressed: busy ? null : configure,
-                    child: Text(
-                      busy
-                          ? 'Preparando…'
-                          : centralChoice
-                              ? 'Iniciar central'
-                              : 'Vincular con cocina',
+                        const SizedBox(height: 24),
+                        SegmentedButton<bool>(
+                          segments: const [
+                            ButtonSegment(
+                              value: true,
+                              label: Text('Central de cocina'),
+                            ),
+                            ButtonSegment(
+                              value: false,
+                              label: Text('Vincular tablet'),
+                            ),
+                          ],
+                          selected: {centralChoice},
+                          onSelectionChanged: busy || hasAccounts
+                              ? null
+                              : (v) => setState(() => centralChoice = v.first),
+                        ),
+                        const SizedBox(height: 20),
+                        if (centralChoice) ...[
+                          const Text(
+                            'Configura una sola central: la tablet que permanecerá en cocina. Las otras tablets se vinculan a ella por Wi-Fi.',
+                          ),
+                          if (!hasAccounts) ...[
+                            TextField(
+                              controller: username,
+                              decoration: const InputDecoration(
+                                labelText: 'Nuevo usuario administrador',
+                              ),
+                              autocorrect: false,
+                            ),
+                            TextField(
+                              controller: password,
+                              decoration: const InputDecoration(
+                                labelText: 'Contraseña (mínimo 8 caracteres)',
+                              ),
+                              obscureText: true,
+                            ),
+                          ],
+                        ] else ...[
+                          const Text(
+                            'Abre Conexión en la tablet de cocina y copia su código. Ambas tablets deben estar en el mismo Wi-Fi.',
+                          ),
+                          TextField(
+                            controller: pairing,
+                            minLines: 3,
+                            maxLines: 5,
+                            decoration: const InputDecoration(
+                              labelText: 'Código trespisos://…',
+                            ),
+                            autocorrect: false,
+                          ),
+                        ],
+                        const SizedBox(height: 20),
+                        if (error != null)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: Text(
+                              error!,
+                              style: const TextStyle(color: Colors.amber),
+                            ),
+                          ),
+                        FilledButton(
+                          onPressed: busy ? null : configure,
+                          child: Text(
+                            busy
+                                ? 'Preparando…'
+                                : centralChoice
+                                    ? 'Iniciar central'
+                                    : 'Vincular con cocina',
+                          ),
+                        ),
+                        if (!hasAccounts && centralChoice)
+                          TextButton(
+                            onPressed: busy ? null : restoreBackup,
+                            child: const Text('Cargar accesos o respaldo'),
+                          ),
+                        if (busy)
+                          const Padding(
+                            padding: EdgeInsets.all(16),
+                            child: LinearProgressIndicator(),
+                          ),
+                      ],
                     ),
                   ),
-                  if (!hasAccounts && centralChoice)
-                    TextButton(
-                      onPressed: busy ? null : restoreBackup,
-                      child: const Text('Cargar accesos o respaldo'),
-                    ),
-                  if (busy)
-                    const Padding(
-                      padding: EdgeInsets.all(16),
-                      child: LinearProgressIndicator(),
-                    ),
-                ],
+                ),
               ),
             ),
-          ),
-        ),
-      ),
+          );
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, dynamic result) async {
+        if (didPop) return;
+        if (web != null && await web!.canGoBack()) {
+          await web!.goBack();
+        }
+      },
+      child: scaffold,
     );
   }
 }
