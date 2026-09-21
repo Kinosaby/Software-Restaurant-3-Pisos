@@ -88,7 +88,7 @@ flutter test
 POS_ALLOW_TEST_SIGNING=true flutter build apk --release
 ```
 
-Flutter 3.47.2; workflow `android-apk.yml`. El punto de entrada es `LocalPosApp`; las pantallas Flutter anteriores permanecen como referencia y no se utilizan. Los recursos se reconstruyen desde la web y los lockfiles. El historial se pagina en grupos de 100 y los datos comerciales no se purgan. Reportes con UTC-6 para Hidalgo.
+Flutter 3.47.5; workflow `android-apk.yml`. El punto de entrada es `LocalPosApp`; las pantallas Flutter anteriores permanecen como referencia y no se utilizan. Los recursos se reconstruyen desde la web y los lockfiles. El historial se pagina en grupos de 100 y los datos comerciales no se purgan. Reportes con UTC-6 para Hidalgo.
 
 Pruebas: menú completo de 54 productos, conservación de ediciones, migración de comprobantes, tres dispositivos simulados con Internet bloqueado, cuatro accesos, permisos por API, pérdida y recuperación del enlace, roles, lotes atómicos, reintentos, precios, edición concurrente, extras, cobro conjunto, 601 pedidos, historial, respaldo/restauración y recuperación de cola después de perder una confirmación. No sustituyen pruebas de cobertura Wi-Fi y capacidad en las tablets reales.
 
