@@ -12,8 +12,10 @@ Future<Database> openPosDatabase(String path) async {
     onUpgrade: PosEngine.upgradeSchema,
     onConfigure: (db) async {
       await db.rawQuery('PRAGMA journal_mode=WAL');
-      await db.execute('PRAGMA synchronous=NORMAL');
-      await db.execute('PRAGMA busy_timeout=5000');
+      // Payments must survive a tablet losing power mid-service, so keep FULL;
+      // busy_timeout is what actually prevents the concurrent-write lockups.
+      await db.execute('PRAGMA synchronous=FULL');
+      await db.rawQuery('PRAGMA busy_timeout=5000');
       await db.rawQuery('PRAGMA secure_delete=ON');
     },
   );
