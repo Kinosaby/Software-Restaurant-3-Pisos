@@ -857,12 +857,38 @@ class _LocalPosScreenState extends State<LocalPosScreen>
             ),
           );
 
+    // The setup screen must stay exitable; inside the POS the back button
+    // walks the web history and only leaves after confirming.
     return PopScope(
-      canPop: false,
+      canPop: web == null,
       onPopInvokedWithResult: (bool didPop, dynamic result) async {
-        if (didPop) return;
-        if (web != null && await web!.canGoBack()) {
+        if (didPop || web == null) return;
+        if (await web!.canGoBack()) {
           await web!.goBack();
+          return;
+        }
+        if (!context.mounted) return;
+        final leave = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('¿Salir de 3 Pisos?'),
+            content: const Text(
+              'Los pedidos y cobros quedan guardados en esta tablet.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Seguir aquí'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Salir'),
+              ),
+            ],
+          ),
+        );
+        if (leave == true) {
+          await SystemNavigator.pop();
         }
       },
       child: scaffold,
