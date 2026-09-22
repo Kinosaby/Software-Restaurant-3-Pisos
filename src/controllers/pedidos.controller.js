@@ -31,14 +31,19 @@ exports.crear = asyncHandler(async (req, res) => {
 /** PUT /api/pedidos/:id/estado  (cocina, mesero, admin) */
 exports.cambiarEstado = asyncHandler(async (req, res) => {
   const io     = getIo(req);
-  const pedido = await pedidosService.cambiarEstado(req.params.id, req.body.estado, io);
+  const pedido = await pedidosService.cambiarEstado(
+    req.params.id,
+    req.body.estado,
+    io,
+    req.user.role
+  );
   res.json({ success: true, mensaje: 'Estado actualizado', pedido });
 });
 
 /** PATCH /api/pedidos/:id/cancelar */
 exports.cancelar = asyncHandler(async (req, res) => {
   const io     = getIo(req);
-  const pedido = await pedidosService.cancelar(req.params.id, io);
+  const pedido = await pedidosService.cancelar(req.params.id, io, req.user.role);
   res.json({ success: true, mensaje: 'Pedido cancelado', pedido });
 });
 

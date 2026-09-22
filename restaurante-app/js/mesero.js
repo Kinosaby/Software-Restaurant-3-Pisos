@@ -8,6 +8,29 @@ const CATEGORIAS = [
   'Gringas','Bebidas','Postres','General'
 ];
 
+// Keep the familiar category order and include every category in the real menu.
+function categoriasMenu(productos = State.productos) {
+  const presentes = new Set(productos.map(p => p.categoria || 'General'));
+  return [...CATEGORIAS.filter(c => presentes.has(c)),
+    ...[...presentes].filter(c => !CATEGORIAS.includes(c)).sort((a,b) => a.localeCompare(b, 'es'))];
+}
+
+function renderCategoryTabs(element, productos, selected, onSelect) {
+  element.replaceChildren();
+  for (const category of [null, ...categoriasMenu(productos)]) {
+    const button = document.createElement('button');
+    button.className = 'cat-tab' + (category === selected ? ' active' : '');
+    button.append(document.createTextNode((category ?? 'Todas') + ' '));
+    const count = document.createElement('span');
+    count.className = 'cat-tab-count';
+    count.textContent = category === null ? productos.length
+      : productos.filter(p => (p.categoria || 'General') === category).length;
+    button.append(count);
+    button.onclick = () => onSelect(category);
+    element.append(button);
+  }
+}
+
 // ── Configuración de mesas ─────────────────────────────────────
 const TOTAL_MESAS = 13;   // <── Cambia este número si el restaurante tiene más/menos mesas
 
@@ -133,7 +156,7 @@ async function loadMeseroData() {
 }
 
 /* ── Catálogo ───────────────────────────────── */
-let _filtroCategoria = 'Todas';
+let _filtroCategoria = null;
 let _busqueda = '';
 
 function renderCatalogo() {
@@ -144,25 +167,13 @@ function renderCatalogo() {
 
   const activos = State.productos.filter(p => p.activo !== false);
 
-  // Categorías que tienen productos
-  const catsConProductos = ['Todas', ...CATEGORIAS.filter(c =>
-    activos.some(p => (p.categoria || 'General') === c)
-  )];
-
-  // Tabs de categorías
-  if (tabsEl) {
-    tabsEl.innerHTML = catsConProductos.map(c => {
-      const count = c === 'Todas' ? activos.length
-        : activos.filter(p => (p.categoria || 'General') === c).length;
-      return `<button class="cat-tab${c === _filtroCategoria ? ' active' : ''}"
-        onclick="filtrarCategoria('${c}')">
-        ${c} <span class="cat-tab-count">${count}</span>
-      </button>`;
-    }).join('');
+  if (_filtroCategoria !== null && !categoriasMenu(activos).includes(_filtroCategoria)) {
+    _filtroCategoria = null;
   }
+  if (tabsEl) renderCategoryTabs(tabsEl, activos, _filtroCategoria, filtrarCategoria);
 
   // Filtrar por categoría y búsqueda
-  let filtrados = _filtroCategoria === 'Todas'
+  let filtrados = _filtroCategoria === null
     ? activos
     : activos.filter(p => (p.categoria || 'General') === _filtroCategoria);
 
@@ -195,8 +206,8 @@ function renderProductoCard(p) {
     <div class="producto-card" onclick="addToCarrito(${p.id})" id="pcard-${p.id}">
       <div class="prod-color-bar" style="background:${color}"></div>
       <div class="prod-body">
-        <span class="prod-cat">${p.categoria || 'General'}</span>
-        <span class="prod-nom">${p.nombre}</span>
+        <span class="prod-cat">${escapeHtml(p.categoria || 'General')}</span>
+        <span class="prod-nom">${escapeHtml(p.nombre)}</span>
         <span class="prod-precio">${fmt.currency(p.precio)}</span>
       </div>
       <div class="prod-add-btn"><i class="fa-solid fa-plus"></i></div>
@@ -299,7 +310,7 @@ function renderCarrito() {
       const active = i === _comensalActivo ? 'active' : '';
       return `
         <div class="comensal-tab ${active}" onclick="cambiarComensal(${i})">
-          <span>${c.nombre}</span>
+          <span>${escapeHtml(c.nombre)}</span>
           ${c.items.length ? `<span class="comensal-tab-total">${fmt.currency(totalC)}</span>` : ''}
           ${_comensales.length > 1 ? `<button class="comensal-tab-del" onclick="event.stopPropagation();quitarComensal(${i})" title="Quitar">&times;</button>` : ''}
         </div>`;
@@ -319,9 +330,9 @@ function renderCarrito() {
       return `
         <div class="carrito-item">
           <div style="flex:1">
-            <div style="font-size:.84rem;font-weight:600">${item.nombre}</div>
+            <div style="font-size:.84rem;font-weight:600">${escapeHtml(item.nombre)}</div>
             <div style="font-size:.73rem;color:var(--muted)">${fmt.currency(item.precio)} c/u &bull; <strong class="text-gold">${fmt.currency(subtotal)}</strong></div>
-            <input class="nota-input" placeholder="Nota..." value="${item.nota || ''}"
+            <input class="nota-input" placeholder="Nota..." value="${escapeHtml(item.nota || '')}"
               onchange="setNota(${item.producto_id}, this.value)" style="margin-top:5px">
           </div>
           <div class="carrito-qty">
@@ -415,7 +426,7 @@ function renderMeseroPedidos() {
     const puedeEditar  = ['pendiente','preparando'].includes(p.estado);
     const esCompletado = ['listo','pagado'].includes(p.estado);
     const labelC = p.comensal
-      ? `<span class="badge-comensal"><i class="fa-solid fa-user"></i> ${p.comensal}</span>`
+      ? `<span class="badge-comensal"><i class="fa-solid fa-user"></i> ${escapeHtml(p.comensal)}</span>`
       : '';
     const descProductos = (p.productos || []).map(i => `${i.cantidad}x ${i.nombre}`).join(', ');
     return `
@@ -425,7 +436,7 @@ function renderMeseroPedidos() {
           ${labelC}${badgeHtml(p.estado)}
         </div>
         <div class="text-xs muted">#${p.id} &middot; ${fmt.relTime(p.creado_en)}</div>
-        ${descProductos ? `<div style="font-size:0.75rem; font-style:italic; color:var(--muted); margin-top:2px;">${descProductos}</div>` : ''}
+        ${descProductos ? `<div style="font-size:0.75rem; font-style:italic; color:var(--muted); margin-top:2px;">${escapeHtml(descProductos)}</div>` : ''}
       </div>
       <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
         ${puedeEditar ? `<button class="btn btn-sm btn-edit" onclick="event.stopPropagation();abrirEditarPedido(${p.id})"><i class="fa-solid fa-pen-to-square"></i></button>` : ''}
@@ -500,7 +511,7 @@ async function cobrarTodoMesa(mesa) {
   if (!content) return;
 
   const desglose = listos.map(p => {
-    const label = p.comensal ? `<span class="badge-comensal"><i class="fa-solid fa-user"></i> ${p.comensal}</span>` : `#${p.id}`;
+    const label = p.comensal ? `<span class="badge-comensal"><i class="fa-solid fa-user"></i> ${escapeHtml(p.comensal)}</span>` : `#${p.id}`;
     return `<div class="cobro-row" style="font-size:.84rem">
       <span>${label}</span>
       <span>${fmt.currency(p.total)}</span>
@@ -577,15 +588,18 @@ function abrirCobro(pedidoId) {
 }
 
 function calcularCambio() {
-  const pago   = parseFloat(document.getElementById('cobro-pago')?.value) || 0;
-  const cambio = pago - _pedidoCobrarTotal;
+  const pagoVal = parseFloat(document.getElementById('cobro-pago')?.value) || 0;
+  const pagoCentavos = Math.round(pagoVal * 100);
+  const totalCentavos = Math.round((_pedidoCobrarTotal || 0) * 100);
+  const cambioCentavos = pagoCentavos - totalCentavos;
+  const cambio = cambioCentavos / 100;
   const wrap   = document.getElementById('cobro-cambio-wrap');
   const val    = document.getElementById('cobro-cambio');
   const btn    = document.getElementById('btn-confirmar-cobro');
 
   if (!wrap || !val || !btn) return;
 
-  if (pago <= 0) {
+  if (pagoCentavos <= 0) {
     wrap.style.display = 'none';
     btn.disabled = true;
     return;
@@ -593,8 +607,8 @@ function calcularCambio() {
 
   wrap.style.display = 'block';
   val.textContent = fmt.currency(Math.max(0, cambio));
-  val.className   = 'cobro-cambio-val ' + (cambio >= 0 ? 'cambio-ok' : 'cambio-err');
-  btn.disabled    = cambio < 0;
+  val.className   = 'cobro-cambio-val ' + (cambioCentavos >= 0 ? 'cambio-ok' : 'cambio-err');
+  btn.disabled    = cambioCentavos < 0;
 }
 
 async function confirmarCobro() {
@@ -602,8 +616,11 @@ async function confirmarCobro() {
   if (btn) btn.disabled = true;
   try {
     loading(true);
-    const pago   = parseFloat(document.getElementById('cobro-pago')?.value) || 0;
-    const cambio = pago - _pedidoCobrarTotal;
+    const pagoVal = parseFloat(document.getElementById('cobro-pago')?.value) || 0;
+    const pagoCentavos = Math.round(pagoVal * 100);
+    const totalCentavos = Math.round((_pedidoCobrarTotal || 0) * 100);
+    const cambioCentavos = pagoCentavos - totalCentavos;
+    const cambio = Math.max(0, cambioCentavos / 100);
 
     if (_pedidoCobrarId !== null) {
       // Cobro individual
@@ -635,7 +652,7 @@ async function cancelarPedido(id) {
 function verDetallePedido(id) {
   const p = State.pedidos.find(x=>x.id===id);
   if (!p) return;
-  const prods = (p.productos||[]).map(i=>`<li>${i.cantidad}× ${i.nombre}${i.nota?' <span class="muted">('+i.nota+')</span>':''}</li>`).join('');
+  const prods = (p.productos||[]).map(i=>`<li>${i.cantidad}× ${escapeHtml(i.nombre)}${i.nota?' <span class="muted">('+escapeHtml(i.nota)+')</span>':''}</li>`).join('');
   document.getElementById('detalle-content').innerHTML = `
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px">
       <span class="brand-sm" style="font-family:var(--font-h)">Mesa ${p.mesa === 99 ? 'Para Llevar' : p.mesa}</span>
@@ -680,7 +697,7 @@ function verDetallePedido(id) {
 /* ── Agregar productos a pedido activo ──────── */
 let _pedidoAgregarId   = null;
 let _carritoAgregar    = [];
-let _agrCat            = 'Todas';
+let _agrCat            = null;
 let _agrBusqueda       = '';
 
 let _agregarTabActiva = 'productos';
@@ -702,7 +719,7 @@ function setAgregarTab(tab) {
 function abrirAgregarProductos(pedidoId) {
   _pedidoAgregarId = pedidoId;
   _carritoAgregar  = [];
-  _agrCat          = 'Todas';
+  _agrCat          = null;
   _agrBusqueda     = '';
   const p = State.pedidos.find(x => x.id === pedidoId);
   if (!p) return;
@@ -710,7 +727,7 @@ function abrirAgregarProductos(pedidoId) {
   const headerInfo = document.getElementById('agregar-pedido-info-header');
   if (headerInfo) {
     const labelC = p.comensal
-      ? `<span class="badge-comensal" style="margin:0"><i class="fa-solid fa-user"></i> ${p.comensal}</span>`
+      ? `<span class="badge-comensal" style="margin:0"><i class="fa-solid fa-user"></i> ${escapeHtml(p.comensal)}</span>`
       : '';
     headerInfo.innerHTML = `
       <span class="fw600" style="font-family:var(--font-h);color:var(--gold);font-size:.9rem">Mesa ${p.mesa}</span>
@@ -736,22 +753,19 @@ function _renderAgrTabs() {
   const tabsEl = document.getElementById('agr-tabs');
   if (!tabsEl) return;
   const activos = State.productos.filter(x => x.activo !== false);
-  const cats = ['Todas', ...CATEGORIAS.filter(c => activos.some(p => (p.categoria||'General') === c))];
-  tabsEl.innerHTML = cats.map(c => {
-    const count = c === 'Todas' ? activos.length
-      : activos.filter(p => (p.categoria||'General') === c).length;
-    return `<button class="cat-tab${c === _agrCat ? ' active' : ''}"
-      onclick="_agrCat='${c}';this.parentNode.querySelectorAll('.cat-tab').forEach(b=>b.classList.remove('active'));this.classList.add('active');renderAgregarGrid()">
-      ${c} <span class="cat-tab-count">${count}</span>
-    </button>`;
-  }).join('');
+  if (_agrCat !== null && !categoriasMenu(activos).includes(_agrCat)) _agrCat = null;
+  renderCategoryTabs(tabsEl, activos, _agrCat, category => {
+    _agrCat = category;
+    _renderAgrTabs();
+    renderAgregarGrid();
+  });
 }
 
 function renderAgregarGrid() {
   const grid = document.getElementById('agregar-grid');
   if (!grid) return;
   let prods = State.productos.filter(x => x.activo !== false);
-  if (_agrCat !== 'Todas') prods = prods.filter(p => (p.categoria||'General') === _agrCat);
+  if (_agrCat !== null) prods = prods.filter(p => (p.categoria||'General') === _agrCat);
   if (_agrBusqueda.trim()) {
     const q = _agrBusqueda.trim().toLowerCase();
     prods = prods.filter(p => p.nombre.toLowerCase().includes(q));
@@ -767,8 +781,8 @@ function renderAgregarGrid() {
     <div class="producto-card${enCarrito ? ' agr-selected' : ''}" onclick="addToAgregar(${prod.id})" id="agcard-${prod.id}">
       <div class="prod-color-bar" style="background:${color}"></div>
       <div class="prod-body">
-        <span class="prod-cat">${prod.categoria||'General'}</span>
-        <span class="prod-nom">${prod.nombre}</span>
+        <span class="prod-cat">${escapeHtml(prod.categoria||'General')}</span>
+        <span class="prod-nom">${escapeHtml(prod.nombre)}</span>
         <span class="prod-precio">${fmt.currency(prod.precio)}</span>
       </div>
       ${enCarrito ? `<div class="prod-add-btn" style="background:var(--accent);color:#fff">${enCarrito.cantidad}</div>` : '<div class="prod-add-btn"><i class="fa-solid fa-plus"></i></div>'}
@@ -840,9 +854,9 @@ function renderAgregarCarrito() {
         ${_carritoAgregar.map(item => `
           <div class="agr-carrito-item">
             <div style="flex:1;min-width:0">
-              <div class="fw600" style="font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.nombre}</div>
+              <div class="fw600" style="font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(item.nombre)}</div>
               <input class="nota-input" placeholder="Indicaciones..."
-                value="${item.nota || ''}"
+                value="${escapeHtml(item.nota || '')}"
                 oninput="setNotaAgregar(${item.producto_id}, this.value)"
                 style="margin-top:4px">
             </div>
@@ -918,7 +932,7 @@ function renderEdicionModal(p) {
       ${_edicionItems.map((item, idx) => `
         <div class="editar-item-row" id="edit-row-${idx}">
           <div class="editar-item-info">
-            <span class="editar-item-nom">${item.nombre}</span>
+            <span class="editar-item-nom">${escapeHtml(item.nombre)}</span>
             <span class="editar-item-precio muted text-xs">${fmt.currency(item.precio)} c/u</span>
           </div>
           <div class="editar-item-controls">
@@ -931,7 +945,7 @@ function renderEdicionModal(p) {
           </div>
           <input class="nota-input" style="width:100%;margin-top:6px"
             placeholder="Nota: sin cebolla..."
-            value="${item.nota}"
+            value="${escapeHtml(item.nota)}"
             oninput="editarNota(${idx}, this.value)">
           <div class="editar-item-subtotal text-gold text-xs" id="edit-sub-${idx}">${fmt.currency(item.precio * item.cantidad)}</div>
         </div>`).join('')}

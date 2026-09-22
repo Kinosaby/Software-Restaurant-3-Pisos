@@ -74,11 +74,11 @@ function renderAdminUsers() {
   tbody.innerHTML = State.usuarios.map(u => `
     <tr>
       <td data-label="ID">${u.id}</td>
-      <td data-label="Usuario"><strong>${u.username}</strong></td>
+      <td data-label="Usuario"><strong>${escapeHtml(u.username)}</strong></td>
       <td data-label="Rol">${chipRole(u.role)}</td>
       <td data-label="Acciones" style="display:flex;gap:6px">
         <button class="btn btn-ghost btn-sm" onclick="editUser(${u.id})"><i class="fa-solid fa-pen"></i></button>
-        <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${u.username}')"><i class="fa-solid fa-trash"></i></button>
+        <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id})"><i class="fa-solid fa-trash"></i></button>
       </td>
     </tr>`).join('');
 }
@@ -119,7 +119,7 @@ async function submitUser() {
   finally { loading(false); }
 }
 
-async function deleteUser(id, name) {
+async function deleteUser(id, name = State.usuarios.find(u => u.id === id)?.username || '') {
   if (!confirm(`¿Eliminar usuario "${name}"?`)) return;
   try {
     loading(true);
@@ -132,19 +132,28 @@ async function deleteUser(id, name) {
 
 /* ── Productos ──────────────────────────────── */
 function renderAdminProducts() {
+  const categories = document.getElementById('menu-categories');
+  if (categories) {
+    categories.replaceChildren();
+    for (const name of new Set([...CATEGORIAS, ...categoriasMenu()])) {
+      const option = document.createElement('option');
+      option.value = name;
+      categories.append(option);
+    }
+  }
   const tbody = document.querySelector('#table-products tbody');
   if (!tbody) return;
   if (!State.productos.length) { tbody.innerHTML = '<tr class="empty-row"><td colspan="6">Sin productos</td></tr>'; return; }
   tbody.innerHTML = State.productos.map(p => `
     <tr>
       <td data-label="ID">${p.id}</td>
-      <td data-label="Nombre"><strong>${p.nombre}</strong></td>
+      <td data-label="Nombre"><strong>${escapeHtml(p.nombre)}</strong></td>
       <td data-label="Precio" class="text-gold fw600">${fmt.currency(p.precio)}</td>
-      <td data-label="Categoria" class="text-xs muted">${p.categoria || '—'}</td>
+      <td data-label="Categoria" class="text-xs muted">${escapeHtml(p.categoria || '—')}</td>
       <td data-label="Activo" style="text-align:center">${p.activo ? '<i class="fa-solid fa-check" style="color:var(--success)"></i>' : '<i class="fa-solid fa-xmark" style="color:var(--danger)"></i>'}</td>
       <td data-label="Acciones" style="display:flex;gap:6px">
         <button class="btn btn-ghost btn-sm" onclick="editProduct(${p.id})"><i class="fa-solid fa-pen"></i></button>
-        <button class="btn btn-danger btn-sm" onclick="deleteProduct(${p.id},'${p.nombre}')"><i class="fa-solid fa-trash"></i></button>
+        <button class="btn btn-danger btn-sm" onclick="deleteProduct(${p.id})"><i class="fa-solid fa-trash"></i></button>
       </td>
     </tr>`).join('');
 }
@@ -167,7 +176,7 @@ async function submitProduct() {
   const body = {
     nombre:    document.getElementById('p-name').value.trim(),
     precio:    parseFloat(document.getElementById('p-price').value),
-    categoria: document.getElementById('p-cat').value || 'General',
+    categoria: document.getElementById('p-cat').value.trim() || 'General',
     activo:    document.getElementById('p-disp').checked,
   };
   if (!body.nombre || isNaN(body.precio)) { toastErr('Nombre y precio son requeridos'); return; }
@@ -186,7 +195,7 @@ async function submitProduct() {
   finally { loading(false); }
 }
 
-async function deleteProduct(id, name) {
+async function deleteProduct(id, name = State.productos.find(p => p.id === id)?.nombre || '') {
   if (!confirm(`¿Eliminar producto "${name}"?`)) return;
   try {
     loading(true);
@@ -393,6 +402,6 @@ async function showWeeklySales() {
     });
     
   } catch (error) {
-    content.innerHTML = `<p style="color: var(--danger);">Error al cargar ventas: ${error.message}</p>`;
+    content.innerHTML = `<p style="color: var(--danger);">Error al cargar ventas: ${escapeHtml(error.message)}</p>`;
   }
 }

@@ -1,0 +1,63 @@
+name: Generar APK Android
+on:
+  push:
+    branches: [app-android]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: tres_pisos_app
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Empaquetar web completa sin CDN
+        working-directory: .
+        run: |
+          npm ci
+          node scripts/build-android-web.mjs
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Instalar dependencias
+        run: flutter pub get
+      - name: Analizar código
+        run: flutter analyze
+      - name: Ejecutar pruebas
+        run: flutter test
+      - name: Habilitar aceleración del emulador
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Probar arranque con SQLite y WebView nativos de Android
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          working-directory: tres_pisos_app
+          disable-animations: true
+          script: flutter test integration_test/android_startup_test.dart -d emulator-5554
+      - name: Compilar APK de validación (firma de prueba)
+        env:
+          POS_ALLOW_TEST_SIGNING: 'true'
+        run: flutter build apk --release
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tres-pisos-android-local
+          path: tres_pisos_app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error

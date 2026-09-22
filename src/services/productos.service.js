@@ -38,7 +38,7 @@ async function actualizar(id, { nombre, precio, categoria, activo }) {
 
 async function eliminar(id) {
   const result = await pool.query(
-    'DELETE FROM productos WHERE id = $1 RETURNING *',
+    'UPDATE productos SET activo = false WHERE id = $1 RETURNING *',
     [id]
   );
   if (result.rows.length === 0) {

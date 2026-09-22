@@ -3,11 +3,24 @@
  */
 const express = require('express');
 const { body, param } = require('express-validator');
+const { rateLimit } = require('express-rate-limit');
 
 const router         = express.Router();
 const ctrl           = require('../controllers/auth.controller');
 const { authMiddleware, isAdmin } = require('../middlewares/auth.middleware');
 const { validate }   = require('../middlewares/validate.middleware');
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: {
+    success: false,
+    code: 'TOO_MANY_LOGIN_ATTEMPTS',
+    error: 'Demasiados intentos. Espera 15 minutos antes de volver a ingresar.',
+  },
+});
 
 // ===== Validaciones =====
 const loginRules = [
@@ -36,7 +49,7 @@ const updateUserRules = [
 
 // ===== Endpoints =====
 // Públicos
-router.post('/login', loginRules, validate, ctrl.login);
+router.post('/login', loginLimiter, loginRules, validate, ctrl.login);
 
 // Autenticados
 router.get('/me', authMiddleware, ctrl.me);

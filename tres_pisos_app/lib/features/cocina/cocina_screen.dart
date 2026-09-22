@@ -20,8 +20,12 @@ class _CocinaScreenState extends ConsumerState<CocinaScreen> {
   @override
   void initState() {
     super.initState();
-    _loadData();
-    _listenSocket();
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    await Future.wait([_loadData(), SocketService.connect()]);
+    if (mounted) _listenSocket();
   }
 
   Future<void> _loadData() async {
@@ -33,7 +37,7 @@ class _CocinaScreenState extends ConsumerState<CocinaScreen> {
     } catch (e) {
       if (mounted) AppSnackbar.error(context, e.toString());
     } finally {
-      ref.read(loadingProvider.notifier).state = false;
+      if (mounted) ref.read(loadingProvider.notifier).state = false;
     }
   }
 
@@ -41,8 +45,9 @@ class _CocinaScreenState extends ConsumerState<CocinaScreen> {
     SocketService.on('nuevo_pedido', (data) {
       final p = Pedido.fromJson(data);
       final current = List<Pedido>.from(ref.read(pedidosProvider));
-      ref.read(pedidosProvider.notifier).state = [p, ...current];
-      if (mounted) AppSnackbar.info(context, 'Nuevo pedido — Mesa ${p.mesa}');
+      ref.read(pedidosProvider.notifier).state = [...current, p];
+      final destino = p.tipo == 'llevar' ? 'Para llevar' : 'Mesa ${p.mesa}';
+      if (mounted) AppSnackbar.info(context, 'Nuevo pedido — $destino');
     });
     SocketService.on('pedido_actualizado', (data) {
       final p = Pedido.fromJson(data);
@@ -131,11 +136,11 @@ class _CocinaScreenState extends ConsumerState<CocinaScreen> {
                   child: GridView.builder(
                     padding: const EdgeInsets.all(16),
                     gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
+                        const SliverGridDelegateWithMaxCrossAxisExtent(
+                            maxCrossAxisExtent: 430,
                             crossAxisSpacing: 12,
                             mainAxisSpacing: 12,
-                            childAspectRatio: 0.75),
+                            mainAxisExtent: 370),
                     itemCount: pedidos.length,
                     itemBuilder: (_, i) => _PedidoCard(
                       pedido: pedidos[i],
@@ -188,7 +193,8 @@ class _PedidoCard extends StatelessWidget {
           ),
           child: Row(children: [
             Expanded(
-                child: Text('Mesa ${pedido.mesa}',
+                child: Text(
+                    pedido.tipo == 'llevar' ? 'Para llevar' : 'Mesa ${pedido.mesa}',
                     style: const TextStyle(
                         fontWeight: FontWeight.w700, fontSize: 15))),
             BadgeEstado(pedido.estado),
@@ -212,6 +218,14 @@ class _PedidoCard extends StatelessWidget {
             ],
           ]),
         ),
+        if (pedido.comensal != null && pedido.comensal!.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+            child: Text(
+              pedido.comensal!,
+              style: const TextStyle(color: AppColors.amber, fontSize: 12),
+            ),
+          ),
         // Productos
         Expanded(
           child: ListView(
@@ -235,9 +249,19 @@ class _PedidoCard extends StatelessWidget {
                         ),
                         const SizedBox(width: 8),
                         Expanded(
-                            child: Text(p.nombre,
-                                style: const TextStyle(fontSize: 12),
-                                overflow: TextOverflow.ellipsis)),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(p.nombre,
+                                  style: const TextStyle(fontSize: 12),
+                                  overflow: TextOverflow.ellipsis),
+                              if (p.nota.isNotEmpty)
+                                Text(p.nota,
+                                  style: const TextStyle(
+                                    color: AppColors.amber, fontSize: 10)),
+                            ],
+                          ),
+                        ),
                       ]),
                     )),
               ]),

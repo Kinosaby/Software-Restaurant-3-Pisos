@@ -7,13 +7,18 @@
 const { Pool } = require('pg');
 const env = require('./env');
 const logger = require('../utils/logger');
+const useSsl = env.DB_SSL
+  || env.NODE_ENV === 'production'
+  || /railway|rlwy/i.test(env.DATABASE_URL || '');
 
 const pool = new Pool(
   // Railway provee DATABASE_URL directamente; si existe, se usa
-  process.env.DATABASE_URL
+  env.DATABASE_URL
     ? {
-        connectionString: process.env.DATABASE_URL,
-        ssl: { rejectUnauthorized: false },  // requerido por Railway
+        connectionString: env.DATABASE_URL,
+        ...(useSsl
+          ? { ssl: { rejectUnauthorized: false } }
+          : {}),
         max: 10,
         idleTimeoutMillis: 30000,
         connectionTimeoutMillis: 5000,
@@ -39,12 +44,5 @@ pool.on('connect', (client) => {
 pool.on('error', (err) => {
   logger.error('Error inesperado en cliente del pool PostgreSQL', { error: err.message });
 });
-
-// Verificar conexión al arrancar
-pool.query("SET TIME ZONE 'America/Mexico_City'; SELECT NOW()")
-  .then((res) => logger.info('✅ Base de datos conectada (TZ: Mexico_City)', { tiempo: res[1]?.rows[0]?.now || 'ok' }))
-  .catch((err) => {
-    logger.error('❌ No se pudo conectar a la base de datos', { error: err.message });
-  });
 
 module.exports = pool;

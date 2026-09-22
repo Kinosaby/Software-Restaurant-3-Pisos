@@ -4,13 +4,16 @@
  */
 require('dotenv').config();
 
-const required = ['JWT_SECRET', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'];
+const databaseUrl = process.env.DATABASE_URL?.trim();
+const required = [
+  'JWT_SECRET',
+  ...(databaseUrl ? [] : ['DB_NAME', 'DB_USER', 'DB_PASSWORD']),
+];
 
-for (const key of required) {
-  if (!process.env[key]) {
-    console.error(`❌ Variable de entorno requerida faltante: ${key}`);
-    process.exit(1);
-  }
+const missing = required.filter((key) => !process.env[key]);
+
+if (missing.length > 0) {
+  throw new Error(`Variables de entorno requeridas faltantes: ${missing.join(', ')}`);
 }
 
 module.exports = {
@@ -23,11 +26,20 @@ module.exports = {
   DB_NAME:       process.env.DB_NAME,
   DB_PASSWORD:   process.env.DB_PASSWORD,
   DB_PORT:       parseInt(process.env.DB_PORT, 10) || 5432,
+  DATABASE_URL:  databaseUrl,
+  DB_SSL:        process.env.DB_SSL === 'true',
 
   // JWT
   JWT_SECRET:    process.env.JWT_SECRET,
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '8h',
 
+  // Usuario inicial. Solo se utiliza cuando la tabla usuarios está vacía.
+  ADMIN_USERNAME: process.env.ADMIN_USERNAME || 'admin',
+  ADMIN_PASSWORD: process.env.ADMIN_PASSWORD,
+
   // CORS
-  CORS_ORIGINS:  (process.env.CORS_ORIGINS || 'http://localhost:3000').split(','),
+  CORS_ORIGINS:  (process.env.CORS_ORIGINS || 'http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean),
 };

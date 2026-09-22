@@ -3,6 +3,7 @@
  * Exporta una función que recibe el servidor HTTP y devuelve io.
  */
 const { Server } = require('socket.io');
+const { verifySession } = require('../services/session.service');
 const logger     = require('../utils/logger');
 const env        = require('../config/env');
 
@@ -16,16 +17,35 @@ function initSocket(httpServer) {
     transports: ['websocket', 'polling'],
   });
 
+  io.use(async (socket, next) => {
+    const authToken = socket.handshake.auth?.token;
+    const header = socket.handshake.headers?.authorization;
+    const headerToken = header?.startsWith('Bearer ') ? header.slice(7).trim() : header;
+    const token = authToken || headerToken;
+
+    if (!token) {
+      return next(new Error('NO_TOKEN'));
+    }
+
+    try {
+      socket.data.user = await verifySession(token);
+      return next();
+    } catch (_) {
+      return next(new Error('INVALID_TOKEN'));
+    }
+  });
+
   io.on('connection', (socket) => {
-    logger.info('Socket conectado', { socketId: socket.id });
+    const { id: userId, role } = socket.data.user;
+    socket.join(`role:${role}`);
+    socket.join(`user:${userId}`);
+    logger.info('Socket conectado', { socketId: socket.id, userId, role });
 
-    // El cliente puede suscribirse a una sala por rol
-    socket.on('join_room', (room) => {
-      socket.join(room);
-      logger.debug('Socket entró a sala', { socketId: socket.id, room });
-    });
-
+    const expires = Math.max(0, socket.data.user.exp * 1000 - Date.now());
+    const expiryTimer = setTimeout(() => socket.disconnect(true), Math.min(expires, 2147483647));
+    expiryTimer.unref();
     socket.on('disconnect', (reason) => {
+      clearTimeout(expiryTimer);
       logger.debug('Socket desconectado', { socketId: socket.id, reason });
     });
   });
