@@ -253,7 +253,13 @@ if(window.LOCAL_POS){
  };
  cobrarMesa=function(key){if(getRole()!=='admin'){toastErr('El cobro corresponde al mesero');return;}if(String(key).startsWith('llevar-'))abrirCobro(Number(String(key).split('-')[1]));else cobrarTodoMesa(Number(key));};
  const oldLoadCocina=loadCocinaData;loadCocinaData=async function(){await oldLoadCocina();try{await loadLocalExtras();}catch(_){}renderLocalItems();renderCocina();renderCocinaExtras();};
- toggleItemListo=async function(id,index){const item=State.pedidos.find(p=>p.id===id)?.productos[index];if(!item)return;try{const d=await patch(`/api/pedidos/${id}/item`,{detalle_id:item.id,listo:!item.listo});State.pedidos=State.pedidos.map(p=>p.id===id?d.pedido:p);renderLocalItems();renderCocina();}catch(e){toastErr(e.message);renderCocina();}};
+ // A queued or blocked reply carries no 'pedido'; writing it into State would
+ // poison the list and break every later render of the kitchen screen.
+ toggleItemListo=async function(id,index){const item=State.pedidos.find(p=>p.id===id)?.productos[index];if(!item)return;try{const d=await patch(`/api/pedidos/${id}/item`,{detalle_id:item.id,listo:!item.listo});
+  if(d&&d.pedido)State.pedidos=State.pedidos.map(p=>p.id===id?d.pedido:p);
+  else if(d&&d.blocked)toastErr(d.mensaje||'Cocina no aceptó el cambio; revisa Pendientes');
+  else if(d&&d.queued)toastInfo('Guardado aquí: PENDIENTE DE RECIBIR EN COCINA');
+  renderLocalItems();renderCocina();}catch(e){toastErr(e.message);renderCocina();}};
  toggleExtraItem=async function(id,index){const ex=State.extras.find(e=>e._id===id);if(!ex)return;try{await patch(`/api/extras/${id}`,{item:index,listo:!ex._done?.[index]});await loadLocalExtras();renderCocinaExtras();}catch(e){toastErr(e.message);}};
  terminarExtra=async function(id){try{await patch(`/api/extras/${id}`,{done:true});await loadLocalExtras();renderCocinaExtras();toastOk('Extra listo');}catch(e){toastErr(e.message);}};
  let page=0,historyRows=[];const oldRenderAdmin=renderAdminPedidos;
@@ -270,7 +276,22 @@ if(window.LOCAL_POS){
   button.onclick=()=>window.PosNative?.postMessage(JSON.stringify({action,token:Auth.token}));menuTools.append(button);
  }
  document.querySelector('#admin-products .pane-header').after(menuTools);
+ // Only /api/pedidos/lote carries mesa in its body; every other queued call
+ // has to be named from its path so the waiter knows which account to fix.
+ function describePending(e){
+  const b=e.body||{},cuenta=String(e.path||'').match(/\/api\/pedidos\/(\d+)/);
+  if(Array.isArray(b.pedidos))return b.pedidos.map(p=>'Mesa '+p.mesa+' / '+(p.comensal||'Cuenta')).join(', ');
+  if(b.mesa!==undefined)return 'Mesa '+b.mesa+' / '+(b.comensal||'Cuenta');
+  if(Array.isArray(b.ids))return 'Cobro de cuenta'+(b.ids.length>1?'s':'')+' #'+b.ids.join(', #');
+  if(cuenta){
+   if(String(e.path).endsWith('/agregar'))return 'Productos agregados a la cuenta #'+cuenta[1];
+   if(String(e.path).endsWith('/item'))return 'Producto marcado en la cuenta #'+cuenta[1];
+   if(String(e.path).endsWith('/editar'))return 'Edición de la cuenta #'+cuenta[1];
+   return 'Cuenta #'+cuenta[1];
+  }
+  return 'Envío pendiente';
+ }
  setInterval(async()=>{try{const d=await get('/api/local/status');status.classList.toggle('local-stale',!d.connected);document.getElementById('local-status-text').textContent=(d.central?'Central de cocina · operación local':d.connected?'Enlace local con cocina activo':'Sin enlace con cocina')+(d.pending.length?' · '+d.pending.length+' envíos pendientes':'');pendingPanel.replaceChildren();
-  for(const e of d.pending){const line=document.createElement('p');line.textContent=(e.status==='blocked'?'Requiere revisión: '+e.error:'Pendiente de recibir en cocina')+' · '+(e.body.pedidos||[e.body]).map(p=>'Mesa '+p.mesa+' / '+(p.comensal||'Cuenta')).join(', ');pendingPanel.append(line);if(e.status==='blocked'){const retry=document.createElement('button');retry.className='btn btn-gold btn-sm';retry.textContent='Reintentar este envío';retry.onclick=async()=>{try{await post('/api/local/retry',{id:e.id});toastInfo('Envío revisado. Consulta su estado aquí.');}catch(err){toastErr(err.message);}};pendingPanel.append(retry);}}
+  for(const e of d.pending){const line=document.createElement('p');line.textContent=(e.status==='blocked'?'Requiere revisión: '+e.error:'Pendiente de recibir en cocina')+' · '+describePending(e);pendingPanel.append(line);if(e.status==='blocked'){const retry=document.createElement('button');retry.className='btn btn-gold btn-sm';retry.textContent='Reintentar este envío';retry.onclick=async()=>{try{await post('/api/local/retry',{id:e.id});toastInfo('Envío revisado. Consulta su estado aquí.');}catch(err){toastErr(err.message);}};pendingPanel.append(retry);}}
   if(!d.pending.length)pendingPanel.textContent='Sin envíos pendientes';}catch(_){}},2000);
 }

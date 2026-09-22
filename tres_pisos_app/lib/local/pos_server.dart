@@ -281,7 +281,7 @@ class PosServer {
               ? <Map<String, Object?>>[]
               : await engine.db.query(
                   'outbox',
-                  columns: ['id', 'status', 'error', 'created', 'body'],
+                  columns: ['id', 'status', 'error', 'created', 'body', 'path'],
                   where: 'user_id=?',
                   whereArgs: [userId],
                   orderBy: 'created ASC',
@@ -413,20 +413,21 @@ class PosServer {
       );
       final res = await req.close().timeout(const Duration(seconds: 8));
       if (res.statusCode == 403) {
-        throw PosError(403, 'El código de enlace no coincide con la central');
+        throw PosError(403, 'El código de enlace no coincide con la central',
+            transport: true);
       }
-      if (res.statusCode != 200) { throw PosError(res.statusCode, 'No se pudo validar el enlace con cocina'); }
+      if (res.statusCode != 200) { throw PosError(res.statusCode, 'No se pudo validar el enlace con cocina', transport: true); }
       final bytes = <int>[];
       await (() async {
         await for (final chunk in res) {
           bytes.addAll(chunk);
-          if (bytes.length > 16 * 1024 * 1024) { throw PosError(413, 'Respuesta demasiado grande'); }
+          if (bytes.length > 16 * 1024 * 1024) { throw PosError(413, 'Respuesta demasiado grande', transport: true); }
         }
       })().timeout(const Duration(seconds: 8));
       final raw = utf8.decode(bytes);
       final result = await cipher.open(jsonDecode(raw) as Json);
       if (result['request_id'] != nonce) {
-        throw PosError(409, 'Respuesta de enlace inválida');
+        throw PosError(409, 'Respuesta de enlace inválida', transport: true);
       }
       connected = true;
       if ((result['status'] as int) >= 400) {
@@ -524,6 +525,20 @@ class PosServer {
       }
       return result;
     } on PosError catch (e) {
+      if (e.transport) {
+        // The kitchen never saw this; keep it queued instead of parking it.
+        connected = false;
+        if (queueable) {
+          await releaseInFlight(op!);
+          return {
+            'queued': true,
+            'operation_id': op,
+            'mensaje':
+                'Guardado en esta tablet. Cocina todavía no ha confirmado.',
+          };
+        }
+        rethrow;
+      }
       if (e.status == 401 && token != null) { await forgetSession(token); }
       if (queueable) {
         final blocked = await engine.db.update(
@@ -622,14 +637,20 @@ class PosServer {
             whereArgs: [row['id']],
           );
         } on PosError catch (e) {
+          if (e.transport) {
+            await releaseInFlight(row['id'] as String);
+            rethrow;
+          }
           if (e.status == 401) {
             await forgetSession(row['token'] as String);
           }
+          // Only park the row this send actually claimed: a manual retry may
+          // have returned it to pending while the rejection was in flight.
           final blocked = await engine.db.update(
             'outbox',
             {'status': 'blocked', 'error': e.message},
-            where: 'id=? AND token=?',
-            whereArgs: [row['id'], row['token']],
+            where: 'id=? AND token=? AND status=?',
+            whereArgs: [row['id'], row['token'], 'in_flight'],
           );
           if (blocked == 0) {
             await releaseInFlight(row['id'] as String);

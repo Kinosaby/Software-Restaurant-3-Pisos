@@ -222,6 +222,82 @@ void main() {
       expect(sales, hasLength(1));
     });
 
+    test('A transient 503 from the central never parks a queued send as blocked', () async {
+      final hubEngine = await createEngine();
+      await hubEngine.bootstrap('admin', 'adminpass123');
+      final hubSecret = randomKey();
+      final hubId = randomKey();
+      final hub = PosServer(
+        engine: hubEngine,
+        central: true,
+        pairSecret: hubSecret,
+        hubId: hubId,
+        asset: (_) async => [],
+      );
+      servers.add(hub);
+      await hub.start(uiPort: 0, lanPort: 0);
+
+      final adminLogin = await hub.request('POST', '/api/auth/login', {'username': 'admin', 'password': 'adminpass123'}, null, randomKey());
+      final adminToken = adminLogin['token'] as String;
+      await hub.request('POST', '/api/auth/register', {'username': 'mesero3', 'password': 'meseropass3', 'role': 'mesero'}, adminToken, randomKey());
+      final prodRes = await hub.request('POST', '/api/productos', {'nombre': 'Quesadilla', 'precio': 30.0, 'categoria': 'Antojitos', 'activo': true}, adminToken, randomKey());
+      final prodId = prodRes['producto']['id'] as int;
+
+      final clientEngine = await createEngine();
+      final client = PosServer(
+        engine: clientEngine,
+        central: false,
+        pairSecret: hubSecret,
+        hubId: hubId,
+        hub: Uri.parse('http://127.0.0.1:${hub.lanServer!.port}'),
+        asset: (_) async => [],
+      );
+      servers.add(client);
+      final clientLogin = await client.request('POST', '/api/auth/login', {'username': 'mesero3', 'password': 'meseropass3'}, null, randomKey());
+      final clientToken = clientLogin['token'] as String;
+
+      final port = hub.lanServer!.port;
+      await hub.lanServer!.close(force: true);
+      hub.lanServer = null;
+
+      final opId = randomKey();
+      final queued = await client.request(
+        'POST',
+        '/api/pedidos',
+        {
+          'mesa': 6,
+          'productos': [{'producto_id': prodId, 'cantidad': 1}],
+        },
+        clientToken,
+        opId,
+      );
+      expect(queued['queued'], isTrue);
+
+      // The central answers outside its sealed envelope, as it does when it is
+      // saturated or SQLite throws. The kitchen never saw the order, so the
+      // entry must stay retryable instead of waiting for a manual retry.
+      final busy = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
+      busy.listen((r) async {
+        r.response.statusCode = 503;
+        await r.response.close();
+      });
+      await client.sync();
+      final parked = await clientEngine.db.query('outbox', where: 'id=?', whereArgs: [opId]);
+      expect(parked.single['status'], equals('pending'));
+      expect(parked.single['error'], isNull);
+      await busy.close(force: true);
+
+      hub.lanServer = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
+      hub.lanServer!.listen((r) => hub.handle(r, true));
+      // The first pass may still hold a socket to the server that just closed;
+      // what matters is that the entry stayed retryable and nothing was lost.
+      await client.sync();
+      await client.sync();
+
+      expect(await clientEngine.db.query('outbox'), isEmpty);
+      expect(await hubEngine.records(hubEngine.db, 'orders'), hasLength(1));
+    });
+
     test('SQLite concurrent transactions execute without locking with busy_timeout configured', () async {
       final dbPath = '${tempDir.path}/concurrent_test.db';
 

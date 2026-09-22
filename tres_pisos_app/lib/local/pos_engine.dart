@@ -11,7 +11,13 @@ typedef Json = Map<String, dynamic>;
 class PosError implements Exception {
   final int status;
   final String message;
-  PosError(this.status, this.message);
+
+  /// True when the failure came from the link itself (the central was busy,
+  /// unreachable or answered outside its sealed envelope) rather than from a
+  /// decision the kitchen made. Only the latter may park an outbox entry as
+  /// `blocked`; a link failure has to stay queued and retry on its own.
+  final bool transport;
+  PosError(this.status, this.message, {this.transport = false});
   @override
   String toString() => message;
 }

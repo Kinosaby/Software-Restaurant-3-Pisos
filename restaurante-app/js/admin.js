@@ -249,8 +249,10 @@ async function adminDeletePedido(id) {
   if (!confirm(`¿Eliminar pedido #${id}? Esta acción no se puede deshacer.`)) return;
   try {
     loading(true);
-    await api.pedidos.eliminar(id);
-    toastOk(`Pedido #${id} eliminado`);
+    const r = await api.pedidos.eliminar(id);
+    if (r?.blocked) toastErr(r.mensaje || 'Cocina no aceptó la eliminación; revisa Pendientes');
+    else if (r?.queued) toastInfo('Eliminación guardada aquí: PENDIENTE DE RECIBIR EN COCINA');
+    else toastOk(`Pedido #${id} eliminado`);
     await loadAdminData();
   } catch(e) { toastErr(e.message); }
   finally { loading(false); }

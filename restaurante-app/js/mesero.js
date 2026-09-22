@@ -679,8 +679,11 @@ function verDetallePedido(id) {
       }
       try {
         loading(true);
-        await api.pedidos.editar(id, { mesa: nuevaMesa });
-        toastOk(`Mesa cambiada exitosamente a ${nuevaMesa === 99 ? 'Para Llevar' : nuevaMesa}`);
+        const r = await api.pedidos.editar(id, { mesa: nuevaMesa });
+        const destino = nuevaMesa === 99 ? 'Para Llevar' : nuevaMesa;
+        if (r?.blocked) toastErr(r.mensaje || 'Cocina no aceptó el cambio de mesa; revisa Pendientes');
+        else if (r?.queued) toastInfo(`Cambio a ${destino} guardado aquí: PENDIENTE DE RECIBIR EN COCINA`);
+        else toastOk(`Mesa cambiada exitosamente a ${destino}`);
         closeModal();
         await loadMeseroData();
       } catch(e) {
@@ -1006,11 +1009,15 @@ async function guardarEdicion() {
       .map(p => ({ detalle_id: p.id, cantidad: 0, nota: '' }));
 
     // Una sola llamada con todos los cambios
-    await api.pedidos.editar(_pedidoEditarId, {
+    const r = await api.pedidos.editar(_pedidoEditarId, {
       items: [...itemsActivos, ...itemsEliminados],
     });
 
-    toastOk(`Pedido #${_pedidoEditarId} actualizado`);
+    // Offline the local server answers 200 with queued/blocked instead of
+    // throwing, so success must not be announced without checking.
+    if (r?.blocked) toastErr(r.mensaje || 'Cocina no aceptó el cambio; revisa Pendientes');
+    else if (r?.queued) toastInfo('Guardado aquí: PENDIENTE DE RECIBIR EN COCINA');
+    else toastOk(`Pedido #${_pedidoEditarId} actualizado`);
     closeModal();
     await loadMeseroData();
   } catch(e) { toastErr(e.message); }
