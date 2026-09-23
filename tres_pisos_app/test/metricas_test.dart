@@ -36,7 +36,7 @@ void main() {
   });
 
   test('VentaDia no se corre al día anterior por la zona horaria', () {
-    // node-pg en Railway (UTC) serializa el DATE 2026-09-21 como medianoche UTC.
+    // Una fecha con hora UTC no debe moverse al día anterior en México.
     final v = VentaDia.fromJson({'fecha': '2026-09-21T00:00:00.000Z', 'pedidos': 9, 'total': '980.00'});
     expect(v.fecha, DateTime(2026, 9, 21));
     expect(v.total, 980);

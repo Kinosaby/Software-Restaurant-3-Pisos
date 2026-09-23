@@ -117,7 +117,7 @@ class _FormularioUsuarioState extends ConsumerState<_FormularioUsuario> {
     final ok = await confirmar(
       context,
       titulo: 'Eliminar a ${usuario.username}',
-      mensaje: 'Ya no podrá iniciar sesión.',
+      mensaje: 'Ya no podrá iniciar sesión y se cierran sus sesiones abiertas. Sus pedidos conservan su nombre.',
       accion: 'Eliminar',
       destructiva: true,
     );
@@ -127,15 +127,7 @@ class _FormularioUsuarioState extends ConsumerState<_FormularioUsuario> {
       await ref.read(adminRepositoryProvider).eliminarUsuario(usuario.id);
       if (mounted) Navigator.pop(context, true);
     } on ApiException catch (e) {
-      if (!mounted) return;
-      // 500: el usuario tiene pedidos registrados (clave foránea pedidos.usuario_id).
-      mostrarMensaje(
-        context,
-        (e.status ?? 0) >= 500
-            ? 'No se puede eliminar porque tiene pedidos registrados. Cambia su contraseña para bloquear el acceso.'
-            : e.mensaje,
-        error: true,
-      );
+      if (mounted) mostrarMensaje(context, e.mensaje, error: true);
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }

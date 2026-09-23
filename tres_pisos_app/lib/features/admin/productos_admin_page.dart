@@ -168,7 +168,8 @@ class _FormularioProductoState extends ConsumerState<_FormularioProducto> {
     final ok = await confirmar(
       context,
       titulo: 'Eliminar ${producto.nombre}',
-      mensaje: 'Si el producto ya aparece en pedidos no se podrá eliminar; en ese caso desactívalo.',
+      mensaje: 'Desaparece del menú. Los pedidos y el historial conservan su nombre y precio. '
+          'Si solo se acabó por hoy, mejor desactívalo.',
       accion: 'Eliminar',
       destructiva: true,
     );
@@ -178,13 +179,7 @@ class _FormularioProductoState extends ConsumerState<_FormularioProducto> {
       await ref.read(adminRepositoryProvider).eliminarProducto(producto.id);
       if (mounted) Navigator.pop(context, true);
     } on ApiException catch (e) {
-      if (!mounted) return;
-      // El backend responde 500 cuando la clave foránea de pedido_detalle lo impide.
-      mostrarMensaje(
-        context,
-        (e.status ?? 0) >= 500 ? 'No se puede eliminar porque ya está en pedidos. Desactívalo.' : e.mensaje,
-        error: true,
-      );
+      if (mounted) mostrarMensaje(context, e.mensaje, error: true);
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }

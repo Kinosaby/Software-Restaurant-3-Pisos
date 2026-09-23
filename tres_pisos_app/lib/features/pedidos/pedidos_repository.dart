@@ -38,27 +38,32 @@ class PedidosRepository {
     return grupos.expand((g) => g).toList();
   }
 
-  Future<Pedido> crear({
+  static Map<String, dynamic> cuerpoCrear({
     required int mesa,
     required TipoPedido tipo,
     String? comensal,
     required List<LineaCarrito> lineas,
-  }) async {
-    final datos = await _api.post('/api/pedidos', {
-      'mesa': mesa,
-      'tipo': tipo.name,
-      if (comensal != null && comensal.trim().isNotEmpty) 'comensal': comensal.trim(),
-      'productos': [for (final l in lineas) l.toJson()],
-    });
-    return _pedido(datos);
-  }
+  }) =>
+      {
+        'mesa': mesa,
+        'tipo': tipo.name,
+        if (comensal != null && comensal.trim().isNotEmpty) 'comensal': comensal.trim(),
+        'productos': [for (final l in lineas) l.toJson()],
+      };
 
-  Future<Pedido> agregar(int pedidoId, List<LineaCarrito> lineas) async {
-    final datos = await _api.patch('/api/pedidos/$pedidoId/agregar', {
-      'productos': [for (final l in lineas) l.toJson()],
-    });
-    return _pedido(datos);
-  }
+  static Map<String, dynamic> cuerpoAgregar(List<LineaCarrito> lineas) => {
+        'productos': [for (final l in lineas) l.toJson()],
+      };
+
+  /// [operacion] permite reintentar sin duplicar (la central la reconoce).
+  Future<Pedido> crear(Map<String, dynamic> cuerpo, {String? operacion}) async =>
+      _pedido(await _api.post('/api/pedidos', cuerpo, operacion: operacion));
+
+  Future<Pedido> agregar(int pedidoId, Map<String, dynamic> cuerpo, {String? operacion}) async =>
+      _pedido(await _api.patch('/api/pedidos/$pedidoId/agregar', cuerpo, operacion));
+
+  /// Solo admin. Borra el pedido (la venta registrada se conserva).
+  Future<void> eliminar(int pedidoId) => _api.delete('/api/pedidos/$pedidoId');
 
   /// `PATCH /editar`: solo se mandan los campos que cambiaron. Una cantidad 0
   /// quita el item. El backend reescribe la nota de cada item enviado, así que

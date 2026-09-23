@@ -7,6 +7,10 @@ String dinero(double valor) => _moneda.format(valor);
 
 String hora(DateTime fecha) => _hora.format(fecha);
 
+final _fechaCorta = DateFormat('d MMM yyyy, HH:mm', 'es');
+
+String fechaCorta(DateTime fecha) => _fechaCorta.format(fecha);
+
 /// "hace 3 min", pensado para que cocina vea de un vistazo cuánto lleva esperando un pedido.
 String tiempoTranscurrido(DateTime desde, {DateTime? ahora}) {
   final minutos = (ahora ?? DateTime.now()).difference(desde).inMinutes;

@@ -71,3 +71,8 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // FileProvider para compartir tickets (MainActivity.compartirImagen).
+    implementation("androidx.core:core:1.13.1")
+}

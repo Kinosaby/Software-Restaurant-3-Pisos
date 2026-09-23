@@ -1,5 +1,6 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/tema.dart';
 import 'auth_controller.dart';
@@ -13,7 +14,6 @@ class LoginPage extends ConsumerStatefulWidget {
 
 class _LoginPageState extends ConsumerState<LoginPage> {
   final _form = GlobalKey<FormState>();
-  late final _servidor = TextEditingController(text: ref.read(authControllerProvider.notifier).servidor);
   final _usuario = TextEditingController();
   final _password = TextEditingController();
   bool _enviando = false;
@@ -22,7 +22,6 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
   @override
   void dispose() {
-    _servidor.dispose();
     _usuario.dispose();
     _password.dispose();
     super.dispose();
@@ -36,7 +35,6 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     });
     try {
       await ref.read(authControllerProvider.notifier).iniciarSesion(
-            servidor: _servidor.text,
             usuario: _usuario.text,
             password: _password.text,
           );
@@ -106,26 +104,23 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         validator: (v) => (v == null || v.isEmpty) ? 'Escribe tu contraseña' : null,
                       ),
                       const SizedBox(height: 12),
-                      ExpansionTile(
-                        tilePadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.dns_outlined, color: Colores.apagado),
-                        title: const Text('Servidor', style: TextStyle(color: Colores.apagado)),
-                        subtitle: ValueListenableBuilder(
-                          valueListenable: _servidor,
-                          builder: (context, valor, _) => Text(valor.text),
-                        ),
-                        children: [
-                          TextFormField(
-                            controller: _servidor,
-                            keyboardType: TextInputType.url,
-                            decoration: const InputDecoration(
-                              labelText: 'Dirección del servidor',
-                              hintText: 'http://192.168.1.50:3000',
+                      Consumer(
+                        builder: (context, ref, _) {
+                          final conexion = ref.watch(conexionProvider);
+                          return ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.dns_outlined, color: Colores.apagado),
+                            title: Text(
+                              conexion?.modo.etiqueta ?? 'Sin conexión configurada',
+                              style: const TextStyle(color: Colores.apagado),
                             ),
-                            validator: (v) => (v == null || v.trim().isEmpty) ? 'Indica el servidor' : null,
-                          ),
-                          const SizedBox(height: 8),
-                        ],
+                            subtitle: Text(conexion?.url ?? ''),
+                            trailing: TextButton(
+                              onPressed: () => context.push('/conexion'),
+                              child: const Text('Cambiar'),
+                            ),
+                          );
+                        },
                       ),
                       if (_error != null) ...[
                         const SizedBox(height: 8),

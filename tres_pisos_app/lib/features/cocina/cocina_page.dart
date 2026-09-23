@@ -4,13 +4,44 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/formato.dart';
+import '../../core/plataforma.dart';
 import '../../core/tema.dart';
 import '../../core/widgets.dart';
+import '../conexion/central_local.dart';
 import '../pedidos/modelos.dart';
 import '../pedidos/pedidos_controller.dart';
 import '../pedidos/widgets_pedido.dart';
 
-/// Tablero de cocina: pedidos pendientes y en preparación, del más antiguo al más nuevo.
+/// Pedidos de cocina agrupados como en la web: cada mesa junta sus cuentas; cada
+/// pedido para llevar va por separado. Ordenados por el más antiguo.
+class GrupoCocina {
+  const GrupoCocina({required this.clave, required this.titulo, required this.pedidos, required this.llevar});
+
+  final String clave;
+  final String titulo;
+  final List<Pedido> pedidos;
+  final bool llevar;
+
+  DateTime get desde => pedidos.map((p) => p.creadoEn).reduce((a, b) => a.isBefore(b) ? a : b);
+  bool get hayPendientes => pedidos.any((p) => p.estado == EstadoPedido.pendiente);
+}
+
+List<GrupoCocina> agruparCocina(List<Pedido> activos) {
+  final grupos = <String, GrupoCocina>{};
+  for (final p in activos.where((p) => p.estado.modificable)) {
+    final llevar = p.tipo == TipoPedido.llevar;
+    final clave = llevar ? 'llevar-${p.id}' : 'mesa-${p.mesa}';
+    final previo = grupos[clave];
+    grupos[clave] = GrupoCocina(
+      clave: clave,
+      titulo: llevar ? 'Para llevar${p.comensal == null ? '' : ' · ${p.comensal}'}' : 'Mesa ${p.mesa}',
+      pedidos: [...?previo?.pedidos, p],
+      llevar: llevar,
+    );
+  }
+  return grupos.values.toList()..sort((a, b) => a.desde.compareTo(b.desde));
+}
+
 class CocinaPage extends ConsumerStatefulWidget {
   const CocinaPage({super.key});
 
@@ -20,37 +51,60 @@ class CocinaPage extends ConsumerStatefulWidget {
 
 class _CocinaPageState extends ConsumerState<CocinaPage> {
   late final Timer _reloj;
-  final _enCurso = <int>{};
+  late final bool _esCentral;
+  final _enCurso = <String>{};
 
   @override
   void initState() {
     super.initState();
     // Refresca los "hace X min" de las tarjetas.
     _reloj = Timer.periodic(const Duration(seconds: 30), (_) => setState(() {}));
+    // `ref` no se puede usar en dispose, así que se decide aquí.
+    _esCentral = ref.read(centralLocalProvider) != null;
+    unawaited(Plataforma.pantallaEncendida(true));
   }
 
   @override
   void dispose() {
     _reloj.cancel();
+    // En la central la pantalla sigue encendida: las demás tablets dependen de ella.
+    if (!_esCentral) unawaited(Plataforma.pantallaEncendida(false));
     super.dispose();
   }
 
-  Future<void> _avanzar(Pedido pedido) async {
-    final siguiente = switch (pedido.estado) {
-      EstadoPedido.pendiente => EstadoPedido.preparando,
-      EstadoPedido.preparando => EstadoPedido.listo,
-      _ => null,
-    };
-    if (siguiente == null) return;
-
-    setState(() => _enCurso.add(pedido.id));
+  Future<void> _ejecutar(String clave, Future<void> Function() accion) async {
+    setState(() => _enCurso.add(clave));
     try {
-      await ref.read(pedidosActivosProvider.notifier).cambiarEstado(pedido.id, siguiente);
+      await accion();
     } on Object catch (e) {
       if (mounted) mostrarMensaje(context, '$e', error: true);
     } finally {
-      if (mounted) setState(() => _enCurso.remove(pedido.id));
+      if (mounted) setState(() => _enCurso.remove(clave));
     }
+  }
+
+  Future<void> _avanzarGrupo(GrupoCocina grupo, EstadoPedido estado) => _ejecutar(
+        grupo.clave,
+        () => ref.read(pedidosActivosProvider.notifier).cambiarEstadoVarios(
+              [
+                for (final p in grupo.pedidos)
+                  if (estado == EstadoPedido.listo || p.estado == EstadoPedido.pendiente) p.id,
+              ],
+              estado,
+            ),
+      );
+
+  Future<void> _cancelar(Pedido pedido) async {
+    final ok = await confirmar(
+      context,
+      titulo: 'Cancelar pedido #${pedido.id}',
+      mensaje: 'Se avisará al mesero. No se puede deshacer.',
+      accion: 'Cancelar pedido',
+      destructiva: true,
+    );
+    if (!ok) return;
+    await _ejecutar('p${pedido.id}',
+        () => ref.read(pedidosActivosProvider.notifier).cambiarEstado(pedido.id, EstadoPedido.cancelado));
   }
 
   @override
@@ -58,89 +112,112 @@ class _CocinaPageState extends ConsumerState<CocinaPage> {
     final pedidos = ref.watch(pedidosActivosProvider);
     final extras = ref.watch(extrasCocinaProvider);
 
+    // Las casillas de pedidos que ya salieron de cocina no se necesitan.
+    ref.listen(pedidosActivosProvider, (_, siguiente) {
+      final activos = siguiente.value;
+      if (activos == null) return;
+      ref.read(marcasCocinaProvider.notifier).limpiar({
+        for (final p in activos.where((p) => p.estado.modificable)) 'p${p.id}',
+        for (final e in ref.read(extrasCocinaProvider)) 'e${e.clave}',
+      });
+    });
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Cocina'),
         actions: const [IndicadorConexion(), MenuUsuario()],
       ),
-      body: pedidos.when(
-        loading: () => const Cargando(),
-        error: (e, _) => ErrorConReintento(
-          error: e,
-          alReintentar: () => ref.invalidate(pedidosActivosProvider),
-        ),
-        data: (todos) {
-          final enCocina = todos.where((p) => p.estado.modificable).toList();
-          if (enCocina.isEmpty && extras.isEmpty) {
-            return RefreshIndicator(
-              onRefresh: () => ref.read(pedidosActivosProvider.notifier).recargar(),
-              child: ListView(
-                children: const [
-                  SizedBox(height: 160),
-                  Vacio(icono: Icons.soup_kitchen_outlined, mensaje: 'Sin pedidos por preparar'),
-                ],
+      body: Column(
+        children: [
+          const AvisoSinConexion(),
+          Expanded(
+            child: pedidos.when(
+              loading: () => const Cargando(),
+              error: (e, _) => ErrorConReintento(
+                error: e,
+                alReintentar: () => ref.invalidate(pedidosActivosProvider),
               ),
-            );
-          }
-          return RefreshIndicator(
-            onRefresh: () => ref.read(pedidosActivosProvider.notifier).recargar(),
-            child: CustomScrollView(
-              slivers: [
-                if (extras.isNotEmpty)
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                    sliver: SliverList.separated(
-                      itemCount: extras.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 8),
-                      itemBuilder: (context, i) => _TarjetaExtra(
-                        extra: extras[i],
-                        onHecho: () => ref.read(extrasCocinaProvider.notifier).marcarHecho(extras[i]),
-                      ),
-                    ),
-                  ),
-                SliverPadding(
-                  padding: const EdgeInsets.all(16),
-                  sliver: SliverGrid.builder(
-                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 420,
-                      mainAxisSpacing: 12,
-                      crossAxisSpacing: 12,
-                      mainAxisExtent: 320,
-                    ),
-                    itemCount: enCocina.length,
-                    itemBuilder: (context, i) => _TarjetaCocina(
-                      pedido: enCocina[i],
-                      ocupado: _enCurso.contains(enCocina[i].id),
-                      onAvanzar: () => _avanzar(enCocina[i]),
-                    ),
-                  ),
-                ),
-              ],
+              data: (todos) {
+                final grupos = agruparCocina(todos);
+                return RefreshIndicator(
+                  onRefresh: () => ref.read(pedidosActivosProvider.notifier).recargar(),
+                  child: grupos.isEmpty && extras.isEmpty
+                      ? ListView(
+                          children: const [
+                            SizedBox(height: 160),
+                            Vacio(icono: Icons.soup_kitchen_outlined, mensaje: 'Sin pedidos por preparar'),
+                          ],
+                        )
+                      : CustomScrollView(
+                          slivers: [
+                            if (extras.isNotEmpty)
+                              SliverPadding(
+                                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                                sliver: SliverList.separated(
+                                  itemCount: extras.length,
+                                  separatorBuilder: (_, _) => const SizedBox(height: 8),
+                                  itemBuilder: (context, i) => _TarjetaExtra(extra: extras[i]),
+                                ),
+                              ),
+                            SliverPadding(
+                              padding: const EdgeInsets.all(16),
+                              sliver: SliverGrid.builder(
+                                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                                  maxCrossAxisExtent: 440,
+                                  mainAxisSpacing: 12,
+                                  crossAxisSpacing: 12,
+                                  mainAxisExtent: 420,
+                                ),
+                                itemCount: grupos.length,
+                                itemBuilder: (context, i) => _TarjetaGrupo(
+                                  grupo: grupos[i],
+                                  ocupado: _enCurso.contains(grupos[i].clave),
+                                  onPreparar: () => _avanzarGrupo(grupos[i], EstadoPedido.preparando),
+                                  onListo: () => _avanzarGrupo(grupos[i], EstadoPedido.listo),
+                                  onCancelar: _cancelar,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                );
+              },
             ),
-          );
-        },
+          ),
+        ],
       ),
     );
   }
 }
 
-class _TarjetaCocina extends StatelessWidget {
-  const _TarjetaCocina({required this.pedido, required this.ocupado, required this.onAvanzar});
+class _TarjetaGrupo extends ConsumerWidget {
+  const _TarjetaGrupo({
+    required this.grupo,
+    required this.ocupado,
+    required this.onPreparar,
+    required this.onListo,
+    required this.onCancelar,
+  });
 
-  final Pedido pedido;
+  final GrupoCocina grupo;
   final bool ocupado;
-  final VoidCallback onAvanzar;
+  final VoidCallback onPreparar;
+  final VoidCallback onListo;
+  final void Function(Pedido) onCancelar;
 
   @override
-  Widget build(BuildContext context) {
-    final pendiente = pedido.estado == EstadoPedido.pendiente;
-    final color = Colores.deEstado(pedido.estado);
-    final minutos = DateTime.now().difference(pedido.creadoEn).inMinutes;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final marcas = ref.watch(marcasCocinaProvider);
+    final minutos = DateTime.now().difference(grupo.desde).inMinutes;
+    final color = grupo.hayPendientes ? Colores.aviso : Colores.azul;
+    final renglones = grupo.pedidos.fold(0, (s, p) => s + p.items.length);
+    final hechos = grupo.pedidos.fold(0, (s, p) => s + (marcas['p${p.id}']?.length ?? 0));
+    final todoMarcado = renglones > 0 && hechos >= renglones;
 
     return Card(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: color.withValues(alpha: 0.6), width: 1.5),
+        side: BorderSide(color: color.withValues(alpha: 0.7), width: 1.5),
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -149,41 +226,82 @@ class _TarjetaCocina extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(
-                  pedido.tipo == TipoPedido.llevar ? Icons.takeout_dining : Icons.table_restaurant,
-                  color: Colores.acento,
-                ),
+                Icon(grupo.llevar ? Icons.takeout_dining : Icons.table_restaurant, color: Colores.acento),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    pedido.titulo,
-                    style: Theme.of(context).textTheme.titleLarge,
-                    overflow: TextOverflow.ellipsis,
+                  child: Text(grupo.titulo,
+                      style: Theme.of(context).textTheme.titleLarge, overflow: TextOverflow.ellipsis),
+                ),
+                Text(
+                  tiempoTranscurrido(grupo.desde),
+                  style: TextStyle(
+                    color: minutos >= 20 ? Colores.peligro : Colores.apagado,
+                    fontWeight: minutos >= 20 ? FontWeight.bold : null,
                   ),
                 ),
-                ChipEstado(pedido.estado),
               ],
             ),
-            const SizedBox(height: 4),
-            Text(
-              '#${pedido.id} · ${hora(pedido.creadoEn)} · ${tiempoTranscurrido(pedido.creadoEn)}',
-              style: TextStyle(color: minutos >= 20 ? Colores.peligro : Colores.apagado),
-            ),
-            const Divider(height: 20),
+            const SizedBox(height: 2),
+            Text('$hechos/$renglones listos', style: const TextStyle(color: Colores.apagado, fontSize: 12)),
+            const Divider(height: 16),
             Expanded(
               child: ListView(
-                children: [for (final item in pedido.items) RenglonItem(item, grande: true)],
+                children: [
+                  for (final p in grupo.pedidos) ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            [if (p.comensal != null && !grupo.llevar) p.comensal!, '#${p.id}', ?p.mesero].join(' · '),
+                            style: const TextStyle(color: Colores.apagado, fontSize: 12),
+                          ),
+                        ),
+                        ChipEstado(p.estado),
+                        IconButton(
+                          tooltip: 'Cancelar pedido',
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Icons.close, size: 18, color: Colores.peligro),
+                          onPressed: ocupado ? null : () => onCancelar(p),
+                        ),
+                      ],
+                    ),
+                    for (var i = 0; i < p.items.length; i++)
+                      _RenglonMarcable(
+                        item: p.items[i],
+                        hecho: marcas['p${p.id}']?.contains(i) ?? false,
+                        onTap: () => ref.read(marcasCocinaProvider.notifier).alternar('p${p.id}', i),
+                      ),
+                    const SizedBox(height: 8),
+                  ],
+                ],
               ),
             ),
             const SizedBox(height: 8),
-            FilledButton.icon(
-              onPressed: ocupado ? null : onAvanzar,
-              style: FilledButton.styleFrom(
-                backgroundColor: pendiente ? Colores.azul : Colores.exito,
-                foregroundColor: Colores.fondo,
-              ),
-              icon: Icon(pendiente ? Icons.local_fire_department : Icons.check),
-              label: Text(pendiente ? 'Empezar a preparar' : 'Marcar listo'),
+            Row(
+              children: [
+                if (grupo.hayPendientes) ...[
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: ocupado ? null : onPreparar,
+                      style: FilledButton.styleFrom(backgroundColor: Colores.azul, foregroundColor: Colores.fondo),
+                      icon: const Icon(Icons.local_fire_department),
+                      label: const Text('Preparar'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: ocupado ? null : onListo,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: todoMarcado ? Colores.exito : Colores.exito.withValues(alpha: 0.35),
+                      foregroundColor: Colores.fondo,
+                    ),
+                    icon: Icon(todoMarcado ? Icons.done_all : Icons.check),
+                    label: Text(grupo.pedidos.length > 1 ? 'Todo listo' : 'Listo'),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -192,14 +310,41 @@ class _TarjetaCocina extends StatelessWidget {
   }
 }
 
-class _TarjetaExtra extends StatelessWidget {
-  const _TarjetaExtra({required this.extra, required this.onHecho});
+/// Renglón con casilla: cocina va marcando lo que ya está hecho.
+class _RenglonMarcable extends StatelessWidget {
+  const _RenglonMarcable({required this.item, required this.hecho, required this.onTap});
 
-  final ExtraPedido extra;
-  final VoidCallback onHecho;
+  final PedidoItem item;
+  final bool hecho;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Opacity(
+        opacity: hecho ? 0.45 : 1,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Checkbox(value: hecho, onChanged: (_) => onTap(), visualDensity: VisualDensity.compact),
+            Expanded(child: RenglonItem(item, grande: true)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TarjetaExtra extends ConsumerWidget {
+  const _TarjetaExtra({required this.extra});
+
+  final ExtraPedido extra;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final marcas = ref.watch(marcasCocinaProvider)['e${extra.clave}'] ?? const <int>{};
     final titulo = extra.tipo == TipoPedido.llevar ? 'Para llevar (mesa ${extra.mesa})' : 'Mesa ${extra.mesa}';
     return Card(
       color: Colores.dorado.withValues(alpha: 0.10),
@@ -209,26 +354,37 @@ class _TarjetaExtra extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Icon(Icons.add_alert, color: Colores.dorado),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Extra · $titulo · pedido #${extra.pedidoId}',
+            Row(
+              children: [
+                const Icon(Icons.add_alert, color: Colores.dorado),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Extra · $titulo${extra.comensal == null ? '' : ' · ${extra.comensal}'} · #${extra.pedidoId}',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colores.dorado),
                   ),
-                  const SizedBox(height: 6),
-                  for (final item in extra.items) RenglonItem(item, grande: true),
-                ],
+                ),
+                Text(tiempoTranscurrido(extra.recibido), style: const TextStyle(color: Colores.apagado)),
+              ],
+            ),
+            const SizedBox(height: 6),
+            for (var i = 0; i < extra.items.length; i++)
+              _RenglonMarcable(
+                item: extra.items[i],
+                hecho: marcas.contains(i),
+                onTap: () => ref.read(marcasCocinaProvider.notifier).alternar('e${extra.clave}', i),
+              ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed: () => ref.read(extrasCocinaProvider.notifier).marcarHecho(extra),
+                icon: const Icon(Icons.check),
+                label: const Text('Extra terminado'),
               ),
             ),
-            const SizedBox(width: 12),
-            FilledButton(onPressed: onHecho, child: const Text('Hecho')),
           ],
         ),
       ),

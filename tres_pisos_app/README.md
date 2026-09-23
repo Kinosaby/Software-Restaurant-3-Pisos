@@ -1,20 +1,47 @@
 # Tres Pisos — App Android
 
-Cliente Flutter del POS del Restaurante 3 Pisos. Habla con el mismo backend Node que la web (`/api/*` + Socket.IO).
+App del POS del Restaurante 3 Pisos. Funciona **sin internet**: la tablet de cocina es la central del restaurante y las demás se conectan a ella por el Wi-Fi local. No usa Railway ni ningún servidor externo.
+
+## Dos formas de conectarse
+
+La primera vez que se abre, la app pregunta cómo trabajará esa tablet (se puede cambiar en Gestión → Conexión, o desde el login):
+
+| Modo | Para qué |
+|------|----------|
+| **Central de cocina** | La tablet de cocina guarda usuarios, menú, pedidos y ventas, y atiende a las demás por el Wi-Fi (puerto 8787). Arranca con el menú del restaurante (54 productos). |
+| **Conectada a la central** | Tablets de meseros o caja. Encuentran la central solas en el Wi-Fi (o se escribe su IP) y se enlazan con su **código de enlace**. |
+
+El router Wi-Fi solo tiene que dar red local: no necesita internet.
+
+El código de enlace y la IP se ven en la tablet central, en **Gestión → Central de cocina**. Si se pierde una tablet, ahí mismo se renueva el código: se cierran todas las sesiones y cada tablet vuelve a enlazarse.
+
+### Qué pasa si se pierde la conexión
+
+| Situación | Resultado |
+|-----------|-----------|
+| Normal (sin internet, con Wi-Fi) | Todo funciona con la central de cocina. |
+| La tablet del mesero pierde el Wi-Fi o la central se apaga | Se ven el menú y los pedidos guardados. Los pedidos nuevos (y los productos agregados) quedan en **Pendientes de enviar** y se envían solos al volver la conexión, sin duplicarse. |
+| La central rechaza un envío (p. ej. producto desactivado mientras tanto) | Queda marcado en rojo con el motivo; se reintenta o se descarta a mano. |
+| Cobros, cambios de estado y ediciones sin conexión | No se hacen: necesitan confirmación de la central en el momento. |
+| Se reinicia la tablet central | Recupera todo: cada operación se escribe a disco antes de responder. |
+
+Limitaciones: la central debe tener la app **abierta** y estar conectada a la corriente (la pantalla se mantiene encendida sola). Tablets que no comparten Wi-Fi no pueden pasarse pedidos. Todos los datos viven en la tablet central: no hay copia en la nube.
 
 ## Qué hace cada rol
 
 | Rol | Pantalla | Puede |
 |-----|----------|-------|
-| `mesero` | Pedidos | Ver pedidos activos; crear pedidos (mesa, para aquí/llevar, varios comensales, notas); agregar productos; editar cantidades, notas, mesa, tipo o comensal mientras cocina no termina; cobrar pedidos listos y cancelar pedidos pendientes o en preparación |
-| `cocina` | Cocina | Ver pedidos pendientes y en preparación en orden de llegada, pasarlos a "preparando" y "listo", y ver los extras que llegan para pedidos ya terminados |
-| `admin` | Pedidos · Cocina · Caja · Gestión | Todo lo anterior; en Caja, los pedidos listos por cobrar; en Gestión, métricas de ventas, productos (precios, categorías, disponibilidad) y usuarios |
+| `mesero` | Salón | Mapa de mesas en vivo, cuentas agrupadas por mesa, cobradas hoy; crear pedidos (mesa, aquí/llevar, varios comensales, notas, productos sueltos para llevar); agregar, editar, cambiar mesa; cobrar con efectivo y cambio o con tarjeta; cancelar; repetir pedidos; compartir la cuenta |
+| `cocina` | Cocina | Pedidos agrupados por mesa (los de llevar aparte), del más antiguo al más nuevo; casillas por producto; preparar / listo por mesa; cancelar lo que aún no termina; extras de pedidos ya terminados |
+| `admin` | Salón · Cocina · Caja · Gestión | Todo lo anterior; caja con cobro de mesa completa; métricas (hoy, semana, jueves a domingo, 7 y 30 días); historial de pedidos con borrado; productos; usuarios; datos de la central |
 
-**Varios comensales:** en un pedido nuevo, "+ Comensal" añade pestañas C1, C2… y cada una lleva sus productos. Al enviar se crea un pedido por comensal, como en la web. Tocar la pestaña activa permite ponerle nombre (por ejemplo, el cliente de un pedido para llevar). Si falla el envío a medias, los comensales ya enviados se vacían para que el reintento no los duplique.
+### Lo que el móvil hace mejor que la web
 
-**Productos y usuarios con historial:** el backend no deja borrar un producto o usuario que ya aparece en pedidos (clave foránea). En ese caso la app lo explica: el producto se desactiva y al usuario se le cambia la contraseña.
-
-Los cambios llegan en tiempo real (`nuevo_pedido`, `pedido_actualizado`, `extra_pedido`). El punto de la barra superior indica si hay conexión en tiempo real. Al reconectar, la lista se recarga para no perder eventos.
+- **Alertas con sonido y vibración**: cocina suena al entrar un pedido o un extra; el mesero recibe aviso cuando *su* pedido está listo o si cocina lo cancela, esté en la pantalla que esté. Se silencian desde el menú del usuario.
+- **Mapa de mesas en vivo**: color por estado (libre, esperando, en cocina, lista) y minutos ocupada; tocar una mesa libre empieza el pedido.
+- **Frecuentes y repetir pedido**: lo más pedido desde esa tablet aparece primero en el catálogo; un pedido cobrado se repite en un toque (al precio actual).
+- **Ticket para compartir**: la cuenta o el ticket de cobro como imagen, para WhatsApp o para imprimir.
+- **Trabajo sin internet** con la central de cocina y cola de envíos.
 
 ## Ejecutar
 
@@ -24,31 +51,32 @@ flutter pub get
 flutter run
 ```
 
-El servidor se configura en la pantalla de login (sección **Servidor**) y se recuerda entre sesiones. El valor inicial es `http://10.0.2.2:3000`: así ve el emulador de Android el `localhost` del PC. Para una tablet en la red del restaurante, usa la IP del equipo que corre el backend (p. ej. `http://192.168.1.50:3000`). También se puede fijar al compilar:
-
-```bash
-flutter run --dart-define=API_URL=http://192.168.1.50:3000
-flutter build apk --release --dart-define=API_URL=https://tu-app.up.railway.app
-```
-
 ## Estructura
 
 ```
 lib/
-  main.dart            Carga la sesión guardada y arranca la app
-  app.dart             Router (GoRouter) con redirección por sesión y rol
-  core/                Cliente HTTP, configuración, tema, formato y widgets comunes
+  main.dart            Carga la sesión y, en la tablet de cocina, arranca la central
+  app.dart             Router con redirección por conexión, sesión y rol
+  central/             La central: reglas de negocio, diario en disco, seguridad y servidor HTTP/WebSocket
+  core/                Cliente HTTP, almacenamiento local, canal nativo, tema y widgets comunes
   features/
-    auth/              Login, sesión (JWT) y su almacenamiento
-    pedidos/           Modelos, repositorio REST, Socket.IO y estado de pedidos activos
-    mesero/            Lista de pedidos, detalle, captura (nuevo / agregar) y edición
+    conexion/          Elegir modo, enlazar con la central y pantalla de la central
+    auth/              Login y sesión
+    pedidos/           Modelos, repositorio, tiempo real, caché y cola sin conexión
+    mesas/             Mapa de mesas y cuentas por mesa
+    mesero/            Salón, captura, detalle y edición de pedidos
     cocina/            Tablero de cocina
-    caja/              Cobro de pedidos listos
-    admin/             Métricas, productos y usuarios
-    inicio/            Pantalla principal según el rol
+    caja/              Caja, cobro y tickets
+    avisos/            Alertas con sonido y vibración
+    admin/             Métricas, historial, productos y usuarios
+android/app/src/main/kotlin/.../MainActivity.kt   Sonido, vibración, pantalla encendida y compartir
 ```
 
-Estado con Riverpod 3, HTTP con Dio, navegación con GoRouter y tiempo real con `socket_io_client`.
+### Cómo guarda los datos la central
+
+En `central.jsonl` dentro del almacenamiento privado de la app: cada operación añade una línea y se fuerza a disco antes de responder. Una línea cortada por un apagón se descarta al arrancar; cada 3 000 líneas el archivo se compacta con un reemplazo atómico. Las contraseñas van con PBKDF2-HMAC-SHA256 y sal propia; las sesiones son JWT HS256 que se invalidan al cambiar contraseña o rol, o al renovar el código de enlace. Tras 5 intentos fallidos de login desde una IP, se bloquea 30 segundos.
+
+La comunicación en el Wi-Fi es HTTP sin cifrar protegido por el código de enlace: usa la red del personal, no la de invitados, y no expongas el puerto 8787 a internet.
 
 ## Pruebas
 
@@ -57,21 +85,20 @@ flutter analyze
 flutter test
 ```
 
+Incluyen la central completa (reglas, permisos, persistencia tras reinicio y apagón, compactación, HTTP y WebSocket reales) y una prueba de punta a punta en la que la tablet pierde la conexión, guarda el pedido y lo envía una sola vez al volver.
+
 ## APK en GitHub Actions
 
-`.github/workflows/app-android.yml` analiza, prueba y compila el APK release en cada push a `main` que toque `tres_pisos_app/`, o a mano desde **Actions → App Android → Run workflow**. El APK queda como artefacto `tres-pisos-apk`. En los PR solo se analiza y se prueba.
-
-Configuración en **Settings → Secrets and variables → Actions**:
+`.github/workflows/app-android.yml` analiza, prueba y compila el APK release en cada push a `main` que toque `tres_pisos_app/`, o a mano desde **Actions → App Android → Run workflow**. El APK queda como artefacto `tres-pisos-apk`.
 
 | Nombre | Tipo | Para qué |
 |--------|------|----------|
 | `ANDROID_KEYSTORE_BASE64` | secreto | Keystore `.jks` en base64 |
 | `ANDROID_STORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` | secretos | Datos de la clave |
-| `API_URL` | variable (opcional) | Servidor que aparece de entrada en el login |
 
-Sin los secretos el APK se firma con una clave de debug temporal, así que cada APK nuevo exige desinstalar el anterior. En local, la firma permanente se activa con las variables de entorno `POS_KEYSTORE_PATH`, `POS_KEY_ALIAS`, `POS_STORE_PASSWORD` y `POS_KEY_PASSWORD`.
+Sin los secretos el APK se firma con una clave de debug temporal. En local, la firma permanente usa `POS_KEYSTORE_PATH`, `POS_KEY_ALIAS`, `POS_STORE_PASSWORD` y `POS_KEY_PASSWORD`.
 
-## Notas
+## Notas técnicas
 
-- La sesión se guarda con `shared_preferences`. No se usa `flutter_secure_storage` porque su cadena de dependencias (`path_provider` → `objective_c`) ejecuta un hook de compilación que falla en Windows cuando la ruta del SDK de Flutter tiene espacios.
-- El manifiesto permite HTTP sin cifrar (`usesCleartextTraffic`) porque el backend suele estar en la red local. Si solo se usa un servidor HTTPS, se puede quitar.
+- No se usan plugins que dependan de `path_provider`/`objective_c` (`flutter_secure_storage`, `share_plus`, `audioplayers`, `sqflite_common_ffi`…): ejecutan un hook de compilación que falla en Windows cuando la ruta del SDK tiene espacios. Sonido, vibración, pantalla encendida y compartir van por un canal nativo propio.
+- La sesión y la caché usan `shared_preferences` (almacenamiento privado de la app, sin cifrado adicional).

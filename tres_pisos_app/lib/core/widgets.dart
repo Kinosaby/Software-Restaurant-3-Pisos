@@ -1,7 +1,9 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/auth/auth_controller.dart';
+import '../features/avisos/avisos.dart';
+import '../features/pedidos/pedidos_controller.dart';
 import '../features/pedidos/tiempo_real.dart';
 import 'tema.dart';
 
@@ -98,15 +100,15 @@ class Vacio extends StatelessWidget {
   }
 }
 
-/// Punto verde/rojo en la barra superior según el estado del Socket.IO.
+/// Punto verde/rojo en la barra superior según la conexión en tiempo real.
 class IndicadorConexion extends ConsumerWidget {
   const IndicadorConexion({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final conectado = ref.watch(conexionProvider).value ?? false;
+    final conectado = ref.watch(conexionTiempoRealProvider).value ?? false;
     return Tooltip(
-      message: conectado ? 'Conectado en tiempo real' : 'Sin conexión en tiempo real',
+      message: conectado ? 'Conectado con la central' : 'Sin conexión con la central',
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8),
         child: Icon(Icons.circle, size: 12, color: conectado ? Colores.exito : Colores.peligro),
@@ -115,13 +117,62 @@ class IndicadorConexion extends ConsumerWidget {
   }
 }
 
-/// Menú con el usuario actual y la opción de cerrar sesión.
+/// Franja que avisa cuando se trabaja con datos guardados o hay envíos esperando conexión.
+class AvisoSinConexion extends ConsumerWidget {
+  const AvisoSinConexion({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sinConexion = ref.watch(sinConexionProvider);
+    final cola = ref.watch(colaEnviosProvider);
+    final pendientes = cola.where((e) => e.error == null).length;
+    final rechazados = cola.length - pendientes;
+    if (!sinConexion && cola.isEmpty) return const SizedBox.shrink();
+
+    final partes = [
+      if (sinConexion) 'Sin conexión: se muestran los datos guardados',
+      if (pendientes > 0) '$pendientes por enviar',
+      if (rechazados > 0) '$rechazados rechazados',
+    ];
+    return Material(
+      color: (rechazados > 0 ? Colores.peligro : Colores.aviso).withValues(alpha: 0.15),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            Icon(sinConexion ? Icons.cloud_off : Icons.cloud_upload_outlined,
+                size: 18, color: rechazados > 0 ? Colores.peligro : Colores.aviso),
+            const SizedBox(width: 10),
+            Expanded(child: Text(partes.join(' · '), style: const TextStyle(fontSize: 13))),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Menú con el usuario actual, el sonido de los avisos y cerrar sesión.
 class MenuUsuario extends ConsumerWidget {
   const MenuUsuario({super.key});
+
+  Future<void> _cerrarSesion(BuildContext context, WidgetRef ref) async {
+    final pendientes = ref.read(colaEnviosProvider).length;
+    if (pendientes > 0) {
+      final ok = await confirmar(
+        context,
+        titulo: 'Hay $pendientes envíos sin completar',
+        mensaje: 'Se quedan guardados en esta tablet y se enviarán cuando alguien vuelva a iniciar sesión en ella.',
+        accion: 'Cerrar sesión',
+      );
+      if (!ok) return;
+    }
+    await ref.read(authControllerProvider.notifier).cerrarSesion();
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final usuario = ref.watch(authControllerProvider)?.usuario;
+    final sonido = ref.watch(sonidoActivoProvider);
     return PopupMenuButton<void>(
       icon: const Icon(Icons.account_circle_outlined),
       itemBuilder: (context) => [
@@ -130,7 +181,17 @@ class MenuUsuario extends ConsumerWidget {
           child: Text('${usuario?.username ?? ''} · ${usuario?.rol.etiqueta ?? ''}'),
         ),
         PopupMenuItem<void>(
-          onTap: () => ref.read(authControllerProvider.notifier).cerrarSesion(),
+          onTap: ref.read(sonidoActivoProvider.notifier).alternar,
+          child: Row(
+            children: [
+              Icon(sonido ? Icons.volume_up_outlined : Icons.volume_off_outlined),
+              const SizedBox(width: 12),
+              Text(sonido ? 'Silenciar avisos' : 'Activar sonido de avisos'),
+            ],
+          ),
+        ),
+        PopupMenuItem<void>(
+          onTap: () => _cerrarSesion(context, ref),
           child: const Row(
             children: [Icon(Icons.logout), SizedBox(width: 12), Text('Cerrar sesión')],
           ),

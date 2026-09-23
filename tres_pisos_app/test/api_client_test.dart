@@ -98,6 +98,6 @@ void main() {
   test('normalizarServidor', () {
     expect(normalizarServidor(' http://192.168.1.50:3000/ '), 'http://192.168.1.50:3000');
     expect(normalizarServidor('192.168.1.50:3000'), 'http://192.168.1.50:3000');
-    expect(normalizarServidor('https://tres-pisos.up.railway.app//'), 'https://tres-pisos.up.railway.app');
+    expect(normalizarServidor('http://192.168.1.20:8787//'), 'http://192.168.1.20:8787');
   });
 }

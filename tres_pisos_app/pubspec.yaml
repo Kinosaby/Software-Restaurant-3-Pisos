@@ -7,6 +7,7 @@ environment:
   sdk: ^3.13.4
 
 dependencies:
+  crypto: ^3.0.7
   dio: ^5.11.1
   flutter:
     sdk: flutter
@@ -16,14 +17,12 @@ dependencies:
   go_router: ^18.0.1
   intl: ^0.20.3
   shared_preferences: ^2.5.5
-  socket_io_client: ^3.1.6
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-
 flutter:
   uses-material-design: true
   assets:
     - assets/logo.jpg
+    - assets/menu/restaurante.json

@@ -1,6 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- usesCleartextTraffic: el servidor del restaurante puede estar en la red local por HTTP -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Recibir los anuncios UDP con los que la central se da a conocer en el Wi-Fi. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- usesCleartextTraffic: la central de cocina y el servidor pueden estar en la red local por HTTP -->
     <application
         android:label="Tres Pisos"
         android:name="${applicationName}"
@@ -28,6 +31,16 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Tickets compartidos desde la caché de la app. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.archivos"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/rutas_compartidas" />
+        </provider>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

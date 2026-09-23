@@ -46,9 +46,8 @@ class ResumenMetricas {
 class VentaDia {
   const VentaDia({required this.fecha, required this.pedidos, required this.total});
 
-  /// `fecha` es un DATE de PostgreSQL que node-pg serializa como medianoche en la
-  /// zona del servidor ("2026-09-21T00:00:00.000Z" en Railway). Convertirlo a hora
-  /// local lo movería al día anterior en México, así que solo se lee la parte de la fecha.
+  /// `fecha` llega como "AAAA-MM-DD" (día local de la central). Se lee solo esa
+  /// parte: convertir una fecha con hora a local podría moverla al día anterior.
   factory VentaDia.fromJson(Map<String, dynamic> json) {
     final texto = json['fecha']?.toString() ?? '';
     final soloFecha = texto.length >= 10 ? texto.substring(0, 10) : texto;

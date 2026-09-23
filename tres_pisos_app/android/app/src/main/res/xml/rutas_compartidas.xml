@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Carpeta de la caché desde la que se comparten los tickets. -->
+<paths>
+    <cache-path name="compartir" path="compartir/" />
+</paths>

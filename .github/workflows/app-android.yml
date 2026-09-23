@@ -59,14 +59,7 @@ jobs:
           POS_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
           POS_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           POS_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          # Servidor sugerido en el login; se define en Settings → Variables (opcional).
-          API_URL: ${{ vars.API_URL }}
-        run: |
-          if [ -n "$API_URL" ]; then
-            flutter build apk --release --dart-define=API_URL="$API_URL"
-          else
-            flutter build apk --release
-          fi
+        run: flutter build apk --release
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: github.event_name != 'pull_request'

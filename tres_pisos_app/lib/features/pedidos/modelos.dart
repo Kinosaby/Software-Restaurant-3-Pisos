@@ -14,6 +14,22 @@ String? leerTextoOpcional(Object? valor) {
   return (texto == null || texto.isEmpty) ? null : texto;
 }
 
+/// Prefijo con el que la web marca un producto para llevar dentro de un pedido para aquí.
+const prefijoLlevar = '[LLEVAR]';
+
+/// Separa la marca de "para llevar" del texto de la nota.
+({bool llevar, String? nota}) leerNota(String? nota) {
+  if (nota == null || !nota.startsWith(prefijoLlevar)) return (llevar: false, nota: nota);
+  return (llevar: true, nota: leerTextoOpcional(nota.substring(prefijoLlevar.length)));
+}
+
+/// Inverso de [leerNota]: la nota tal como la guarda el servidor.
+String? componerNota({required bool llevar, String? nota}) {
+  final texto = leerTextoOpcional(nota);
+  if (!llevar) return texto;
+  return texto == null ? prefijoLlevar : '$prefijoLlevar $texto';
+}
+
 class Producto {
   const Producto({
     required this.id,
@@ -36,6 +52,9 @@ class Producto {
   final double precio;
   final String categoria;
   final bool activo;
+
+  Map<String, dynamic> toJson() =>
+      {'id': id, 'nombre': nombre, 'precio': precio, 'categoria': categoria, 'activo': activo};
 }
 
 enum EstadoPedido {
@@ -92,9 +111,22 @@ class PedidoItem {
   final String nombre;
   final int cantidad;
   final double precio;
+
+  /// Nota tal como está en el servidor (puede empezar por [prefijoLlevar]).
   final String? nota;
 
   double get subtotal => precio * cantidad;
+  bool get llevar => leerNota(nota).llevar;
+  String? get notaVisible => leerNota(nota).nota;
+
+  Map<String, dynamic> toJson() => {
+        'id': detalleId,
+        'producto_id': productoId,
+        'nombre': nombre,
+        'cantidad': cantidad,
+        'nota': nota,
+        'precio': precio,
+      };
 }
 
 class Pedido {
@@ -107,6 +139,8 @@ class Pedido {
     required this.items,
     required this.creadoEn,
     this.comensal,
+    this.usuarioId,
+    this.mesero,
   });
 
   factory Pedido.fromJson(Map<String, dynamic> json) => Pedido(
@@ -116,6 +150,8 @@ class Pedido {
         tipo: TipoPedido.desde(json['tipo']?.toString()),
         total: leerDinero(json['total']),
         comensal: leerTextoOpcional(json['comensal']),
+        usuarioId: json['usuario_id'] == null ? null : leerEntero(json['usuario_id']),
+        mesero: leerTextoOpcional(json['mesero']),
         creadoEn: DateTime.tryParse(json['creado_en']?.toString() ?? '')?.toLocal() ?? DateTime.now(),
         items: [
           for (final item in (json['productos'] as List? ?? const []))
@@ -129,6 +165,10 @@ class Pedido {
   final TipoPedido tipo;
   final double total;
   final String? comensal;
+
+  /// Quién tomó el pedido (para avisarle cuando esté listo).
+  final int? usuarioId;
+  final String? mesero;
   final DateTime creadoEn;
   final List<PedidoItem> items;
 
@@ -138,6 +178,19 @@ class Pedido {
     final base = tipo == TipoPedido.llevar ? 'Para llevar' : 'Mesa $mesa';
     return comensal == null ? base : '$base · $comensal';
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'mesa': mesa,
+        'estado': estado.name,
+        'tipo': tipo.name,
+        'total': total,
+        'comensal': comensal,
+        'usuario_id': usuarioId,
+        'mesero': mesero,
+        'creado_en': creadoEn.toUtc().toIso8601String(),
+        'productos': [for (final i in items) i.toJson()],
+      };
 }
 
 /// Productos añadidos a un pedido que cocina ya había terminado (`extra_pedido`).
@@ -148,13 +201,15 @@ class ExtraPedido {
     required this.tipo,
     required this.items,
     required this.recibido,
+    this.comensal,
   });
 
   factory ExtraPedido.fromJson(Map<String, dynamic> json, {DateTime? recibido}) => ExtraPedido(
         pedidoId: leerEntero(json['pedido_id']),
         mesa: leerEntero(json['mesa']),
         tipo: TipoPedido.desde(json['tipo']?.toString()),
-        recibido: recibido ?? DateTime.now(),
+        comensal: leerTextoOpcional(json['comensal']),
+        recibido: recibido ?? DateTime.tryParse(json['recibido']?.toString() ?? '')?.toLocal() ?? DateTime.now(),
         items: [
           for (final item in (json['items'] as List? ?? const []))
             if (item is Map<String, dynamic>) PedidoItem.fromJson(item),
@@ -164,8 +219,21 @@ class ExtraPedido {
   final int pedidoId;
   final int mesa;
   final TipoPedido tipo;
+  final String? comensal;
   final List<PedidoItem> items;
   final DateTime recibido;
+
+  /// Identifica el extra en el almacenamiento local de cocina.
+  String get clave => '$pedidoId-${recibido.microsecondsSinceEpoch}';
+
+  Map<String, dynamic> toJson() => {
+        'pedido_id': pedidoId,
+        'mesa': mesa,
+        'tipo': tipo.name,
+        'comensal': comensal,
+        'recibido': recibido.toUtc().toIso8601String(),
+        'items': [for (final i in items) i.toJson()],
+      };
 }
 
 /// Cambio sobre un renglón existente del pedido (`items` de `PATCH /editar`).
@@ -189,23 +257,28 @@ class Opcional<T> {
 
 /// Línea del pedido que el mesero está armando, antes de enviarlo.
 class LineaCarrito {
-  const LineaCarrito({required this.producto, this.cantidad = 1, this.nota});
+  const LineaCarrito({required this.producto, this.cantidad = 1, this.nota, this.llevar = false});
 
   final Producto producto;
   final int cantidad;
+
+  /// Solo el texto que escribe el mesero; la marca de llevar va aparte.
   final String? nota;
+
+  /// Este producto se empaca para llevar aunque el pedido sea para aquí.
+  final bool llevar;
 
   double get subtotal => producto.precio * cantidad;
 
-  LineaCarrito copyWith({int? cantidad, String? nota, bool borrarNota = false}) => LineaCarrito(
+  LineaCarrito copyWith({int? cantidad, String? nota, bool borrarNota = false, bool? llevar}) => LineaCarrito(
         producto: producto,
         cantidad: cantidad ?? this.cantidad,
         nota: borrarNota ? null : (nota ?? this.nota),
+        llevar: llevar ?? this.llevar,
       );
 
-  Map<String, dynamic> toJson() => {
-        'producto_id': producto.id,
-        'cantidad': cantidad,
-        if (nota != null) 'nota': nota,
-      };
+  Map<String, dynamic> toJson() {
+    final nota = componerNota(llevar: llevar, nota: this.nota);
+    return {'producto_id': producto.id, 'cantidad': cantidad, 'nota': ?nota};
+  }
 }

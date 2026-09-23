@@ -1,40 +1,65 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/formato.dart';
 import '../../core/tema.dart';
 import '../../core/widgets.dart';
+import '../mesas/mesas.dart';
 import '../pedidos/modelos.dart';
 import '../pedidos/pedidos_controller.dart';
 import 'carrito.dart';
 
 /// Captura de productos. Sin [pedidoId] crea pedidos nuevos (uno por comensal);
-/// con él, agrega productos a ese pedido.
+/// con él, agrega productos a ese pedido. [mesa] y [plantilla] llegan desde el
+/// mapa de mesas o desde "repetir pedido".
 class CapturaPedidoPage extends ConsumerStatefulWidget {
-  const CapturaPedidoPage({super.key, this.pedidoId});
+  const CapturaPedidoPage({super.key, this.pedidoId, this.mesa, this.plantilla});
 
   final int? pedidoId;
+  final int? mesa;
+  final PlantillaPedido? plantilla;
 
   @override
   ConsumerState<CapturaPedidoPage> createState() => _CapturaPedidoPageState();
 }
 
+/// Categoría especial con lo más pedido desde esta tablet.
+const _frecuentes = '★ Frecuentes';
+
 class _CapturaPedidoPageState extends ConsumerState<CapturaPedidoPage> {
-  final _mesa = TextEditingController();
   final _busqueda = TextEditingController();
-  TipoPedido _tipo = TipoPedido.aqui;
+  late int? _mesa = widget.plantilla?.mesa ?? widget.mesa;
+  late TipoPedido _tipo = widget.plantilla?.tipo ?? TipoPedido.aqui;
   String? _categoria;
   bool _enviando = false;
 
   bool get _esNuevo => widget.pedidoId == null;
 
   @override
+  void initState() {
+    super.initState();
+    final plantilla = widget.plantilla;
+    if (plantilla != null) {
+      // Después del primer frame: el carrito es un provider y no se modifica durante el build.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final carrito = ref.read(carritoProvider.notifier)..cargar(plantilla.lineas);
+        if (plantilla.comensal != null) carrito.renombrarComensal(0, plantilla.comensal!);
+      });
+    }
+    if (ref.read(favoritosProvider).isNotEmpty) _categoria = _frecuentes;
+  }
+
+  @override
   void dispose() {
-    _mesa.dispose();
     _busqueda.dispose();
     super.dispose();
+  }
+
+  Future<void> _elegirMesa() async {
+    final mesa = await elegirMesa(context, ref, actual: _mesa);
+    if (mesa != null) setState(() => _mesa = mesa);
   }
 
   Future<void> _enviar() async {
@@ -42,40 +67,47 @@ class _CapturaPedidoPageState extends ConsumerState<CapturaPedidoPage> {
     final estado = ref.read(carritoProvider);
     if (estado.vacio) return;
 
-    final mesa = int.tryParse(_mesa.text.trim());
-    if (_esNuevo && (mesa == null || mesa < 1)) {
-      mostrarMensaje(context, 'Indica un número de mesa válido.', error: true);
+    final mesa = _mesa;
+    if (_esNuevo && mesa == null) {
+      mostrarMensaje(context, 'Elige la mesa.', error: true);
+      await _elegirMesa();
       return;
     }
 
     setState(() => _enviando = true);
     final pedidos = ref.read(pedidosActivosProvider.notifier);
     try {
+      final resultados = <ResultadoEnvio>[];
       if (_esNuevo) {
-        final creados = <int>[];
         for (final comensal in estado.porEnviar) {
-          final pedido = await pedidos.crear(
+          resultados.add(await pedidos.crear(
             mesa: mesa!,
             tipo: _tipo,
             comensal: estado.nombreParaEnvio(comensal),
             lineas: comensal.lineas,
-          );
-          creados.add(pedido.id);
+          ));
           // Si falla el siguiente, un reintento no vuelve a mandar este.
           carrito.marcarEnviado(comensal);
         }
-        if (!mounted) return;
-        mostrarMensaje(
-          context,
-          creados.length == 1
-              ? 'Pedido #${creados.single} enviado a cocina'
-              : '${creados.length} pedidos enviados a cocina',
-        );
       } else {
-        await pedidos.agregar(widget.pedidoId!, estado.lineasActivas);
-        if (!mounted) return;
-        mostrarMensaje(context, 'Productos agregados');
+        final pedido = ref.read(pedidosActivosProvider).value?.where((p) => p.id == widget.pedidoId).firstOrNull;
+        if (pedido == null) throw StateError('El pedido #${widget.pedidoId} ya no está activo.');
+        resultados.add(await pedidos.agregar(pedido, estado.lineasActivas));
       }
+      if (!mounted) return;
+      final enCola = resultados.whereType<EnCola>().length;
+      final enviados = resultados.whereType<Enviado>().toList();
+      mostrarMensaje(
+        context,
+        enCola > 0
+            ? 'Sin conexión: ${enCola == 1 ? 'se guardó el pedido' : 'se guardaron $enCola pedidos'} '
+                'y se enviará${enCola == 1 ? '' : 'n'} a cocina al reconectar'
+            : !_esNuevo
+                ? 'Productos agregados'
+                : enviados.length == 1
+                    ? 'Pedido #${enviados.single.pedido.id} enviado a cocina'
+                    : '${enviados.length} pedidos enviados a cocina',
+      );
       context.pop();
     } on Object catch (e) {
       if (mounted) mostrarMensaje(context, '$e', error: true);
@@ -110,6 +142,7 @@ class _CapturaPedidoPageState extends ConsumerState<CapturaPedidoPage> {
       ),
       body: Column(
         children: [
+          const AvisoSinConexion(),
           if (_esNuevo) _datosPedido(),
           if (_esNuevo) const _PestanasComensales(),
           Padding(
@@ -176,14 +209,14 @@ class _CapturaPedidoPageState extends ConsumerState<CapturaPedidoPage> {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Row(
         children: [
-          SizedBox(
-            width: 96,
-            child: TextField(
-              controller: _mesa,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(4)],
-              decoration: const InputDecoration(labelText: 'Mesa', isDense: true),
+          OutlinedButton.icon(
+            onPressed: _elegirMesa,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _mesa == null ? Colores.acento : Colores.crema,
+              side: BorderSide(color: _mesa == null ? Colores.acento : Colores.apagado),
             ),
+            icon: const Icon(Icons.table_restaurant),
+            label: Text(_mesa == null ? 'Mesa' : 'Mesa $_mesa'),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -193,7 +226,7 @@ class _CapturaPedidoPageState extends ConsumerState<CapturaPedidoPage> {
                   ButtonSegment(
                     value: tipo,
                     label: Text(tipo == TipoPedido.aqui ? 'Aquí' : 'Llevar'),
-                    icon: Icon(tipo == TipoPedido.aqui ? Icons.table_restaurant : Icons.takeout_dining),
+                    icon: Icon(tipo == TipoPedido.aqui ? Icons.restaurant : Icons.takeout_dining),
                   ),
               ],
               selected: {_tipo},
@@ -206,12 +239,21 @@ class _CapturaPedidoPageState extends ConsumerState<CapturaPedidoPage> {
   }
 
   Widget _catalogo(List<Producto> productos) {
-    final categorias = {for (final p in productos) p.categoria}.toList();
+    final favoritos = ref.watch(favoritosProvider.notifier).top();
+    ref.watch(favoritosProvider);
+    final porId = {for (final p in productos) p.id: p};
+    final frecuentes = [for (final id in favoritos) ?porId[id]];
+    final categorias = [
+      if (frecuentes.isNotEmpty) _frecuentes,
+      ...{for (final p in productos) p.categoria},
+    ];
     final filtro = _busqueda.text.trim().toLowerCase();
-    final visibles = productos.where((p) {
-      if (_categoria != null && p.categoria != _categoria) return false;
-      return filtro.isEmpty || p.nombre.toLowerCase().contains(filtro);
-    }).toList();
+    final base = filtro.isNotEmpty || _categoria == null
+        ? productos
+        : _categoria == _frecuentes
+            ? frecuentes
+            : productos.where((p) => p.categoria == _categoria).toList();
+    final visibles = base.where((p) => filtro.isEmpty || p.nombre.toLowerCase().contains(filtro)).toList();
 
     return Column(
       children: [
@@ -455,9 +497,9 @@ class _HojaCarrito extends ConsumerWidget {
                               if (nota != null) carrito.fijarNota(linea.producto.id, nota, en: i);
                             },
                             child: Text(
-                              linea.nota ?? '+ Agregar nota',
+                              [if (linea.llevar) 'Para llevar', linea.nota ?? '+ Agregar nota'].join(' · '),
                               style: TextStyle(
-                                color: linea.nota == null ? Colores.apagado : Colores.dorado,
+                                color: linea.nota == null && !linea.llevar ? Colores.apagado : Colores.dorado,
                                 fontStyle: linea.nota == null ? null : FontStyle.italic,
                               ),
                             ),
@@ -465,6 +507,13 @@ class _HojaCarrito extends ConsumerWidget {
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              IconButton(
+                                tooltip: linea.llevar ? 'Quitar "para llevar"' : 'Empacar para llevar',
+                                isSelected: linea.llevar,
+                                icon: const Icon(Icons.takeout_dining_outlined),
+                                selectedIcon: const Icon(Icons.takeout_dining, color: Colores.dorado),
+                                onPressed: () => carrito.alternarLlevar(linea.producto.id, en: i),
+                              ),
                               IconButton(
                                 tooltip: 'Quitar uno',
                                 icon: Icon(linea.cantidad == 1 ? Icons.delete_outline : Icons.remove),

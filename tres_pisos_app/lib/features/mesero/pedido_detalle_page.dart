@@ -6,9 +6,12 @@ import '../../core/formato.dart';
 import '../../core/tema.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
+import '../caja/cobro.dart';
+import '../caja/ticket.dart';
 import '../pedidos/modelos.dart';
 import '../pedidos/pedidos_controller.dart';
 import '../pedidos/widgets_pedido.dart';
+import 'pedidos_page.dart';
 
 class PedidoDetallePage extends ConsumerStatefulWidget {
   const PedidoDetallePage({super.key, required this.pedidoId});
@@ -38,17 +41,10 @@ class _PedidoDetallePageState extends ConsumerState<PedidoDetallePage> {
   }
 
   Future<void> _cobrar(Pedido pedido) async {
-    final ok = await confirmar(
-      context,
-      titulo: 'Cobrar ${pedido.titulo}',
-      mensaje: 'Total a cobrar: ${dinero(pedido.total)}',
-      accion: 'Cobrado',
-    );
-    if (!ok || !mounted) return;
-    await _accionYSalir(
-      () => ref.read(pedidosActivosProvider.notifier).cambiarEstado(pedido.id, EstadoPedido.pagado),
-      'Pedido #${pedido.id} cobrado',
-    );
+    await mostrarCobro(context, ref, [pedido]);
+    if (!mounted) return;
+    final sigueActivo = ref.read(pedidosActivosProvider).value?.any((p) => p.id == pedido.id) ?? false;
+    if (!sigueActivo) context.pop();
   }
 
   Future<void> _cancelar(Pedido pedido) async {
@@ -146,6 +142,22 @@ class _PedidoDetallePageState extends ConsumerState<PedidoDetallePage> {
                   label: Text('Cobrar ${dinero(pedido.total)}'),
                 ),
               ],
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => mostrarTicket(context, [pedido]),
+                      icon: const Icon(Icons.share_outlined),
+                      label: const Text('Compartir cuenta'),
+                    ),
+                  ),
+                  if (rol?.tomaPedidos ?? false) ...[
+                    const SizedBox(width: 10),
+                    Expanded(child: BotonRepetir(pedido: pedido)),
+                  ],
+                ],
+              ),
               if ((rol?.tomaPedidos ?? false) && pedido.estado.modificable) ...[
                 const SizedBox(height: 10),
                 TextButton.icon(

@@ -90,6 +90,16 @@ class Carrito extends Notifier<EstadoCarrito> {
         ]);
   }
 
+  void alternarLlevar(int productoId, {int? en}) {
+    _editar(en, (lineas) => [
+          for (final linea in lineas)
+            if (linea.producto.id == productoId) linea.copyWith(llevar: !linea.llevar) else linea,
+        ]);
+  }
+
+  /// Carga una plantilla (p. ej. "repetir pedido"): reemplaza al comensal activo.
+  void cargar(List<LineaCarrito> lineas) => _editar(null, (_) => [...lineas]);
+
   void agregarComensal() {
     final comensales = [...state.comensales, Comensal(nombre: 'C${state.comensales.length + 1}')];
     state = EstadoCarrito(comensales: comensales, activo: comensales.length - 1);
@@ -125,6 +135,32 @@ class Carrito extends Notifier<EstadoCarrito> {
       for (final c in state.comensales) identical(c, comensal) ? c.copyWith(lineas: const []) : c,
     ]);
   }
+}
+
+/// Pedido de partida para la captura ("repetir pedido").
+class PlantillaPedido {
+  const PlantillaPedido({required this.lineas, this.mesa, this.tipo = TipoPedido.aqui, this.comensal});
+
+  /// Arma la plantilla con los productos de un pedido anterior que siguen en el menú,
+  /// al precio actual. Los que ya no existen o están desactivados se omiten.
+  factory PlantillaPedido.desde(Pedido pedido, List<Producto> catalogo) {
+    final porId = {for (final p in catalogo) p.id: p};
+    return PlantillaPedido(
+      mesa: pedido.tipo == TipoPedido.aqui ? pedido.mesa : null,
+      tipo: pedido.tipo,
+      comensal: pedido.comensal,
+      lineas: [
+        for (final i in pedido.items)
+          if (porId[i.productoId] case final producto?)
+            LineaCarrito(producto: producto, cantidad: i.cantidad, nota: i.notaVisible, llevar: i.llevar),
+      ],
+    );
+  }
+
+  final List<LineaCarrito> lineas;
+  final int? mesa;
+  final TipoPedido tipo;
+  final String? comensal;
 }
 
 extension ResumenCarrito on List<LineaCarrito> {

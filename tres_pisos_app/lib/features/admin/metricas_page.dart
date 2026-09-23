@@ -29,6 +29,23 @@ List<VentaDia> completarDias(List<VentaDia> ventas, {required int dias, required
   ];
 }
 
+/// Jueves a domingo que muestra la web en "ventas de la semana": de lunes a
+/// miércoles, el fin de semana pasado; de jueves a domingo, el actual.
+List<DateTime> diasFinDeSemana(DateTime hoy) {
+  final dia = DateUtils.dateOnly(hoy);
+  // weekday: lunes = 1 … domingo = 7.
+  final desfaseAJueves = switch (dia.weekday) {
+    >= 1 && <= 3 => -(dia.weekday + 3),
+    7 => -3,
+    _ => 4 - dia.weekday,
+  };
+  final jueves = DateTime(dia.year, dia.month, dia.day + desfaseAJueves);
+  return [for (var i = 0; i < 4; i++) DateTime(jueves.year, jueves.month, jueves.day + i)];
+}
+
+/// Valor del selector para la vista jueves a domingo.
+const _finDeSemana = 0;
+
 class MetricasPage extends ConsumerStatefulWidget {
   const MetricasPage({super.key});
 
@@ -40,17 +57,29 @@ class _MetricasPageState extends ConsumerState<MetricasPage> {
   int _dias = 7;
   bool _verTabla = false;
 
+  /// Jueves a domingo necesita hasta 10 días atrás (visto un miércoles).
+  int get _diasConsulta => _dias == _finDeSemana ? 10 : _dias;
+
   Future<void> _refrescar() async {
     ref
       ..invalidate(resumenMetricasProvider)
-      ..invalidate(ventasPorDiaProvider(_dias));
+      ..invalidate(ventasPorDiaProvider(_diasConsulta));
     await ref.read(resumenMetricasProvider.future);
+  }
+
+  List<VentaDia> _diasAMostrar(List<VentaDia> lista) {
+    final hoy = DateTime.now();
+    if (_dias != _finDeSemana) return completarDias(lista, dias: _dias, hoy: hoy);
+    final porFecha = {for (final v in lista) DateUtils.dateOnly(v.fecha): v};
+    return [
+      for (final d in diasFinDeSemana(hoy)) porFecha[d] ?? VentaDia(fecha: d, pedidos: 0, total: 0),
+    ];
   }
 
   @override
   Widget build(BuildContext context) {
     final resumen = ref.watch(resumenMetricasProvider);
-    final ventas = ref.watch(ventasPorDiaProvider(_dias));
+    final ventas = ref.watch(ventasPorDiaProvider(_diasConsulta));
     final texto = Theme.of(context).textTheme;
 
     return Scaffold(
@@ -73,19 +102,17 @@ class _MetricasPageState extends ConsumerState<MetricasPage> {
                 ],
               ),
               const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(child: Text('Ventas por día', style: texto.titleMedium)),
-                  SegmentedButton<int>(
-                    segments: const [
-                      ButtonSegment(value: 7, label: Text('7 días')),
-                      ButtonSegment(value: 30, label: Text('30 días')),
-                    ],
-                    selected: {_dias},
-                    showSelectedIcon: false,
-                    onSelectionChanged: (s) => setState(() => _dias = s.first),
-                  ),
+              Text('Ventas por día', style: texto.titleMedium),
+              const SizedBox(height: 8),
+              SegmentedButton<int>(
+                segments: const [
+                  ButtonSegment(value: _finDeSemana, label: Text('Jue–Dom')),
+                  ButtonSegment(value: 7, label: Text('7 días')),
+                  ButtonSegment(value: 30, label: Text('30 días')),
                 ],
+                selected: {_dias},
+                showSelectedIcon: false,
+                onSelectionChanged: (s) => setState(() => _dias = s.first),
               ),
               const SizedBox(height: 12),
               Card(
@@ -97,11 +124,11 @@ class _MetricasPageState extends ConsumerState<MetricasPage> {
                       height: 200,
                       child: ErrorConReintento(
                         error: e,
-                        alReintentar: () => ref.invalidate(ventasPorDiaProvider(_dias)),
+                        alReintentar: () => ref.invalidate(ventasPorDiaProvider(_diasConsulta)),
                       ),
                     ),
                     data: (lista) {
-                      final dias = completarDias(lista, dias: _dias, hoy: DateTime.now());
+                      final dias = _diasAMostrar(lista);
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [

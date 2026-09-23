@@ -55,9 +55,18 @@ class RenglonItem extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(item.nombre, style: estilo),
-                if (item.nota != null)
+                if (item.llevar)
+                  const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.takeout_dining, size: 16, color: Colores.acento),
+                      SizedBox(width: 4),
+                      Text('Para llevar', style: TextStyle(color: Colores.acento, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                if (item.notaVisible != null)
                   Text(
-                    item.nota!,
+                    item.notaVisible!,
                     style: const TextStyle(color: Colores.dorado, fontStyle: FontStyle.italic),
                   ),
               ],
@@ -112,7 +121,7 @@ class TarjetaPedido extends StatelessWidget {
               Row(
                 children: [
                   Text(
-                    '#${pedido.id} · ${hora(pedido.creadoEn)}',
+                    '#${pedido.id} · ${hora(pedido.creadoEn)}${pedido.mesero == null ? '' : ' · ${pedido.mesero}'}',
                     style: texto.bodySmall?.copyWith(color: Colores.apagado),
                   ),
                   const Spacer(),

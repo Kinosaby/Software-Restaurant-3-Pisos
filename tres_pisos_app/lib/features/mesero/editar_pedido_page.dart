@@ -78,7 +78,8 @@ class _EditarPedidoPageState extends ConsumerState<EditarPedidoPage> {
   }
 
   Future<void> _editarNota(PedidoItem item) async {
-    final controller = TextEditingController(text: _renglones[item.detalleId]!.nota);
+    final actual = leerNota(_renglones[item.detalleId]!.nota);
+    final controller = TextEditingController(text: actual.nota);
     final nota = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -97,10 +98,10 @@ class _EditarPedidoPageState extends ConsumerState<EditarPedidoPage> {
     );
     controller.dispose();
     if (nota == null) return;
-    final limpia = nota.trim();
+    // Se conserva la marca de "para llevar", que viaja dentro de la nota.
     setState(() => _renglones[item.detalleId] = (
           cantidad: _renglones[item.detalleId]!.cantidad,
-          nota: limpia.isEmpty ? null : limpia,
+          nota: componerNota(llevar: actual.llevar, nota: nota),
         ));
   }
 
@@ -250,7 +251,10 @@ class _EditarPedidoPageState extends ConsumerState<EditarPedidoPage> {
       subtitle: GestureDetector(
         onTap: quitado ? null : () => _editarNota(item),
         child: Text(
-          editado.nota ?? (quitado ? 'Se quitará del pedido' : '+ Agregar nota'),
+          [
+            if (leerNota(editado.nota).llevar) 'Para llevar',
+            leerNota(editado.nota).nota ?? (quitado ? 'Se quitará del pedido' : '+ Agregar nota'),
+          ].join(' · '),
           style: TextStyle(
             color: editado.nota == null ? Colores.apagado : Colores.dorado,
             fontStyle: editado.nota == null ? null : FontStyle.italic,

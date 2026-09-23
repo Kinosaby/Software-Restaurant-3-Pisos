@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:tres_pisos_app/core/config.dart';
 import 'package:tres_pisos_app/features/auth/almacen_sesion.dart';
 import 'package:tres_pisos_app/features/auth/sesion.dart';
 
@@ -30,32 +29,48 @@ void main() {
     expect(tokenVigente('a.%%%.c', ahora: ahora), isFalse);
   });
 
-  test('AlmacenSesion restaura una sesión vigente y al cerrarla recuerda el servidor', () async {
+  test('AlmacenSesion restaura una sesión vigente y al cerrarla recuerda la conexión', () async {
     final token = jwtCon({'id': 1, 'exp': segundos(DateTime.now().toUtc().add(const Duration(hours: 8)))});
     SharedPreferences.setMockInitialValues({});
     final almacen = AlmacenSesion(await SharedPreferences.getInstance());
 
     expect(almacen.cargar().sesion, isNull);
-    expect(almacen.cargar().servidor, servidorPorDefecto);
+    expect(almacen.cargar().conexion, isNull, reason: 'la primera vez hay que elegir la conexión');
 
+    const conexion = Conexion(modo: ModoConexion.enlazada, url: 'http://192.168.1.20:8787', enlace: 'K7P2-9QXM');
     await almacen.guardar(Sesion(
-      servidor: 'http://192.168.1.50:3000',
+      conexion: conexion,
       token: token,
       usuario: const Usuario(id: 1, username: 'luis', rol: Rol.mesero),
     ));
     final restaurada = almacen.cargar().sesion;
     expect(restaurada?.usuario.username, 'luis');
     expect(restaurada?.usuario.rol, Rol.mesero);
+    expect(restaurada?.conexion.enlace, 'K7P2-9QXM');
 
     await almacen.borrarSesion();
     final trasCerrar = almacen.cargar();
     expect(trasCerrar.sesion, isNull);
-    expect(trasCerrar.servidor, 'http://192.168.1.50:3000');
+    expect(trasCerrar.conexion?.modo, ModoConexion.enlazada);
+    expect(trasCerrar.conexion?.url, 'http://192.168.1.20:8787');
+  });
+
+  test('una conexión al antiguo servidor web obliga a configurar de nuevo', () async {
+    final token = jwtCon({'id': 1, 'exp': segundos(DateTime.now().toUtc().add(const Duration(hours: 8)))});
+    SharedPreferences.setMockInitialValues({
+      'conexion': '{"modo":"servidor","url":"https://tres-pisos.up.railway.app"}',
+      'token': token,
+      'usuario': '{"id":1,"username":"luis","role":"mesero"}',
+    });
+    final arranque = AlmacenSesion(await SharedPreferences.getInstance()).cargar();
+    expect(arranque.conexion, isNull);
+    expect(arranque.sesion, isNull);
   });
 
   test('AlmacenSesion descarta un token caducado', () async {
     final caducado = jwtCon({'id': 1, 'exp': segundos(DateTime.now().toUtc().subtract(const Duration(hours: 1)))});
     SharedPreferences.setMockInitialValues({
+      'conexion': '{"modo":"enlazada","url":"http://192.168.1.20:8787","enlace":"K7P2-9QXM"}',
       'token': caducado,
       'usuario': '{"id":1,"username":"luis","role":"mesero"}',
     });
