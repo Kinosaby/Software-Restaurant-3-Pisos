@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Promedio de las esquinas de assets/logo.jpg, para que el borde de la foto no se note. -->
+    <color name="icono_fondo">#100A09</color>
+</resources>
