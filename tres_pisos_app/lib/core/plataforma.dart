@@ -26,6 +26,17 @@ abstract final class Plataforma {
   static Future<void> compartirImagen(Uint8List png, {required String nombre, String? texto}) =>
       _llamar('compartirImagen', {'bytes': png, 'nombre': nombre, 'texto': texto});
 
+  static Future<void> compartirArchivo(Uint8List bytes, {required String nombre, String tipo = 'application/octet-stream', String? texto}) =>
+      _llamar('compartirArchivo', {'bytes': bytes, 'nombre': nombre, 'tipo': tipo, 'texto': texto});
+
+  /// Abre el selector de Android para guardar el archivo. `false` si el usuario cancela.
+  /// A diferencia de los avisos, aquí los errores sí se propagan: el usuario debe saber si no se guardó.
+  static Future<bool> guardarArchivo(Uint8List bytes, {required String nombre, String tipo = 'application/octet-stream'}) async =>
+      await _canal.invokeMethod<bool>('guardarArchivo', {'bytes': bytes, 'nombre': nombre, 'tipo': tipo}) ?? false;
+
+  /// Abre el selector de Android para elegir un archivo. `null` si el usuario cancela.
+  static Future<Uint8List?> abrirArchivo() => _canal.invokeMethod<Uint8List>('abrirArchivo');
+
   static Future<void> multicast(bool activo) => _llamar('multicast', {'activo': activo});
 
   /// Carpeta privada y persistente de la app (`filesDir` en Android).

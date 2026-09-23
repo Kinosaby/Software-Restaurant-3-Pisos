@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/tema.dart';
 import '../../core/widgets.dart';
 import '../conexion/central_local.dart';
+import '../conexion/respaldos_page.dart';
 
 /// Punto de entrada a las herramientas del administrador.
 class GestionPage extends ConsumerWidget {
@@ -13,14 +14,21 @@ class GestionPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final esCentral = ref.watch(centralLocalProvider) != null;
+    final ultimoRespaldo = ref.watch(ultimoRespaldoProvider);
 
-    Widget opcion(IconData icono, String titulo, String detalle, String ruta) => Padding(
+    Widget opcion(IconData icono, String titulo, String detalle, String ruta, {bool alerta = false}) => Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: Card(
+            shape: alerta
+                ? RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    side: const BorderSide(color: Colores.peligro),
+                  )
+                : null,
             child: ListTile(
-              leading: Icon(icono, color: Colores.acento, size: 32),
+              leading: Icon(icono, color: alerta ? Colores.peligro : Colores.acento, size: 32),
               title: Text(titulo),
-              subtitle: Text(detalle, style: const TextStyle(color: Colores.apagado)),
+              subtitle: Text(detalle, style: TextStyle(color: alerta ? Colores.peligro : Colores.apagado)),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => context.push(ruta),
             ),
@@ -35,9 +43,12 @@ class GestionPage extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if (esCentral)
+          if (esCentral) ...[
             opcion(Icons.hub_outlined, 'Central de cocina', 'IP y código para enlazar las tablets de los meseros',
                 '/admin/central'),
+            opcion(Icons.backup_outlined, 'Respaldos', descripcionUltimoRespaldo(ultimoRespaldo), '/admin/respaldos',
+                alerta: respaldoAtrasado(ultimoRespaldo)),
+          ],
           opcion(Icons.insights_outlined, 'Métricas', 'Ventas del día y la semana, jueves a domingo, productos más pedidos',
               '/admin/metricas'),
           opcion(Icons.receipt_long_outlined, 'Pedidos e historial', 'Pedidos de hoy o de siempre; tickets y borrado',

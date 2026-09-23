@@ -361,19 +361,58 @@ class Central {
     if (_diario.lineas > _lineasParaCompactar) await _compactar();
   }
 
+  List<Map<String, dynamic>> _estadoCompleto() => [
+        {'t': 'config', 'v': _config},
+        {'t': 'seq', 'v': _secuencias},
+        for (final u in _usuarios.values) {'t': 'usuario', 'v': u.toJson()},
+        for (final p in _productos.values) {'t': 'producto', 'v': p.toJson()},
+        for (final p in _pedidos.values) {'t': 'pedido', 'v': p.toJson()},
+        for (final v in _ventas.values) {'t': 'venta', 'v': v.toJson()},
+        for (final MapEntry(:key, :value) in _operaciones.entries)
+          {'t': 'op', 'id': key, 'pedido': value.pedidoId, 'fecha': value.fecha.toUtc().toIso8601String()},
+      ];
+
   Future<void> _compactar() async {
     final limite = _reloj().subtract(const Duration(days: 7));
     _operaciones.removeWhere((_, op) => op.fecha.isBefore(limite));
-    await _diario.compactar([
-      {'t': 'config', 'v': _config},
-      {'t': 'seq', 'v': _secuencias},
-      for (final u in _usuarios.values) {'t': 'usuario', 'v': u.toJson()},
-      for (final p in _productos.values) {'t': 'producto', 'v': p.toJson()},
-      for (final p in _pedidos.values) {'t': 'pedido', 'v': p.toJson()},
-      for (final v in _ventas.values) {'t': 'venta', 'v': v.toJson()},
-      for (final MapEntry(:key, :value) in _operaciones.entries)
-        {'t': 'op', 'id': key, 'pedido': value.pedidoId, 'fecha': value.fecha.toUtc().toIso8601String()},
-    ]);
+    await _diario.compactar(_estadoCompleto());
+  }
+
+  // ── Respaldo ─────────────────────────────────────────────
+
+  /// Copia de todo lo que guarda la central, para cifrarla en un archivo de respaldo.
+  Future<List<Map<String, dynamic>>> exportar() => _enSerie(() async => _estadoCompleto());
+
+  /// Carga un respaldo en una central **vacía** (tablet nueva). Nunca sobrescribe
+  /// datos existentes. Conserva el código de enlace, así las tablets de los
+  /// meseros solo tienen que buscar la nueva IP; las sesiones se cierran porque
+  /// se genera un secreto nuevo.
+  Future<void> restaurar(List<Map<String, dynamic>> registros) => _enSerie(() async {
+        if (_usuarios.isNotEmpty || _pedidos.isNotEmpty) {
+          throw ErrorCentral(409, 'CENTRAL_CON_DATOS', 'Esta tablet ya tiene datos de una central; no se sobrescriben.');
+        }
+        final validado = _validarRespaldo(registros);
+        final lote = [
+          for (final r in validado)
+            if (r['t'] == 'config') {'t': 'config', 'v': {...r['v'] as Map<String, dynamic>, 'secreto': idAleatorio(32)}} else r,
+        ];
+        await _diario.compactar(lote);
+        _aplicar(lote);
+      });
+
+  /// Comprueba que el respaldo se pueda cargar entero antes de tocar nada.
+  static List<Map<String, dynamic>> _validarRespaldo(List<Map<String, dynamic>> registros) {
+    try {
+      final prueba = Central._(Diario(Directory.systemTemp), 1, DateTime.now).._aplicar(registros);
+      if (!prueba.inicializada || prueba.codigoEnlace.isEmpty) {
+        throw ErrorCentral(400, 'RESPALDO_INVALIDO', 'El respaldo no tiene administrador ni configuración.');
+      }
+      return registros;
+    } on ErrorCentral {
+      rethrow;
+    } on Object {
+      throw ErrorCentral(400, 'RESPALDO_INVALIDO', 'El respaldo tiene datos inválidos.');
+    }
   }
 
   // ── Instalación y enlace ─────────────────────────────────

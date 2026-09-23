@@ -13,6 +13,7 @@ import 'features/auth/login_page.dart';
 import 'features/auth/sesion.dart';
 import 'features/conexion/central_info_page.dart';
 import 'features/conexion/conexion_page.dart';
+import 'features/conexion/respaldos_page.dart';
 import 'features/inicio/inicio_page.dart';
 import 'features/mesas/mesas.dart';
 import 'features/mesero/captura_pedido_page.dart';
@@ -62,6 +63,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/admin/metricas', builder: (_, _) => const MetricasPage()),
       GoRoute(path: '/admin/historial', builder: (_, _) => const HistorialPage()),
       GoRoute(path: '/admin/central', builder: (_, _) => const CentralInfoPage()),
+      GoRoute(path: '/admin/respaldos', builder: (_, _) => const RespaldosPage()),
       GoRoute(path: '/admin/productos', builder: (_, _) => const ProductosAdminPage()),
       GoRoute(path: '/admin/usuarios', builder: (_, _) => const UsuariosAdminPage()),
       GoRoute(

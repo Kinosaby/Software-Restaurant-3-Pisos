@@ -1,10 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../central/central.dart';
+import '../../central/respaldo.dart';
 import '../../central/servidor_central.dart';
 import '../../core/plataforma.dart';
 import '../auth/auth_controller.dart';
@@ -76,5 +78,40 @@ class CentralLocalController extends Notifier<CentralLocal?> {
     final codigo = await local.central.renovarEnlace();
     await ref.read(conexionProvider.notifier).actualizarEnlace(codigo);
     return codigo;
+  }
+
+  /// Archivo `.3pisos` cifrado con [password] con todo lo que guarda la central.
+  Future<Uint8List> generarRespaldo(String password) async {
+    final local = state ?? (throw StateError('Esta tablet no es la central'));
+    final registros = await local.central.exportar();
+    final restaurante = local.central.nombre;
+    // PBKDF2 tarda un par de segundos: fuera del hilo de la interfaz.
+    return Isolate.run(() => cifrarRespaldo(registros, password, restaurante: restaurante));
+  }
+
+  /// Convierte esta tablet (sin datos) en la central restaurando un respaldo.
+  /// Después hay que iniciar sesión con los usuarios del respaldo.
+  Future<void> restaurar(Uint8List archivo, String password) async {
+    final registros = await Isolate.run(() => descifrarRespaldo(archivo, password));
+    final local = state ?? await CentralLocal.arrancar();
+    state = local;
+    await local.central.restaurar(registros);
+    await ref.read(conexionProvider.notifier).usar(local.conexion);
+  }
+}
+
+/// Fecha del último respaldo guardado desde esta tablet (para recordar hacerlo).
+final ultimoRespaldoProvider = NotifierProvider<UltimoRespaldo, DateTime?>(UltimoRespaldo.new);
+
+class UltimoRespaldo extends Notifier<DateTime?> {
+  static const _clave = 'ultimo_respaldo';
+
+  @override
+  DateTime? build() => DateTime.tryParse(ref.read(almacenSesionProvider).prefs.getString(_clave) ?? '');
+
+  Future<void> marcar() async {
+    final ahora = DateTime.now();
+    state = ahora;
+    await ref.read(almacenSesionProvider).prefs.setString(_clave, ahora.toIso8601String());
   }
 }

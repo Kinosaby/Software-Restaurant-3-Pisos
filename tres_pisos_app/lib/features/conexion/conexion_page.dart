@@ -1,19 +1,23 @@
 ﻿import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../central/respaldo.dart';
 import '../../central/seguridad.dart';
 import '../../central/servidor_central.dart';
 import '../../core/api_client.dart';
 import '../../core/config.dart';
+import '../../core/formato.dart';
 import '../../core/plataforma.dart';
 import '../../core/tema.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import '../auth/sesion.dart';
 import 'central_local.dart';
+import 'respaldos_page.dart';
 
 /// Elige cómo trabaja esta tablet: como central de cocina o conectada a la
 /// central por el Wi-Fi del restaurante. Nada necesita internet.
@@ -173,6 +177,48 @@ class _FormularioCentralState extends ConsumerState<_FormularioCentral> {
     }
   }
 
+  /// Tablet nueva que reemplaza a la central: carga todo desde un archivo `.3pisos`.
+  Future<void> _restaurar() async {
+    final Uint8List? archivo;
+    try {
+      archivo = await Plataforma.abrirArchivo();
+    } on Object catch (e) {
+      if (mounted) mostrarMensaje(context, 'No se pudo abrir el archivo: $e', error: true);
+      return;
+    }
+    if (archivo == null || !mounted) return;
+
+    final InfoRespaldo info;
+    try {
+      info = leerInfoRespaldo(archivo);
+    } on RespaldoInvalido catch (e) {
+      mostrarMensaje(context, e.mensaje, error: true);
+      return;
+    }
+    final ok = await confirmar(
+      context,
+      titulo: 'Restaurar respaldo',
+      mensaje: '${info.restaurante}\nGuardado el ${fechaCorta(info.creado)}.\n\n'
+          'Esta tablet pasará a ser la central con esos datos.',
+      accion: 'Restaurar',
+    );
+    if (!ok || !mounted) return;
+    final password = await pedirPasswordRespaldo(context, nueva: false);
+    if (password == null || !mounted) return;
+
+    setState(() => _ocupado = true);
+    try {
+      await ref.read(centralLocalProvider.notifier).restaurar(archivo, password);
+      if (!mounted) return;
+      mostrarMensaje(context, 'Respaldo cargado. Inicia sesión con un usuario del respaldo.');
+      context.go('/login');
+    } on Object catch (e) {
+      if (mounted) mostrarMensaje(context, 'No se pudo restaurar: $e', error: true);
+    } finally {
+      if (mounted) setState(() => _ocupado = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Form(
@@ -217,6 +263,17 @@ class _FormularioCentralState extends ConsumerState<_FormularioCentral> {
                 ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2.5))
                 : const Icon(Icons.power_settings_new),
             label: const Text('Iniciar central'),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            '¿Esta tablet reemplaza a una central perdida o dañada?',
+            style: TextStyle(color: Colores.apagado),
+          ),
+          const SizedBox(height: 6),
+          OutlinedButton.icon(
+            onPressed: _ocupado ? null : _restaurar,
+            icon: const Icon(Icons.restore),
+            label: const Text('Restaurar desde un respaldo'),
           ),
         ],
       ),

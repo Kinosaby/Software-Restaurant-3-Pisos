@@ -25,7 +25,17 @@ El código de enlace y la IP se ven en la tablet central, en **Gestión → Cent
 | Cobros, cambios de estado y ediciones sin conexión | No se hacen: necesitan confirmación de la central en el momento. |
 | Se reinicia la tablet central | Recupera todo: cada operación se escribe a disco antes de responder. |
 
-Limitaciones: la central debe tener la app **abierta** y estar conectada a la corriente (la pantalla se mantiene encendida sola). Tablets que no comparten Wi-Fi no pueden pasarse pedidos. Todos los datos viven en la tablet central: no hay copia en la nube.
+Limitaciones: la central debe tener la app **abierta** y estar conectada a la corriente (la pantalla se mantiene encendida sola). Tablets que no comparten Wi-Fi no pueden pasarse pedidos. Todos los datos viven en la tablet central: no hay copia en la nube, por eso los respaldos son imprescindibles.
+
+## Respaldos
+
+En la tablet central, **Gestión → Respaldos**:
+
+- **Guardar en…** abre el selector de Android (Descargas, Drive, memoria USB). **Enviar por…** lo manda por WhatsApp, correo o Drive.
+- El archivo `.3pisos` contiene usuarios, menú, pedidos, ventas y el código de enlace, comprimido y cifrado con AES-256-GCM. La clave se deriva de la contraseña que elijas (mínimo 8 caracteres) con PBKDF2-HMAC-SHA256 y 200 000 iteraciones. **Sin la contraseña no se puede abrir**: no hay forma de recuperarla.
+- Gestión marca en rojo la opción si nunca se ha respaldado o si pasaron 7 días o más.
+
+Para **restaurar** en una tablet nueva: instala la app → **Central de cocina** → **Restaurar desde un respaldo** → elige el archivo y escribe la contraseña. Nunca sobrescribe una central que ya tiene datos. Las sesiones se cierran (secreto nuevo), pero el código de enlace se conserva: en cada tablet de mesero solo hay que buscar de nuevo la central (su IP cambia) e iniciar sesión.
 
 ## Qué hace cada rol
 
@@ -57,7 +67,7 @@ flutter run
 lib/
   main.dart            Carga la sesión y, en la tablet de cocina, arranca la central
   app.dart             Router con redirección por conexión, sesión y rol
-  central/             La central: reglas de negocio, diario en disco, seguridad y servidor HTTP/WebSocket
+  central/             La central: reglas de negocio, diario en disco, seguridad, respaldos y servidor HTTP/WebSocket
   core/                Cliente HTTP, almacenamiento local, canal nativo, tema y widgets comunes
   features/
     conexion/          Elegir modo, enlazar con la central y pantalla de la central
@@ -69,7 +79,7 @@ lib/
     caja/              Caja, cobro y tickets
     avisos/            Alertas con sonido y vibración
     admin/             Métricas, historial, productos y usuarios
-android/app/src/main/kotlin/.../MainActivity.kt   Sonido, vibración, pantalla encendida y compartir
+android/app/src/main/kotlin/.../MainActivity.kt   Sonido, vibración, pantalla encendida, compartir y selector de archivos
 ```
 
 ### Cómo guarda los datos la central

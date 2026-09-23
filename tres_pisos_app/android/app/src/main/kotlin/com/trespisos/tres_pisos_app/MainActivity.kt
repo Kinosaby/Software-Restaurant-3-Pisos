@@ -24,6 +24,52 @@ class MainActivity : FlutterActivity() {
     private var tonos: ToneGenerator? = null
     private var bloqueoMulticast: WifiManager.MulticastLock? = null
 
+    // Selector de archivos en curso (guardar o abrir un respaldo).
+    private var pendiente: MethodChannel.Result? = null
+    private var porGuardar: ByteArray? = null
+
+    companion object {
+        private const val PEDIR_GUARDAR = 41
+        private const val PEDIR_ABRIR = 42
+        private const val LIMITE_ARCHIVO = 64 * 1024 * 1024
+    }
+
+    @Deprecated("Se usa startActivityForResult para no depender de androidx.activity")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != PEDIR_GUARDAR && requestCode != PEDIR_ABRIR) return
+        val resultado = pendiente ?: return
+        val bytes = porGuardar
+        pendiente = null
+        porGuardar = null
+        val uri = data?.data
+        if (resultCode != RESULT_OK || uri == null) {
+            resultado.success(if (requestCode == PEDIR_GUARDAR) false else null)
+            return
+        }
+        try {
+            if (requestCode == PEDIR_GUARDAR) {
+                contentResolver.openOutputStream(uri, "wt")!!.use { it.write(bytes!!) }
+                resultado.success(true)
+            } else {
+                val leidos = contentResolver.openInputStream(uri)!!.use { entrada ->
+                    val salida = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = entrada.read(buffer)
+                        if (n < 0) break
+                        salida.write(buffer, 0, n)
+                        if (salida.size() > LIMITE_ARCHIVO) throw IllegalStateException("Archivo demasiado grande")
+                    }
+                    salida.toByteArray()
+                }
+                resultado.success(leidos)
+            }
+        } catch (e: Exception) {
+            resultado.error("ARCHIVO", e.message, null)
+        }
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "tres_pisos/plataforma")
@@ -43,12 +89,54 @@ class MainActivity : FlutterActivity() {
                             resultado.success(null)
                         }
                         "compartirImagen" -> {
-                            compartirImagen(
+                            compartirArchivo(
                                 llamada.argument<ByteArray>("bytes")!!,
                                 llamada.argument<String>("nombre") ?: "ticket.png",
+                                "image/png",
                                 llamada.argument<String>("texto"),
                             )
                             resultado.success(null)
+                        }
+                        "compartirArchivo" -> {
+                            compartirArchivo(
+                                llamada.argument<ByteArray>("bytes")!!,
+                                llamada.argument<String>("nombre") ?: "archivo",
+                                llamada.argument<String>("tipo") ?: "application/octet-stream",
+                                llamada.argument<String>("texto"),
+                            )
+                            resultado.success(null)
+                        }
+                        // Guarda donde elija el usuario (Descargas, Drive, USB...). Devuelve false si cancela.
+                        "guardarArchivo" -> {
+                            if (pendiente != null) {
+                                resultado.error("OCUPADO", "Ya hay un selector de archivos abierto", null)
+                            } else {
+                                porGuardar = llamada.argument<ByteArray>("bytes")!!
+                                pendiente = resultado
+                                startActivityForResult(
+                                    Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                                        addCategory(Intent.CATEGORY_OPENABLE)
+                                        type = llamada.argument<String>("tipo") ?: "application/octet-stream"
+                                        putExtra(Intent.EXTRA_TITLE, llamada.argument<String>("nombre") ?: "archivo")
+                                    },
+                                    PEDIR_GUARDAR,
+                                )
+                            }
+                        }
+                        // Devuelve los bytes del archivo elegido, o null si cancela.
+                        "abrirArchivo" -> {
+                            if (pendiente != null) {
+                                resultado.error("OCUPADO", "Ya hay un selector de archivos abierto", null)
+                            } else {
+                                pendiente = resultado
+                                startActivityForResult(
+                                    Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                                        addCategory(Intent.CATEGORY_OPENABLE)
+                                        type = "*/*"
+                                    },
+                                    PEDIR_ABRIR,
+                                )
+                            }
                         }
                         // Almacenamiento privado y persistente (no la caché, que Android puede vaciar).
                         "carpetaDatos" -> resultado.success(filesDir.absolutePath)
@@ -102,18 +190,18 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun compartirImagen(bytes: ByteArray, nombre: String, texto: String?) {
+    private fun compartirArchivo(bytes: ByteArray, nombre: String, tipo: String, texto: String?) {
         val carpeta = File(cacheDir, "compartir").apply { mkdirs() }
         val archivo = File(carpeta, nombre.replace(Regex("[^A-Za-z0-9._-]"), "_"))
         archivo.writeBytes(bytes)
         val uri = FileProvider.getUriForFile(this, "$packageName.archivos", archivo)
         val envio = Intent(Intent.ACTION_SEND).apply {
-            type = "image/png"
+            type = tipo
             putExtra(Intent.EXTRA_STREAM, uri)
             if (texto != null) putExtra(Intent.EXTRA_TEXT, texto)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        startActivity(Intent.createChooser(envio, "Compartir ticket"))
+        startActivity(Intent.createChooser(envio, "Compartir"))
     }
 
     /** Android descarta los paquetes UDP de difusión si no se pide este bloqueo. */
