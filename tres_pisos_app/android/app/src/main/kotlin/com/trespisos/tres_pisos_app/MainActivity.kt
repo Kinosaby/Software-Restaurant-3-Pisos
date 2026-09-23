@@ -11,6 +11,9 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.view.WindowManager
 import androidx.core.content.FileProvider
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -70,12 +73,47 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    // Enlace trespisos://enlace?… con el que se abrió la app (QR leído con la cámara del sistema).
+    private var enlacePendiente: String? = null
+    private var canal: MethodChannel? = null
+
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        enlacePendiente = enlaceDe(intent)
+        super.onCreate(savedInstanceState)
+    }
+
+    /// La app ya estaba abierta (launchMode singleTop): se avisa a Dart en el momento.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val enlace = enlaceDe(intent) ?: return
+        canal?.invokeMethod("enlaceRecibido", enlace) ?: run { enlacePendiente = enlace }
+    }
+
+    private fun enlaceDe(intent: Intent?): String? {
+        val datos = intent?.data ?: return null
+        return if (intent.action == Intent.ACTION_VIEW && datos.scheme == "trespisos") datos.toString() else null
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "tres_pisos/plataforma")
-            .setMethodCallHandler { llamada, resultado ->
+        canal = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "tres_pisos/plataforma")
+        canal!!.setMethodCallHandler { llamada, resultado ->
                 try {
                     when (llamada.method) {
+                        "enlaceInicial" -> {
+                            resultado.success(enlacePendiente)
+                            enlacePendiente = null
+                        }
+                        // Escáner de Google Play Services: no pide permiso de cámara. null si se cancela.
+                        "escanearQr" -> {
+                            val opciones = GmsBarcodeScannerOptions.Builder()
+                                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                                .build()
+                            GmsBarcodeScanning.getClient(this, opciones).startScan()
+                                .addOnSuccessListener { codigo -> resultado.success(codigo.rawValue) }
+                                .addOnCanceledListener { resultado.success(null) }
+                                .addOnFailureListener { e -> resultado.error("ESCANER", e.message, null) }
+                        }
                         "sonar" -> {
                             sonar(llamada.argument<String>("tipo") ?: "aviso")
                             resultado.success(null)

@@ -17,6 +17,7 @@ import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import '../auth/sesion.dart';
 import 'central_local.dart';
+import 'enlace_qr.dart';
 import 'respaldos_page.dart';
 
 /// Elige cómo trabaja esta tablet: como central de cocina o conectada a la
@@ -29,7 +30,10 @@ class ConexionPage extends ConsumerStatefulWidget {
 }
 
 class _ConexionPageState extends ConsumerState<ConexionPage> {
-  late ModoConexion _modo = ref.read(conexionProvider)?.modo ?? ModoConexion.enlazada;
+  // Con un QR escaneado se abre directamente en "Conectada a la central".
+  late ModoConexion _modo = ref.read(enlacePendienteProvider) != null
+      ? ModoConexion.enlazada
+      : ref.read(conexionProvider)?.modo ?? ModoConexion.enlazada;
 
   @override
   Widget build(BuildContext context) {
@@ -293,6 +297,7 @@ class _FormularioEnlaceState extends ConsumerState<_FormularioEnlace> {
   final _codigo = TextEditingController();
   List<CentralEncontrada> _encontradas = const [];
   bool _buscando = false;
+  bool _buscado = false;
   bool _ocupado = false;
 
   @override
@@ -303,7 +308,13 @@ class _FormularioEnlaceState extends ConsumerState<_FormularioEnlace> {
       _ip.text = Uri.parse(actual!.url).host;
       _codigo.text = actual.enlace ?? '';
     }
-    unawaited(_buscar());
+    // La app se abrió (o volvió) con el QR de una central: se pide confirmar.
+    final pendiente = ref.read(enlacePendienteProvider);
+    if (pendiente != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_conectarCon(pendiente));
+      });
+    }
   }
 
   @override
@@ -313,8 +324,83 @@ class _FormularioEnlaceState extends ConsumerState<_FormularioEnlace> {
     super.dispose();
   }
 
+  Future<void> _escanear() async {
+    final String? texto;
+    try {
+      texto = await Plataforma.escanearQr();
+    } on Object {
+      if (mounted) {
+        mostrarMensaje(
+          context,
+          'El escáner no está disponible en esta tablet. Abre la cámara y apunta al QR, o escribe la IP y el código.',
+          error: true,
+        );
+      }
+      return;
+    }
+    if (texto == null || !mounted) return;
+    final datos = DatosEnlace.leer(texto);
+    if (datos == null) {
+      mostrarMensaje(context, 'Ese QR no es el de una central de Tres Pisos.', error: true);
+      return;
+    }
+    await _conectarCon(datos);
+  }
+
+  /// Confirma, prueba cada IP del QR y enlaza con la primera que responde con ese código.
+  Future<void> _conectarCon(DatosEnlace datos) async {
+    final pendiente = ref.read(enlacePendienteProvider.notifier);
+    if (ref.read(centralLocalProvider) != null) {
+      pendiente.descartar();
+      mostrarMensaje(context, 'Esta tablet es la central: el QR se escanea desde las tablets de los meseros.');
+      return;
+    }
+    final ok = await confirmar(
+      context,
+      titulo: 'Conectar a la central',
+      mensaje: '${datos.nombre ?? 'Central de cocina'}\n${datos.ips.join(' · ')}\n\n'
+          'Solo conecta tablets a la central de tu restaurante.',
+      accion: 'Conectar',
+    );
+    pendiente.descartar();
+    if (!ok || !mounted) return;
+
+    setState(() => _ocupado = true);
+    try {
+      ApiException? ultimoError;
+      for (final url in datos.urls) {
+        try {
+          await ApiClient(servidor: url, enlace: datos.codigo).get('/api/central/info');
+          if (!mounted) return;
+          await ref
+              .read(conexionProvider.notifier)
+              .usar(Conexion(modo: ModoConexion.enlazada, url: url, enlace: datos.codigo));
+          if (mounted) context.go('/login');
+          return;
+        } on ApiException catch (e) {
+          ultimoError = e;
+        }
+      }
+      if (mounted) {
+        mostrarMensaje(
+          context,
+          ultimoError == null || ultimoError.sinConexion
+              ? 'No se encontró la central. Comprueba que las dos tablets estén en el mismo Wi-Fi '
+                  'y que la app de cocina esté abierta.'
+              : ultimoError.mensaje,
+          error: true,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _ocupado = false);
+    }
+  }
+
   Future<void> _buscar() async {
-    setState(() => _buscando = true);
+    setState(() {
+      _buscando = true;
+      _buscado = true;
+    });
     await Plataforma.multicast(true);
     final encontradas = await buscarCentrales();
     await Plataforma.multicast(false);
@@ -326,7 +412,7 @@ class _FormularioEnlaceState extends ConsumerState<_FormularioEnlace> {
     });
   }
 
-  Future<void> _conectar() async {
+  Future<void> _conectarManual() async {
     final host = _ip.text.trim();
     final codigo = normalizarCodigo(_codigo.text);
     if (host.isEmpty || codigo.length != 9) {
@@ -350,64 +436,90 @@ class _FormularioEnlaceState extends ConsumerState<_FormularioEnlace> {
 
   @override
   Widget build(BuildContext context) {
+    // QR recibido con esta pantalla ya abierta (cámara del sistema).
+    ref.listen(enlacePendienteProvider, (_, datos) {
+      if (datos != null) unawaited(_conectarCon(datos));
+    });
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Text(
-          'En la tablet de cocina abre Gestión → Central para ver su IP y el código de enlace. '
+          'En la tablet de cocina abre Gestión → Central de cocina y escanea el QR que aparece. '
           'Las dos tablets deben estar en el mismo Wi-Fi (no hace falta internet).',
           style: TextStyle(color: Colores.apagado),
         ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Text('Centrales en el Wi-Fi', style: Theme.of(context).textTheme.titleSmall),
-            const Spacer(),
-            TextButton.icon(
-              onPressed: _buscando ? null : _buscar,
-              icon: _buscando
-                  ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.wifi_find),
-              label: Text(_buscando ? 'Buscando…' : 'Buscar'),
-            ),
-          ],
-        ),
-        if (!_buscando && _encontradas.isEmpty)
-          const Text(
-            'No se encontró ninguna automáticamente. Escribe la IP a mano.',
-            style: TextStyle(color: Colores.apagado),
-          ),
-        for (final c in _encontradas)
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.soup_kitchen_outlined, color: Colores.acento),
-              title: Text(c.nombre),
-              subtitle: Text(c.ip),
-              trailing: _ip.text == c.ip ? const Icon(Icons.check_circle, color: Colores.exito) : null,
-              onTap: () => setState(() => _ip.text = c.ip),
-            ),
-          ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _ip,
-          keyboardType: TextInputType.url,
-          decoration: const InputDecoration(labelText: 'IP de la central', hintText: '192.168.1.20'),
-        ),
-        const SizedBox(height: 10),
-        TextField(
-          controller: _codigo,
-          textCapitalization: TextCapitalization.characters,
-          decoration: const InputDecoration(labelText: 'Código de enlace', hintText: 'K7P2-9QXM'),
-        ),
         const SizedBox(height: 16),
         FilledButton.icon(
-          onPressed: _ocupado ? null : _conectar,
+          onPressed: _ocupado ? null : _escanear,
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(64)),
           icon: _ocupado
-              ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2.5))
-              : const Icon(Icons.link),
-          label: const Text('Conectar'),
+              ? const SizedBox.square(dimension: 22, child: CircularProgressIndicator(strokeWidth: 2.5))
+              : const Icon(Icons.qr_code_scanner, size: 28),
+          label: const Text('Escanear QR de la central', style: TextStyle(fontSize: 16)),
+        ),
+        const SizedBox(height: 16),
+        Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            title: const Text('Sin cámara: escribir IP y código', style: TextStyle(color: Colores.apagado)),
+            onExpansionChanged: (abierto) {
+              if (abierto && !_buscado) unawaited(_buscar());
+            },
+            children: [
+              Row(
+                children: [
+                  Text('Centrales en el Wi-Fi', style: Theme.of(context).textTheme.titleSmall),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: _buscando ? null : _buscar,
+                    icon: _buscando
+                        ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.wifi_find),
+                    label: Text(_buscando ? 'Buscando…' : 'Buscar'),
+                  ),
+                ],
+              ),
+              if (_buscado && !_buscando && _encontradas.isEmpty)
+                const Text(
+                  'No se encontró ninguna automáticamente. Escribe la IP a mano.',
+                  style: TextStyle(color: Colores.apagado),
+                ),
+              for (final c in _encontradas)
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.soup_kitchen_outlined, color: Colores.acento),
+                    title: Text(c.nombre),
+                    subtitle: Text(c.ip),
+                    trailing: _ip.text == c.ip ? const Icon(Icons.check_circle, color: Colores.exito) : null,
+                    onTap: () => setState(() => _ip.text = c.ip),
+                  ),
+                ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _ip,
+                keyboardType: TextInputType.url,
+                decoration: const InputDecoration(labelText: 'IP de la central', hintText: '192.168.1.20'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _codigo,
+                textCapitalization: TextCapitalization.characters,
+                decoration: const InputDecoration(labelText: 'Código de enlace', hintText: 'K7P2-9QXM'),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _ocupado ? null : _conectarManual,
+                icon: const Icon(Icons.link),
+                label: const Text('Conectar'),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ],
     );
   }
 }
+

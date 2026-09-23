@@ -8,6 +8,7 @@ import '../../central/servidor_central.dart';
 import '../../core/tema.dart';
 import '../../core/widgets.dart';
 import 'central_local.dart';
+import 'enlace_qr.dart';
 
 final _ipsProvider = FutureProvider.autoDispose<List<String>>((ref) => ipsLocales());
 
@@ -74,10 +75,25 @@ class _CentralInfoPageState extends ConsumerState<CentralInfoPage> {
                         Text('Para enlazar una tablet', style: texto.titleMedium),
                         const SizedBox(height: 4),
                         const Text(
-                          'En la tablet del mesero elige "Conectar a la central" y escribe estos datos.',
+                          'En la tablet del mesero elige "Conectada a la central" y toca "Escanear QR". '
+                          'También sirve la cámara normal de la tablet.',
                           style: TextStyle(color: Colores.apagado),
                         ),
                         const SizedBox(height: 16),
+                        if (ips.value case final lista? when lista.isNotEmpty)
+                          Center(
+                            child: VistaQr(
+                              datos: DatosEnlace(
+                                ips: ordenarIps(lista),
+                                puerto: local.servidor.puertoEnUso,
+                                codigo: local.central.codigoEnlace,
+                                nombre: local.central.nombre,
+                              ).uri.toString(),
+                            ),
+                          ),
+                        const SizedBox(height: 16),
+                        const Text('Sin cámara: escribe en la tablet del mesero', style: TextStyle(color: Colores.apagado)),
+                        const SizedBox(height: 8),
                         const Text('IP de la central', style: TextStyle(color: Colores.apagado)),
                         ips.when(
                           loading: () => const LinearProgressIndicator(),

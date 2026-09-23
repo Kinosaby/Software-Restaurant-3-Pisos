@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -38,6 +40,35 @@ abstract final class Plataforma {
   static Future<Uint8List?> abrirArchivo() => _canal.invokeMethod<Uint8List>('abrirArchivo');
 
   static Future<void> multicast(bool activo) => _llamar('multicast', {'activo': activo});
+
+  /// Escanea un QR con el escáner de Google Play Services. `null` si se cancela;
+  /// lanza [PlatformException] si el escáner no está disponible en la tablet.
+  static Future<String?> escanearQr() => _canal.invokeMethod<String>('escanearQr');
+
+  /// Enlace `trespisos://…` con el que se abrió la app (QR leído con la cámara del sistema).
+  static Future<String?> enlaceInicial() async {
+    try {
+      return await _canal.invokeMethod<String>('enlaceInicial');
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  static final _enlaces = StreamController<String>.broadcast();
+  static bool _escuchando = false;
+
+  /// Enlaces que llegan con la app ya abierta.
+  static Stream<String> get enlaces {
+    if (!_escuchando) {
+      _escuchando = true;
+      _canal.setMethodCallHandler((llamada) async {
+        if (llamada.method == 'enlaceRecibido' && llamada.arguments is String) {
+          _enlaces.add(llamada.arguments as String);
+        }
+      });
+    }
+    return _enlaces.stream;
+  }
 
   /// Carpeta privada y persistente de la app (`filesDir` en Android).
   static Future<String> carpetaDatos() async {

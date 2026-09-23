@@ -13,6 +13,7 @@ import 'features/auth/login_page.dart';
 import 'features/auth/sesion.dart';
 import 'features/conexion/central_info_page.dart';
 import 'features/conexion/conexion_page.dart';
+import 'features/conexion/enlace_qr.dart';
 import 'features/conexion/respaldos_page.dart';
 import 'features/inicio/inicio_page.dart';
 import 'features/mesas/mesas.dart';
@@ -26,6 +27,7 @@ final routerProvider = Provider<GoRouter>((ref) {
   final cambiosSesion = ValueNotifier<int>(0);
   ref.listen(authControllerProvider, (_, _) => cambiosSesion.value++);
   ref.listen(conexionProvider, (_, _) => cambiosSesion.value++);
+  ref.listen(enlacePendienteProvider, (_, _) => cambiosSesion.value++);
 
   final router = GoRouter(
     initialLocation: '/',
@@ -35,6 +37,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Primera vez: hay que decidir si esta tablet es la central o se conecta a ella.
       if (ref.read(conexionProvider) == null) return ruta == '/conexion' ? null : '/conexion';
       if (ruta == '/conexion') return null;
+      // Se escaneó el QR de una central: la pantalla de conexión pide confirmar.
+      if (ref.read(enlacePendienteProvider) != null) return '/conexion';
 
       final sesion = ref.read(authControllerProvider);
       if (sesion == null) return ruta == '/login' ? null : '/login';

@@ -9,9 +9,18 @@ La primera vez que se abre, la app pregunta cómo trabajará esa tablet (se pued
 | Modo | Para qué |
 |------|----------|
 | **Central de cocina** | La tablet de cocina guarda usuarios, menú, pedidos y ventas, y atiende a las demás por el Wi-Fi (puerto 8787). Arranca con el menú del restaurante (54 productos). |
-| **Conectada a la central** | Tablets de meseros o caja. Encuentran la central solas en el Wi-Fi (o se escribe su IP) y se enlazan con su **código de enlace**. |
+| **Conectada a la central** | Tablets de meseros o caja. Se enlazan **escaneando el QR** de la central. |
 
 El router Wi-Fi solo tiene que dar red local: no necesita internet.
+
+### Enlazar una tablet
+
+1. En la tablet de cocina: **Gestión → Central de cocina** muestra un **QR** con la IP, el puerto y el código de enlace.
+2. En la tablet del mesero: **Conectada a la central → Escanear QR de la central**, confirmar y iniciar sesión.
+
+El escáner es el de Google Play Services: no pide permiso de cámara y se descarga al instalar la app (esa primera vez la tablet debe tener internet). Si no está disponible, sirve la **cámara normal** de la tablet o Google Lens: el QR es un enlace `trespisos://enlace?...` que abre la app directamente. Sin cámara, en "Sin cámara: escribir IP y código" se busca la central en el Wi-Fi o se escribe su IP y el código.
+
+Antes de cambiar de central la app siempre pide confirmación, así un QR ajeno no puede redirigir la tablet sin que nadie lo note.
 
 El código de enlace y la IP se ven en la tablet central, en **Gestión → Central de cocina**. Si se pierde una tablet, ahí mismo se renueva el código: se cierran todas las sesiones y cada tablet vuelve a enlazarse.
 

@@ -30,7 +30,18 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- QR de la central leído con la cámara del sistema o Google Lens -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="trespisos" android:host="enlace" />
+            </intent-filter>
         </activity>
+        <!-- Descarga el escáner de QR al instalar la app (mientras aún hay internet), no la primera vez que se usa. -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="barcode_ui" />
         <!-- Tickets compartidos desde la caché de la app. -->
         <provider
             android:name="androidx.core.content.FileProvider"

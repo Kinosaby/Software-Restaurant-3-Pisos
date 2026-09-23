@@ -75,4 +75,6 @@ flutter {
 dependencies {
     // FileProvider para compartir tickets (MainActivity.compartirImagen).
     implementation("androidx.core:core:1.13.1")
+    // Escáner de QR de Google Play Services (MainActivity "escanearQr"): sin permiso de cámara.
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 }

@@ -7,7 +7,9 @@ import 'app.dart';
 import 'features/auth/almacen_sesion.dart';
 import 'features/auth/auth_controller.dart';
 import 'features/auth/sesion.dart';
+import 'core/plataforma.dart';
 import 'features/conexion/central_local.dart';
+import 'features/conexion/enlace_qr.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -35,11 +37,15 @@ Future<void> main() async {
     }
   }
 
+  // ¿Se abrió la app escaneando el QR de la central con la cámara del sistema?
+  final enlace = DatosEnlace.leer(await Plataforma.enlaceInicial());
+
   runApp(ProviderScope(
     overrides: [
       almacenSesionProvider.overrideWithValue(almacen),
       datosArranqueProvider.overrideWithValue(arranque),
       centralArranqueProvider.overrideWithValue(central),
+      enlaceInicialProvider.overrideWithValue(enlace),
     ],
     child: const TresPisosApp(),
   ));
