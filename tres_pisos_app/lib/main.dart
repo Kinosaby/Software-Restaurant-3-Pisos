@@ -1,52 +1,52 @@
-// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
-import 'core/services/api_service.dart';
-import 'core/services/auth_service.dart';
-import 'core/theme/app_theme.dart';
-import 'features/auth/login_screen.dart';
-import 'features/menu/role_menu_screen.dart';
-import 'features/mesero/mesero_screen.dart';
-import 'features/cocina/cocina_screen.dart';
-import 'features/admin/admin_screen.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-void main() async {
+import 'app.dart';
+import 'features/auth/almacen_sesion.dart';
+import 'features/auth/auth_controller.dart';
+import 'features/auth/sesion.dart';
+import 'core/plataforma.dart';
+import 'features/conexion/central_local.dart';
+import 'features/conexion/enlace_qr.dart';
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await ApiService.init();
-  runApp(const ProviderScope(child: TresPisosApp()));
-}
+  await initializeDateFormatting('es');
 
-final _router = GoRouter(
-  initialLocation: '/login',
-  redirect: (context, state) async {
-    final loggedIn = await AuthService.isLoggedIn();
-    final isLogin  = state.matchedLocation == '/login';
-    if (!loggedIn && !isLogin) return '/login';
-    if (loggedIn && isLogin) {
-      final role = await AuthService.getRole();
-      return switch (role) { 'mesero' => '/mesero', 'cocina' => '/cocina', _ => '/menu' };
+  // Se lee la sesión guardada antes de pintar para abrir directo en la pantalla del rol.
+  final almacen = AlmacenSesion(await SharedPreferences.getInstance());
+  var arranque = almacen.cargar();
+
+  // En la tablet de cocina la central arranca con la app: las demás dependen de ella.
+  CentralLocal? central;
+  if (arranque.conexion?.modo == ModoConexion.central) {
+    try {
+      central = await CentralLocal.arrancar();
+      // El puerto o el código de enlace pueden haber cambiado desde la última vez.
+      final conexion = central.conexion;
+      await almacen.guardarConexion(conexion);
+      final sesion = arranque.sesion;
+      arranque = DatosArranque(
+        conexion: conexion,
+        sesion: sesion == null ? null : Sesion(conexion: conexion, token: sesion.token, usuario: sesion.usuario),
+      );
+    } on Object catch (e) {
+      debugPrint('No se pudo arrancar la central: $e');
     }
-    return null;
-  },
-  routes: [
-    GoRoute(path: '/login',  builder: (_, __) => const LoginScreen()),
-    GoRoute(path: '/menu',   builder: (_, __) => const RoleMenuScreen()),
-    GoRoute(path: '/mesero', builder: (_, __) => const MeseroScreen()),
-    GoRoute(path: '/cocina', builder: (_, __) => const CocinaScreen()),
-    GoRoute(path: '/admin',  builder: (_, __) => const AdminScreen()),
-  ],
-);
-
-class TresPisosApp extends StatelessWidget {
-  const TresPisosApp({super.key});
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp.router(
-      title: '3 Pisos POS',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.dark,
-      routerConfig: _router,
-    );
   }
+
+  // ¿Se abrió la app escaneando el QR de la central con la cámara del sistema?
+  final enlace = DatosEnlace.leer(await Plataforma.enlaceInicial());
+
+  runApp(ProviderScope(
+    overrides: [
+      almacenSesionProvider.overrideWithValue(almacen),
+      datosArranqueProvider.overrideWithValue(arranque),
+      centralArranqueProvider.overrideWithValue(central),
+      enlaceInicialProvider.overrideWithValue(enlace),
+    ],
+    child: const TresPisosApp(),
+  ));
 }

@@ -12,6 +12,7 @@ Este es el backend profesional y la aplicación Single Page Application (SPA) pa
 *   **Comunicación en Tiempo Real:** Uso de `socket.io` para actualizar el estado de las órdenes entre Meseros, Cocina y Caja instantáneamente.
 *   **Base de Datos PostgreSQL:** Almacenamiento seguro, conectado mediante el driver `pg`.
 *   **Interfaz de Usuario (SPA):** Ubicada dentro de la carpeta `restaurante-app/`. Interfaz fluida sin recargas, utilizando Vanilla JS, HTML y CSS.
+*   **App Android:** Cliente Flutter en `tres_pisos_app/`. Consulta `tres_pisos_app/README.md`.
 
 ## Estructura del Proyecto
 
@@ -21,6 +22,7 @@ Este es el backend profesional y la aplicación Single Page Application (SPA) pa
     *   `src/middlewares/`: Middlewares como autenticación (`auth.middleware.js`) y manejo de errores.
     *   `src/sockets/`: Gestión de WebSockets.
 *   `restaurante-app/`: Aplicación frontend SPA (HTML, CSS, JS).
+*   `tres_pisos_app/`: App Android (Flutter).
 *   `server.js`: Punto de entrada principal del servidor Express.
 
 ## Requisitos
