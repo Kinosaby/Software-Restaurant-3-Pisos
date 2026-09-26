@@ -109,6 +109,12 @@ class TresPisosApp extends ConsumerWidget {
       supportedLocales: const [Locale('es', 'MX'), Locale('es')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       routerConfig: ref.watch(routerProvider),
+      // Android 15+ dibuja la app debajo de la barra de navegación del sistema: sin
+      // esto los botones de abajo quedan tapados. El AppBar ya respeta la barra de arriba.
+      builder: (context, child) => ColoredBox(
+        color: Colores.fondo,
+        child: SafeArea(top: false, child: child!),
+      ),
     );
   }
 }
