@@ -11,6 +11,7 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.view.WindowManager
 import androidx.core.content.FileProvider
+import com.google.mlkit.common.MlKitException
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
@@ -89,6 +90,43 @@ class MainActivity : FlutterActivity() {
         canal?.invokeMethod("enlaceRecibido", enlace) ?: run { enlacePendiente = enlace }
     }
 
+    private var escaneando = false
+
+    /**
+     * Escáner de Google Play Services: no pide permiso de cámara. null si se cancela.
+     * Errores: "DESCARGANDO" (Google aún no baja el módulo del escáner) o "ESCANER".
+     */
+    private fun escanearQr(resultado: MethodChannel.Result) {
+        // Un segundo toque con el escáner abierto lo rechazaría ML Kit (TASK_IN_PROGRESS).
+        if (escaneando) {
+            resultado.success(null)
+            return
+        }
+        escaneando = true
+        val opciones = GmsBarcodeScannerOptions.Builder()
+            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+            .build()
+        GmsBarcodeScanning.getClient(this, opciones).startScan()
+            .addOnSuccessListener { codigo ->
+                escaneando = false
+                resultado.success(codigo.rawValue)
+            }
+            .addOnCanceledListener {
+                escaneando = false
+                resultado.success(null)
+            }
+            .addOnFailureListener { e ->
+                escaneando = false
+                when ((e as? MlKitException)?.errorCode) {
+                    MlKitException.CODE_SCANNER_CANCELLED,
+                    MlKitException.CODE_SCANNER_TASK_IN_PROGRESS -> resultado.success(null)
+                    MlKitException.UNAVAILABLE,
+                    MlKitException.CODE_SCANNER_UNAVAILABLE -> resultado.error("DESCARGANDO", e.message, null)
+                    else -> resultado.error("ESCANER", e.message, null)
+                }
+            }
+    }
+
     private fun enlaceDe(intent: Intent?): String? {
         val datos = intent?.data ?: return null
         return if (intent.action == Intent.ACTION_VIEW && datos.scheme == "trespisos") datos.toString() else null
@@ -104,16 +142,7 @@ class MainActivity : FlutterActivity() {
                             resultado.success(enlacePendiente)
                             enlacePendiente = null
                         }
-                        // Escáner de Google Play Services: no pide permiso de cámara. null si se cancela.
-                        "escanearQr" -> {
-                            val opciones = GmsBarcodeScannerOptions.Builder()
-                                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-                                .build()
-                            GmsBarcodeScanning.getClient(this, opciones).startScan()
-                                .addOnSuccessListener { codigo -> resultado.success(codigo.rawValue) }
-                                .addOnCanceledListener { resultado.success(null) }
-                                .addOnFailureListener { e -> resultado.error("ESCANER", e.message, null) }
-                        }
+                        "escanearQr" -> escanearQr(resultado)
                         "sonar" -> {
                             sonar(llamada.argument<String>("tipo") ?: "aviso")
                             resultado.success(null)

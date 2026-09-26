@@ -1,7 +1,7 @@
 ﻿import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -326,17 +326,22 @@ class _FormularioEnlaceState extends ConsumerState<_FormularioEnlace> {
 
   Future<void> _escanear() async {
     final String? texto;
+    setState(() => _ocupado = true);
     try {
       texto = await Plataforma.escanearQr();
-    } on Object {
+    } on PlatformException catch (e) {
       if (mounted) {
         mostrarMensaje(
           context,
-          'El escáner no está disponible en esta tablet. Abre la cámara y apunta al QR, o escribe la IP y el código.',
+          e.code == 'DESCARGANDO'
+              ? 'Google está descargando el escáner. Conecta la tablet a internet y vuelve a intentarlo en un minuto.'
+              : 'El escáner falló (${e.message ?? e.code}). Abre la cámara y apunta al QR, o escribe la IP y el código.',
           error: true,
         );
       }
       return;
+    } finally {
+      if (mounted) setState(() => _ocupado = false);
     }
     if (texto == null || !mounted) return;
     final datos = DatosEnlace.leer(texto);
