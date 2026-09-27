@@ -77,10 +77,19 @@ bool _igualesEnTiempoConstante(List<int> a, List<int> b) {
 
 String _b64(List<int> bytes) => base64Url.encode(bytes).replaceAll('=', '');
 
-String firmarToken(Map<String, dynamic> datos, String secreto, {Duration vigencia = const Duration(hours: 12)}) {
-  final ahora = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+/// Vigencia de un token de sesión. La tablet lo renueva al pasar la mitad
+/// (`POST /api/auth/renovar`), así que un turno largo no la deja fuera.
+const vigenciaToken = Duration(hours: 12);
+
+String firmarToken(
+  Map<String, dynamic> datos,
+  String secreto, {
+  Duration vigencia = vigenciaToken,
+  DateTime? ahora,
+}) {
+  final segundos = (ahora ?? DateTime.now()).millisecondsSinceEpoch ~/ 1000;
   final cabecera = _b64(utf8.encode(jsonEncode({'alg': 'HS256', 'typ': 'JWT'})));
-  final cuerpo = _b64(utf8.encode(jsonEncode({...datos, 'iat': ahora, 'exp': ahora + vigencia.inSeconds})));
+  final cuerpo = _b64(utf8.encode(jsonEncode({...datos, 'iat': segundos, 'exp': segundos + vigencia.inSeconds})));
   final firma = _b64(Hmac(sha256, utf8.encode(secreto)).convert(utf8.encode('$cabecera.$cuerpo')).bytes);
   return '$cabecera.$cuerpo.$firma';
 }

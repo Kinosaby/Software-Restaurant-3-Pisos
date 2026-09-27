@@ -89,19 +89,36 @@ class Sesion {
 /// Lee la fecha de expiración (`exp`) de un JWT sin verificar la firma.
 /// Solo sirve para no restaurar sesiones ya vencidas; el servidor sigue siendo
 /// quien valida el token.
-DateTime? expiracionToken(String token) {
+DateTime? expiracionToken(String token) => _fechaToken(token, 'exp');
+
+DateTime? _fechaToken(String token, String campo) {
   final partes = token.split('.');
   if (partes.length != 3) return null;
   try {
     final payload = utf8.decode(base64Url.decode(base64Url.normalize(partes[1])));
-    final exp = (jsonDecode(payload) as Map<String, dynamic>)['exp'];
-    if (exp is num) {
-      return DateTime.fromMillisecondsSinceEpoch(exp.toInt() * 1000, isUtc: true);
+    final valor = (jsonDecode(payload) as Map<String, dynamic>)[campo];
+    if (valor is num) {
+      return DateTime.fromMillisecondsSinceEpoch(valor.toInt() * 1000, isUtc: true);
     }
-  } on FormatException {
+  } on Object {
     return null;
   }
   return null;
+}
+
+/// Momento en que conviene renovar el token: la mitad de su vigencia (`iat` → `exp`).
+/// `null` si el token no trae esas fechas.
+DateTime? mitadVigenciaToken(String token) {
+  final emitido = _fechaToken(token, 'iat');
+  final expira = expiracionToken(token);
+  if (emitido == null || expira == null || !expira.isAfter(emitido)) return null;
+  return emitido.add(expira.difference(emitido) ~/ 2);
+}
+
+/// Ya pasó la mitad de la vigencia del token: hay que pedir uno nuevo.
+bool debeRenovarToken(String token, {DateTime? ahora}) {
+  final mitad = mitadVigenciaToken(token);
+  return mitad != null && !(ahora ?? DateTime.now().toUtc()).isBefore(mitad);
 }
 
 bool tokenVigente(String token, {DateTime? ahora}) {

@@ -19,11 +19,12 @@ class DatosEnlace {
   final String codigo;
   final String? nombre;
 
+  /// Solo lleva IP de la red local: la central no atiende las de datos móviles.
   Uri get uri => Uri(
         scheme: 'trespisos',
         host: 'enlace',
         queryParameters: {
-          'ip': ips.join(','),
+          'ip': ips.where(esIpLocalTexto).join(','),
           'p': '$puerto',
           'c': codigo,
           'n': ?nombre,
@@ -33,6 +34,7 @@ class DatosEnlace {
   List<String> get urls => [for (final ip in ips) 'http://$ip:$puerto'];
 
   /// `null` si el texto no es un enlace válido de Tres Pisos (otro QR, uno manipulado...).
+  /// Descarta las IP que no son de la red local.
   static DatosEnlace? leer(String? texto) {
     if (texto == null) return null;
     final uri = Uri.tryParse(texto.trim());
@@ -40,7 +42,8 @@ class DatosEnlace {
     final ipv4 = RegExp(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$');
     final ips = [
       for (final ip in (uri.queryParameters['ip'] ?? '').split(','))
-        if (ipv4.firstMatch(ip.trim()) case final m? when m.groups([1, 2, 3, 4]).every((g) => int.parse(g!) <= 255))
+        if (ipv4.firstMatch(ip.trim()) case final m?
+            when m.groups([1, 2, 3, 4]).every((g) => int.parse(g!) <= 255) && esIpLocalTexto(ip))
           ip.trim(),
     ];
     final puerto = int.tryParse(uri.queryParameters['p'] ?? '') ?? puertoCentral;

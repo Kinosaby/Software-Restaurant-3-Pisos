@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../central/servidor_central.dart' show cierreSesionInvalida;
 import '../auth/auth_controller.dart';
 import 'modelos.dart';
 
@@ -78,21 +79,36 @@ abstract class TiempoReal {
 }
 
 /// WebSocket con la central de cocina; se reconecta solo con espera creciente (1 s → 10 s).
+///
+/// Cada conexión usa el token vigente en ese momento ([token]), así que tras una
+/// renovación basta con reconectar. Si la central cierra el socket porque la
+/// sesión dejó de valer ([cierreSesionInvalida]), se reconecta enseguida; si al
+/// conectar responde 401, la sesión ya no sirve: avisa con [alSesionInvalida] y
+/// deja de reintentar.
 class TiempoRealCentral extends TiempoReal {
-  TiempoRealCentral(String servidor, {required String token, required String enlace})
-      : _url = Uri.parse(servidor).replace(
-          scheme: servidor.startsWith('https') ? 'wss' : 'ws',
-          path: '/ws',
-          queryParameters: {'token': token, 'enlace': enlace},
-        ) {
+  TiempoRealCentral(
+    String servidor, {
+    required this._token,
+    required this._enlace,
+    this.alSesionInvalida,
+  }) : _servidor = Uri.parse(servidor) {
     unawaited(_conectar());
   }
 
-  final Uri _url;
+  final Uri _servidor;
+  final String? Function() _token;
+  final String _enlace;
+  final void Function()? alSesionInvalida;
   final _cliente = HttpClient()..connectionTimeout = const Duration(seconds: 6);
   WebSocket? _ws;
   bool _cerrado = false;
   int _intentos = 0;
+
+  Uri get _url => _servidor.replace(
+        scheme: _servidor.scheme == 'https' ? 'wss' : 'ws',
+        path: '/ws',
+        queryParameters: {'token': _token() ?? '', 'enlace': _enlace},
+      );
 
   Future<void> _conectar() async {
     while (!_cerrado) {
@@ -119,6 +135,15 @@ class TiempoRealCentral extends TiempoReal {
             // Mensaje malformado: se ignora.
           }
         }
+        // Cerrado por la central (p. ej. [cierreSesionInvalida]): se reconecta en 1 s con el token actual.
+      } on WebSocketException catch (e) {
+        if (e.httpStatusCode == 401) {
+          _ws = null;
+          if (_conectado) _marcarConexion(false);
+          if (!_cerrado) alSesionInvalida?.call();
+          return;
+        }
+        // Otro rechazo (central reiniciando, red no permitida...): se reintenta abajo.
       } on Object {
         // Central apagada o Wi-Fi caído: se reintenta abajo.
       }
@@ -140,13 +165,27 @@ class TiempoRealCentral extends TiempoReal {
 }
 
 final tiempoRealProvider = Provider.autoDispose<TiempoReal>((ref) {
-  final sesion = ref.watch(authControllerProvider);
+  // Sin el token: renovarlo no reabre el socket (la reconexión ya usa el nuevo).
+  final sesion = ref.watch(sesionActivaProvider);
   if (sesion == null) {
     throw StateError('Tiempo real sin sesión');
   }
-  final enlace = ref.watch(conexionProvider.select((c) => c?.enlace)) ?? sesion.conexion.enlace ?? '';
-  final TiempoReal tiempoReal = TiempoRealCentral(sesion.servidor, token: sesion.token, enlace: enlace);
-  ref.onDispose(tiempoReal.cerrar);
+  final enlace = ref.watch(conexionProvider.select((c) => c?.enlace)) ?? sesion.enlace ?? '';
+  final auth = ref.read(authControllerProvider.notifier);
+  final TiempoReal tiempoReal = TiempoRealCentral(
+    sesion.servidor,
+    token: () => auth.tokenActual,
+    enlace: enlace,
+    alSesionInvalida: () => unawaited(auth.cerrarSesion()),
+  );
+  // Al (re)conectar se renueva el token si ya pasó la mitad de su vigencia.
+  final suscripcion = tiempoReal.eventos.listen((evento) {
+    if (evento is Conectado) unawaited(auth.renovarSiHaceFalta());
+  });
+  ref.onDispose(() {
+    unawaited(suscripcion.cancel());
+    tiempoReal.cerrar();
+  });
   return tiempoReal;
 });
 

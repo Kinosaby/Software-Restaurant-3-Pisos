@@ -274,7 +274,7 @@ void main() {
   test('el tiempo real se reconecta solo cuando vuelve la central', () async {
     final tiempoReal = TiempoRealCentral(
       conexion.url,
-      token: login['token'] as String,
+      token: () => login['token'] as String,
       enlace: central.codigoEnlace,
     );
     addTearDown(tiempoReal.cerrar);

@@ -32,6 +32,7 @@ class ApiClient {
     String? token,
     String? enlace,
     this._alNoAutorizado,
+    this._leerToken,
     Dio? dio,
   }) : _dio = dio ??
             Dio(BaseOptions(
@@ -49,6 +50,10 @@ class ApiClient {
 
   final Dio _dio;
   final void Function()? _alNoAutorizado;
+
+  /// Token vigente en el momento de cada petición (la sesión lo renueva sin
+  /// tener que crear otro cliente). Si no se da, se usa `token` fijo.
+  final String? Function()? _leerToken;
 
   Future<Map<String, dynamic>> get(String ruta, {Map<String, dynamic>? query}) =>
       _enviar(() => _dio.get(ruta, queryParameters: query));
@@ -68,6 +73,7 @@ class ApiClient {
   Options? _opciones(String? operacion) => operacion == null ? null : Options(headers: {'X-Operacion': operacion});
 
   Future<Map<String, dynamic>> _enviar(Future<Response<dynamic>> Function() peticion) async {
+    if (_leerToken?.call() case final token?) _dio.options.headers['Authorization'] = 'Bearer $token';
     try {
       final respuesta = await peticion();
       final datos = respuesta.data;
