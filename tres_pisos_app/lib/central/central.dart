@@ -404,11 +404,14 @@ class _Totales {
 /// [Diario] y solo después se aplican en memoria, en serie, para que dos
 /// peticiones simultáneas no se pisen.
 class Central {
-  Central._(this._diario, this._iteraciones, this._reloj);
+  Central._(this._diario, this._iteraciones, this._reloj, [this._lineasParaCompactar = 3000]);
 
   final Diario _diario;
   final int _iteraciones;
   final DateTime Function() _reloj;
+
+  /// Líneas del diario a partir de las cuales se compacta.
+  final int _lineasParaCompactar;
 
   /// Avisos en tiempo real (`nuevo_pedido`, `pedido_actualizado`, `extra_pedido`, `pedido_eliminado`).
   Emisor? emitir;
@@ -424,19 +427,19 @@ class Central {
   Map<String, dynamic> _config = {};
   Future<void> _cola = Future.value();
 
-  static const _lineasParaCompactar = 3000;
-
+  /// [lineasParaCompactar] solo se cambia en las pruebas.
   static Future<Central> abrir(
     Directory carpeta, {
     int iteraciones = 60000,
     DateTime Function()? reloj,
+    int lineasParaCompactar = 3000,
   }) async {
-    final central = Central._(Diario(carpeta), iteraciones, reloj ?? DateTime.now);
+    final central = Central._(Diario(carpeta), iteraciones, reloj ?? DateTime.now, lineasParaCompactar);
     final lotes = await central._diario.cargar();
     for (final lote in lotes) {
       central._aplicar(lote);
     }
-    if (central._diario.lineas > _lineasParaCompactar) await central._compactar();
+    if (central._diario.lineas > central._lineasParaCompactar) await central._compactarSinFallar();
     return central;
   }
 
@@ -513,7 +516,8 @@ class Central {
   Future<void> _confirmar(List<Map<String, dynamic>> lote) async {
     await _diario.escribir(lote);
     _aplicar(lote);
-    if (_diario.lineas > _lineasParaCompactar) await _compactar();
+    // La operación ya quedó guardada: un fallo al compactar no la convierte en error.
+    if (_diario.lineas > _lineasParaCompactar) await _compactarSinFallar();
   }
 
   List<Map<String, dynamic>> _estadoCompleto() => [
@@ -531,6 +535,16 @@ class Central {
     final limite = _reloj().subtract(const Duration(days: 7));
     _operaciones.removeWhere((_, op) => op.fecha.isBefore(limite));
     await _diario.compactar(_estadoCompleto());
+  }
+
+  /// Compacta sin propagar errores (disco lleno, E/S): el diario sigue abierto
+  /// y se vuelve a intentar en la siguiente escritura.
+  Future<void> _compactarSinFallar() async {
+    try {
+      await _compactar();
+    } on Object catch (e) {
+      Zone.current.print('No se pudo compactar el diario de la central: $e');
+    }
   }
 
   // ── Respaldo ─────────────────────────────────────────────

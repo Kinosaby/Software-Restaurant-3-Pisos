@@ -21,6 +21,7 @@ Future<void> main() async {
 
   // En la tablet de cocina la central arranca con la app: las demás dependen de ella.
   CentralLocal? central;
+  String? errorCentral;
   if (arranque.conexion?.modo == ModoConexion.central) {
     try {
       central = await CentralLocal.arrancar();
@@ -34,6 +35,8 @@ Future<void> main() async {
       );
     } on Object catch (e) {
       debugPrint('No se pudo arrancar la central: $e');
+      // Sin central las demás tablets no pueden trabajar: se avisa en pantalla.
+      errorCentral = '$e';
     }
   }
 
@@ -45,6 +48,7 @@ Future<void> main() async {
       almacenSesionProvider.overrideWithValue(almacen),
       datosArranqueProvider.overrideWithValue(arranque),
       centralArranqueProvider.overrideWithValue(central),
+      errorArranqueCentralProvider.overrideWithValue(errorCentral),
       enlaceInicialProvider.overrideWithValue(enlace),
     ],
     child: const TresPisosApp(),

@@ -12,6 +12,7 @@ import 'features/auth/auth_controller.dart';
 import 'features/auth/login_page.dart';
 import 'features/auth/sesion.dart';
 import 'features/conexion/central_info_page.dart';
+import 'features/conexion/central_local.dart';
 import 'features/conexion/conexion_page.dart';
 import 'features/conexion/enlace_qr.dart';
 import 'features/conexion/respaldos_page.dart';
@@ -101,6 +102,8 @@ class TresPisosApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Solo en la tablet central, y solo mientras la central siga sin correr.
+    final errorCentral = ref.watch(centralLocalProvider) == null ? ref.watch(errorArranqueCentralProvider) : null;
     return MaterialApp.router(
       title: 'Tres Pisos',
       debugShowCheckedModeBanner: false,
@@ -113,7 +116,70 @@ class TresPisosApp extends ConsumerWidget {
       // esto los botones de abajo quedan tapados. El AppBar ya respeta la barra de arriba.
       builder: (context, child) => ColoredBox(
         color: Colores.fondo,
-        child: SafeArea(top: false, child: child!),
+        child: errorCentral == null
+            ? SafeArea(top: false, child: child!)
+            : Column(
+                children: [
+                  AvisoCentralSinArrancar(error: errorCentral),
+                  // El aviso ya ocupa la barra de arriba: el AppBar no debe dejar ese espacio otra vez.
+                  Expanded(
+                    child: MediaQuery.removePadding(
+                      context: context,
+                      removeTop: true,
+                      child: SafeArea(top: false, child: child!),
+                    ),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+/// Franja fija arriba de todas las pantallas cuando la central no pudo arrancar.
+class AvisoCentralSinArrancar extends StatelessWidget {
+  const AvisoCentralSinArrancar({super.key, required this.error});
+
+  final String error;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colores.peligro,
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              const Icon(Icons.error_outline, color: Colors.black, size: 32),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'La central no arrancó: las demás tablets no pueden enviar ni recibir pedidos.',
+                      style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                    const SizedBox(height: 2),
+                    const Text(
+                      'Cierra la app por completo y vuelve a abrirla. Si el aviso sigue, avisa al administrador.',
+                      style: TextStyle(color: Colors.black, fontSize: 14),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Error: $error',
+                      style: const TextStyle(color: Colors.black87, fontSize: 12),
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
