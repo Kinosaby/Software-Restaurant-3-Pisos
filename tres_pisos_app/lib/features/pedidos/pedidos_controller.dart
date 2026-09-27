@@ -427,29 +427,9 @@ class Favoritos extends Notifier<Map<int, int>> {
 
 // ── Cocina ──────────────────────────────────────────────────
 
-final extrasCocinaProvider =
-    NotifierProvider.autoDispose<ExtrasCocina, List<ExtraPedido>>(ExtrasCocina.new);
-
-/// Extras que llegan a cocina para pedidos ya terminados. El servidor no los
-/// guarda por separado, así que se conservan en la tablet (sobreviven a un
-/// reinicio) hasta que cocina los marca como hechos.
-class ExtrasCocina extends Notifier<List<ExtraPedido>> {
-  @override
-  List<ExtraPedido> build() {
-    final suscripcion = ref.watch(tiempoRealProvider).eventos.listen((evento) {
-      if (evento is ExtraRecibido) _guardar([...state, evento.extra]);
-    });
-    ref.onDispose(suscripcion.cancel);
-    return [for (final e in ref.read(almacenLocalProvider).lista('extras') ?? const []) ExtraPedido.fromJson(e)];
-  }
-
-  void _guardar(List<ExtraPedido> extras) {
-    state = extras;
-    unawaited(ref.read(almacenLocalProvider).guardarLista('extras', [for (final e in extras) e.toJson()]));
-  }
-
-  void marcarHecho(ExtraPedido extra) => _guardar([for (final e in state) if (e.clave != extra.clave) e]);
-}
+// Los extras de pedidos ya listos los marca la central en cada renglón
+// (`extra_desde`), así que cocina los ve en `pedidosActivosProvider` aunque la
+// pantalla no estuviera abierta cuando llegaron.
 
 /// Casillas de cocina: renglones ya preparados de cada pedido o extra (clave → índices).
 final marcasCocinaProvider = NotifierProvider.autoDispose<MarcasCocina, Map<String, Set<int>>>(MarcasCocina.new);

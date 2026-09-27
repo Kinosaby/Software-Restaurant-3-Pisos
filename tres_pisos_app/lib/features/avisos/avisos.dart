@@ -59,7 +59,9 @@ class ReglasAviso {
         final piezas = extra.items.fold(0, (s, i) => s + i.cantidad);
         return (aviso: Aviso('Extra para mesa ${extra.mesa}: $piezas productos', urgente: true), sonido: 'pedido');
       case PedidoCambiado(:final pedido, nuevo: false) when !cocina && _esMio(pedido):
-        if (pedido.estado == EstadoPedido.listo && _primeraVez('listo-${pedido.id}')) {
+        // Con un extra en cocina aún no se puede servir; cuando lo terminan cambian
+        // las piezas y se vuelve a avisar.
+        if (pedido.paraServir && _primeraVez('listo-${pedido.id}-${pedido.piezas}')) {
           return (aviso: Aviso('${pedido.titulo} está lista para servir', pedidoId: pedido.id), sonido: 'listo');
         }
         if (pedido.estado == EstadoPedido.cancelado && _primeraVez('cancelado-${pedido.id}')) {

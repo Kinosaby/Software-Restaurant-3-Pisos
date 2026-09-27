@@ -42,6 +42,13 @@ List<GrupoCocina> agruparCocina(List<Pedido> activos) {
   return grupos.values.toList()..sort((a, b) => a.desde.compareTo(b.desde));
 }
 
+/// Pedidos listos con extras que cocina aún no termina, del extra más antiguo al más nuevo.
+List<Pedido> extrasCocina(List<Pedido> activos) {
+  DateTime desde(Pedido p) =>
+      p.extrasPendientes.map((i) => i.extraDesde!).reduce((a, b) => a.isBefore(b) ? a : b);
+  return activos.where((p) => p.conExtrasPendientes).toList()..sort((a, b) => desde(a).compareTo(desde(b)));
+}
+
 class CocinaPage extends ConsumerStatefulWidget {
   const CocinaPage({super.key});
 
@@ -110,7 +117,6 @@ class _CocinaPageState extends ConsumerState<CocinaPage> {
   @override
   Widget build(BuildContext context) {
     final pedidos = ref.watch(pedidosActivosProvider);
-    final extras = ref.watch(extrasCocinaProvider);
 
     // Las casillas de pedidos que ya salieron de cocina no se necesitan.
     ref.listen(pedidosActivosProvider, (_, siguiente) {
@@ -118,7 +124,7 @@ class _CocinaPageState extends ConsumerState<CocinaPage> {
       if (activos == null) return;
       ref.read(marcasCocinaProvider.notifier).limpiar({
         for (final p in activos.where((p) => p.estado.modificable)) 'p${p.id}',
-        for (final e in ref.read(extrasCocinaProvider)) 'e${e.clave}',
+        for (final p in extrasCocina(activos)) 'x${p.id}',
       });
     });
 
@@ -139,6 +145,7 @@ class _CocinaPageState extends ConsumerState<CocinaPage> {
               ),
               data: (todos) {
                 final grupos = agruparCocina(todos);
+                final extras = extrasCocina(todos);
                 return RefreshIndicator(
                   onRefresh: () => ref.read(pedidosActivosProvider.notifier).recargar(),
                   child: grupos.isEmpty && extras.isEmpty
@@ -156,7 +163,16 @@ class _CocinaPageState extends ConsumerState<CocinaPage> {
                                 sliver: SliverList.separated(
                                   itemCount: extras.length,
                                   separatorBuilder: (_, _) => const SizedBox(height: 8),
-                                  itemBuilder: (context, i) => _TarjetaExtra(extra: extras[i]),
+                                  itemBuilder: (context, i) => _TarjetaExtra(
+                                    pedido: extras[i],
+                                    ocupado: _enCurso.contains('x${extras[i].id}'),
+                                    onTerminado: () => _ejecutar(
+                                      'x${extras[i].id}',
+                                      () => ref
+                                          .read(pedidosActivosProvider.notifier)
+                                          .cambiarEstado(extras[i].id, EstadoPedido.listo),
+                                    ),
+                                  ),
                                 ),
                               ),
                             SliverPadding(
@@ -337,15 +353,21 @@ class _RenglonMarcable extends StatelessWidget {
   }
 }
 
+/// Productos agregados a un pedido que cocina ya había terminado. Al terminarlos
+/// el pedido vuelve a quedar listo (y la mesa, lista para servir).
 class _TarjetaExtra extends ConsumerWidget {
-  const _TarjetaExtra({required this.extra});
+  const _TarjetaExtra({required this.pedido, required this.ocupado, required this.onTerminado});
 
-  final ExtraPedido extra;
+  final Pedido pedido;
+  final bool ocupado;
+  final VoidCallback onTerminado;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final marcas = ref.watch(marcasCocinaProvider)['e${extra.clave}'] ?? const <int>{};
-    final titulo = extra.tipo == TipoPedido.llevar ? 'Para llevar (mesa ${extra.mesa})' : 'Mesa ${extra.mesa}';
+    final items = pedido.extrasPendientes;
+    final recibido = items.map((i) => i.extraDesde!).reduce((a, b) => a.isBefore(b) ? a : b);
+    final marcas = ref.watch(marcasCocinaProvider)['x${pedido.id}'] ?? const <int>{};
+    final titulo = pedido.tipo == TipoPedido.llevar ? 'Para llevar (mesa ${pedido.mesa})' : 'Mesa ${pedido.mesa}';
     return Card(
       color: Colores.dorado.withValues(alpha: 0.10),
       shape: RoundedRectangleBorder(
@@ -363,24 +385,24 @@ class _TarjetaExtra extends ConsumerWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Extra · $titulo${extra.comensal == null ? '' : ' · ${extra.comensal}'} · #${extra.pedidoId}',
+                    'Extra · $titulo${pedido.comensal == null ? '' : ' · ${pedido.comensal}'} · #${pedido.id}',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colores.dorado),
                   ),
                 ),
-                Text(tiempoTranscurrido(extra.recibido), style: const TextStyle(color: Colores.apagado)),
+                Text(tiempoTranscurrido(recibido), style: const TextStyle(color: Colores.apagado)),
               ],
             ),
             const SizedBox(height: 6),
-            for (var i = 0; i < extra.items.length; i++)
+            for (var i = 0; i < items.length; i++)
               _RenglonMarcable(
-                item: extra.items[i],
+                item: items[i],
                 hecho: marcas.contains(i),
-                onTap: () => ref.read(marcasCocinaProvider.notifier).alternar('e${extra.clave}', i),
+                onTap: () => ref.read(marcasCocinaProvider.notifier).alternar('x${pedido.id}', i),
               ),
             Align(
               alignment: Alignment.centerRight,
               child: FilledButton.icon(
-                onPressed: () => ref.read(extrasCocinaProvider.notifier).marcarHecho(extra),
+                onPressed: ocupado ? null : onTerminado,
                 icon: const Icon(Icons.check),
                 label: const Text('Extra terminado'),
               ),

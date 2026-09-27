@@ -22,6 +22,7 @@ const mesaParaLlevar = 99;
 /// Situación de una mesa según sus cuentas activas (la más urgente manda).
 enum SituacionMesa {
   libre('Libre', Colores.apagado, Icons.event_seat_outlined),
+  sinEnviar('Pendiente de enviar', Colores.acento, Icons.cloud_upload_outlined),
   esperando('Esperando cocina', Colores.aviso, Icons.hourglass_top),
   enCocina('En cocina', Colores.azul, Icons.local_fire_department_outlined),
   lista('Lista para servir', Colores.exito, Icons.room_service_outlined);
@@ -33,17 +34,23 @@ enum SituacionMesa {
 }
 
 class EstadoMesa {
-  const EstadoMesa(this.numero, this.pedidos);
+  const EstadoMesa(this.numero, this.pedidos, {this.sinEnviar = const []});
 
   final int numero;
 
   /// Cuentas activas de la mesa (pedidos para aquí; los de llevar van aparte).
   final List<Pedido> pedidos;
 
+  /// Pedidos nuevos para esta mesa que siguen en la cola sin conexión de esta tablet.
+  final List<EnvioPendiente> sinEnviar;
+
   SituacionMesa get situacion {
-    if (pedidos.isEmpty) return SituacionMesa.libre;
-    if (pedidos.any((p) => p.estado == EstadoPedido.listo)) return SituacionMesa.lista;
-    if (pedidos.any((p) => p.estado == EstadoPedido.preparando)) return SituacionMesa.enCocina;
+    if (pedidos.isEmpty) return sinEnviar.isEmpty ? SituacionMesa.libre : SituacionMesa.sinEnviar;
+    // Un pedido listo al que se le agregó un extra sigue en cocina hasta que lo terminen.
+    if (pedidos.any((p) => p.paraServir)) return SituacionMesa.lista;
+    if (pedidos.any((p) => p.estado == EstadoPedido.preparando || p.conExtrasPendientes)) {
+      return SituacionMesa.enCocina;
+    }
     return SituacionMesa.esperando;
   }
 
@@ -55,13 +62,21 @@ class EstadoMesa {
 }
 
 /// Mesas 1..[totalMesas] más cualquier otra que tenga cuentas (p. ej. una mesa extra en la terraza).
-List<EstadoMesa> estadoMesas(List<Pedido> activos) {
+/// [cola] son los envíos sin conexión de esta tablet: un pedido nuevo para aquí
+/// que aún no llega a la central ya ocupa su mesa.
+List<EstadoMesa> estadoMesas(List<Pedido> activos, {List<EnvioPendiente> cola = const []}) {
   final porMesa = <int, List<Pedido>>{};
   for (final p in activos) {
     porMesa.putIfAbsent(p.mesa, () => []).add(p);
   }
-  final numeros = {for (var i = 1; i <= totalMesas; i++) i, ...porMesa.keys}.toList()..sort();
-  return [for (final n in numeros) EstadoMesa(n, porMesa[n] ?? const [])];
+  final enCola = <int, List<EnvioPendiente>>{};
+  for (final e in cola) {
+    if (e.tipo != 'crear' || e.cuerpo['tipo'] == TipoPedido.llevar.name) continue;
+    final mesa = leerEntero(e.cuerpo['mesa']);
+    if (mesa > 0) enCola.putIfAbsent(mesa, () => []).add(e);
+  }
+  final numeros = {for (var i = 1; i <= totalMesas; i++) i, ...porMesa.keys, ...enCola.keys}.toList()..sort();
+  return [for (final n in numeros) EstadoMesa(n, porMesa[n] ?? const [], sinEnviar: enCola[n] ?? const [])];
 }
 
 /// Cuadrícula de mesas en vivo. Tocar una mesa libre empieza un pedido; una ocupada abre sus cuentas.
@@ -90,13 +105,14 @@ class _MapaMesasState extends ConsumerState<MapaMesas> {
   @override
   Widget build(BuildContext context) {
     final pedidos = ref.watch(pedidosActivosProvider);
+    final cola = ref.watch(colaEnviosProvider);
     final puedeCrear = ref.watch(authControllerProvider)?.usuario.rol.tomaPedidos ?? false;
 
     return pedidos.when(
       loading: () => const Cargando(),
       error: (e, _) => ErrorConReintento(error: e, alReintentar: () => ref.invalidate(pedidosActivosProvider)),
       data: (todos) {
-        final mesas = estadoMesas(todos.where((p) => p.tipo == TipoPedido.aqui).toList());
+        final mesas = estadoMesas(todos.where((p) => p.tipo == TipoPedido.aqui).toList(), cola: cola);
         return RefreshIndicator(
           onRefresh: () => ref.read(pedidosActivosProvider.notifier).recargar(),
           child: CustomScrollView(
@@ -194,10 +210,19 @@ class _TarjetaMesa extends StatelessWidget {
               ),
               const Spacer(),
               Text(s.etiqueta, style: TextStyle(color: s.color, fontWeight: FontWeight.w600, fontSize: 13)),
-              if (!libre)
+              if (mesa.pedidos.isNotEmpty)
                 Text(
                   '${mesa.pedidos.length == 1 ? '1 cuenta' : '${mesa.pedidos.length} cuentas'} · ${dinero(mesa.total)}'
-                  '${minutos > 0 ? ' · $minutos min' : ''}',
+                  '${minutos > 0 ? ' · $minutos min' : ''}'
+                  '${mesa.sinEnviar.isEmpty ? '' : ' · ${mesa.sinEnviar.length} sin enviar'}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colores.apagado, fontSize: 12),
+                )
+              else if (mesa.sinEnviar.isNotEmpty)
+                Text(
+                  '${mesa.sinEnviar.length == 1 ? '1 pedido' : '${mesa.sinEnviar.length} pedidos'} · '
+                  '${dinero(mesa.sinEnviar.fold(0, (s, e) => s + e.total))} · cocina aún no lo recibe',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: Colores.apagado, fontSize: 12),
@@ -213,7 +238,10 @@ class _TarjetaMesa extends StatelessWidget {
 /// Selector de mesa para la captura: libres y ocupadas, con la seleccionada resaltada.
 Future<int?> elegirMesa(BuildContext context, WidgetRef ref, {int? actual}) {
   final activos = ref.read(pedidosActivosProvider).value ?? const [];
-  final mesas = estadoMesas(activos.where((p) => p.tipo == TipoPedido.aqui).toList());
+  final mesas = estadoMesas(
+    activos.where((p) => p.tipo == TipoPedido.aqui).toList(),
+    cola: ref.read(colaEnviosProvider),
+  );
   return showModalBottomSheet<int>(
     context: context,
     showDragHandle: true,

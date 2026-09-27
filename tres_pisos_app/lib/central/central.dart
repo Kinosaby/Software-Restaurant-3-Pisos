@@ -114,6 +114,7 @@ class ItemCentral {
     required this.precio,
     required this.cantidad,
     this.nota,
+    this.extraDesde,
   });
 
   factory ItemCentral.fromJson(Map<String, dynamic> j) => ItemCentral(
@@ -123,6 +124,7 @@ class ItemCentral {
         precio: (j['precio'] as num).toDouble(),
         cantidad: j['cantidad'] as int,
         nota: j['nota'] as String?,
+        extraDesde: j['extra_desde'] == null ? null : DateTime.parse(j['extra_desde'] as String),
       );
 
   final int id;
@@ -132,13 +134,19 @@ class ItemCentral {
   final int cantidad;
   final String? nota;
 
-  ItemCentral copyWith({int? cantidad, String? nota, bool borrarNota = false}) => ItemCentral(
+  /// Extra que se agregó cuando el pedido ya estaba listo y que cocina aún no
+  /// termina. Se borra cuando cocina vuelve a marcar el pedido como listo.
+  final DateTime? extraDesde;
+
+  ItemCentral copyWith({int? cantidad, String? nota, bool borrarNota = false, bool terminarExtra = false}) =>
+      ItemCentral(
         id: id,
         productoId: productoId,
         nombre: nombre,
         precio: precio,
         cantidad: cantidad ?? this.cantidad,
         nota: borrarNota ? null : (nota ?? this.nota),
+        extraDesde: terminarExtra ? null : extraDesde,
       );
 
   Map<String, dynamic> toJson() => {
@@ -148,6 +156,7 @@ class ItemCentral {
         'cantidad': cantidad,
         'nota': nota,
         'precio': precio,
+        if (extraDesde != null) 'extra_desde': extraDesde!.toUtc().toIso8601String(),
       };
 }
 
@@ -698,7 +707,7 @@ class Central {
     ];
   }
 
-  List<ItemCentral> _numerar(List<ItemCentral> items) => [
+  List<ItemCentral> _numerar(List<ItemCentral> items, {DateTime? extraDesde}) => [
         for (final i in items)
           ItemCentral(
             id: _siguiente('item'),
@@ -707,6 +716,7 @@ class Central {
             precio: i.precio,
             cantidad: i.cantidad,
             nota: i.nota,
+            extraDesde: extraDesde,
           ),
       ];
 
@@ -791,7 +801,8 @@ class Central {
         if (pedido.estado == 'cancelado') {
           throw ErrorCentral(400, 'INVALID_STATUS', 'No se puede modificar un pedido cancelado.');
         }
-        final nuevos = _numerar(_itemsNuevos(datos['productos']));
+        final esExtra = pedido.estado == 'listo';
+        final nuevos = _numerar(_itemsNuevos(datos['productos']), extraDesde: esExtra ? _reloj() : null);
 
         if (pedido.estado == 'pagado') {
           final cuenta = PedidoCentral(
@@ -815,9 +826,12 @@ class Central {
         }
 
         // Mismo producto y misma nota se suman; con otra nota va en renglón aparte.
+        // Un extra no se mezcla con lo que cocina ya terminó: va en su propio
+        // renglón (marcado) hasta que cocina lo termine.
         final items = [...pedido.items];
         for (final nuevo in nuevos) {
-          final i = items.indexWhere((x) => x.productoId == nuevo.productoId && x.nota == nuevo.nota);
+          final i = items.indexWhere((x) =>
+              x.productoId == nuevo.productoId && x.nota == nuevo.nota && (x.extraDesde != null) == esExtra);
           if (i >= 0) {
             items[i] = items[i].copyWith(cantidad: items[i].cantidad + nuevo.cantidad);
           } else {
@@ -831,7 +845,7 @@ class Central {
         ]);
 
         final json = actualizado.toJson();
-        if (pedido.estado == 'listo') {
+        if (esExtra) {
           emitir?.call('extra_pedido', {
             'pedido_id': id,
             'mesa': pedido.mesa,
@@ -910,7 +924,13 @@ class Central {
               (estado == 'cancelado' && (pedido.estado == 'pendiente' || pedido.estado == 'preparando'));
           if (!permitido) throw ErrorCentral(403, 'FORBIDDEN', 'Cocina no puede cambiar el pedido a "$estado".');
         }
-        final actualizado = pedido.copyWith(estado: estado);
+        // Marcar listo también termina los extras que cocina tenía pendientes.
+        final actualizado = pedido.copyWith(
+          estado: estado,
+          items: estado == 'listo' && pedido.items.any((i) => i.extraDesde != null)
+              ? [for (final i in pedido.items) i.copyWith(terminarExtra: true)]
+              : null,
+        );
         await _confirmar([
           {'t': 'pedido', 'v': actualizado.toJson()},
           if (estado == 'pagado')

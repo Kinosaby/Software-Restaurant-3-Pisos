@@ -95,6 +95,7 @@ class PedidoItem {
     required this.cantidad,
     required this.precio,
     this.nota,
+    this.extraDesde,
   });
 
   factory PedidoItem.fromJson(Map<String, dynamic> json) => PedidoItem(
@@ -104,6 +105,7 @@ class PedidoItem {
         cantidad: leerEntero(json['cantidad']),
         precio: leerDinero(json['precio']),
         nota: leerTextoOpcional(json['nota']),
+        extraDesde: DateTime.tryParse(json['extra_desde']?.toString() ?? '')?.toLocal(),
       );
 
   final int detalleId;
@@ -115,9 +117,13 @@ class PedidoItem {
   /// Nota tal como está en el servidor (puede empezar por [prefijoLlevar]).
   final String? nota;
 
+  /// Extra agregado a un pedido ya listo que cocina aún no termina (`extra_desde`).
+  final DateTime? extraDesde;
+
   double get subtotal => precio * cantidad;
   bool get llevar => leerNota(nota).llevar;
   String? get notaVisible => leerNota(nota).nota;
+  bool get extraPendiente => extraDesde != null;
 
   Map<String, dynamic> toJson() => {
         'id': detalleId,
@@ -126,6 +132,7 @@ class PedidoItem {
         'cantidad': cantidad,
         'nota': nota,
         'precio': precio,
+        if (extraDesde != null) 'extra_desde': extraDesde!.toUtc().toIso8601String(),
       };
 }
 
@@ -173,6 +180,15 @@ class Pedido {
   final List<PedidoItem> items;
 
   int get piezas => items.fold(0, (suma, item) => suma + item.cantidad);
+
+  /// Renglones agregados a un pedido listo que cocina todavía está preparando.
+  List<PedidoItem> get extrasPendientes => [for (final i in items) if (i.extraPendiente) i];
+
+  /// Listo, pero con algún extra que cocina aún no termina.
+  bool get conExtrasPendientes => estado == EstadoPedido.listo && items.any((i) => i.extraPendiente);
+
+  /// Listo y sin extras pendientes: se puede servir todo.
+  bool get paraServir => estado == EstadoPedido.listo && !conExtrasPendientes;
 
   String get titulo {
     final base = tipo == TipoPedido.llevar ? 'Para llevar' : 'Mesa $mesa';

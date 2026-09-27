@@ -7,6 +7,7 @@ import 'package:tres_pisos_app/features/cocina/cocina_page.dart';
 import 'package:tres_pisos_app/features/mesas/mesas.dart';
 import 'package:tres_pisos_app/features/mesero/carrito.dart';
 import 'package:tres_pisos_app/features/pedidos/modelos.dart';
+import 'package:tres_pisos_app/features/pedidos/pedidos_controller.dart';
 import 'package:tres_pisos_app/features/pedidos/tiempo_real.dart';
 
 Pedido pedido({
@@ -79,6 +80,111 @@ void main() {
     expect(mesas.firstWhere((m) => m.numero == 2).porCobrar.single.id, 2);
     expect(mesas.firstWhere((m) => m.numero == 5).situacion, SituacionMesa.enCocina);
     expect(mesas.firstWhere((m) => m.numero == 1).situacion, SituacionMesa.libre);
+  });
+
+  group('extras de un pedido listo', () {
+    List<Map<String, dynamic>> conExtra({bool pendiente = true}) => [
+          {'id': 1, 'producto_id': 1, 'nombre': 'Tacos', 'cantidad': 2, 'nota': null, 'precio': '40'},
+          {
+            'id': 2,
+            'producto_id': 2,
+            'nombre': 'Refresco',
+            'cantidad': 1,
+            'nota': null,
+            'precio': '22',
+            if (pendiente) 'extra_desde': '2026-09-22T18:30:00Z',
+          },
+        ];
+
+    test('la mesa pasa a "En cocina" mientras el extra no esté terminado', () {
+      final extra = pedido(id: 1, mesa: 4, estado: 'listo', productos: conExtra());
+      expect(extra.conExtrasPendientes, isTrue);
+      expect(extra.extrasPendientes.single.nombre, 'Refresco');
+      expect(estadoMesas([extra]).firstWhere((m) => m.numero == 4).situacion, SituacionMesa.enCocina);
+
+      // Cocina lo termina: la central quita la marca y la mesa vuelve a estar lista.
+      final terminado = pedido(id: 1, mesa: 4, estado: 'listo', productos: conExtra(pendiente: false));
+      expect(estadoMesas([terminado]).firstWhere((m) => m.numero == 4).situacion, SituacionMesa.lista);
+    });
+
+    test('otra cuenta ya lista de la misma mesa sigue mandando', () {
+      final mesas = estadoMesas([
+        pedido(id: 1, mesa: 4, estado: 'listo', productos: conExtra()),
+        pedido(id: 2, mesa: 4, estado: 'listo'),
+      ]);
+      expect(mesas.firstWhere((m) => m.numero == 4).situacion, SituacionMesa.lista);
+    });
+
+    test('cocina ve el extra aparte y no vuelve a ver el pedido completo', () {
+      final activos = [
+        pedido(id: 1, mesa: 4, estado: 'listo', productos: conExtra()),
+        pedido(id: 2, mesa: 5, estado: 'listo'),
+      ];
+      expect(extrasCocina(activos).map((p) => p.id), [1]);
+      expect(agruparCocina(activos), isEmpty);
+    });
+
+    test('el mesero recibe "lista para servir" solo cuando el extra está terminado', () {
+      final reglas = ReglasAviso(const Usuario(id: 5, username: 'luis', rol: Rol.mesero));
+      PedidoCambiado cambio(List<Map<String, dynamic>> productos) =>
+          PedidoCambiado(pedido(id: 1, estado: 'listo', usuarioId: 5, productos: productos), nuevo: false);
+
+      expect(reglas.evaluar(cambio(conExtra())), isNull, reason: 'aún falta el extra');
+      expect(reglas.evaluar(cambio(conExtra(pendiente: false)))?.sonido, 'listo');
+      expect(reglas.evaluar(cambio(conExtra(pendiente: false))), isNull, reason: 'no se repite');
+    });
+
+    test('el renglón conserva la marca en la copia local', () {
+      final item = PedidoItem.fromJson(conExtra()[1]);
+      expect(PedidoItem.fromJson(item.toJson()).extraPendiente, isTrue);
+      expect(PedidoItem.fromJson(conExtra()[0]).toJson().containsKey('extra_desde'), isFalse);
+    });
+  });
+
+  group('pedidos en la cola sin conexión', () {
+    EnvioPendiente envio({required int mesa, String tipo = 'aqui', String operacion = 'op-1', String accion = 'crear'}) =>
+        EnvioPendiente(
+          operacion: operacion,
+          tipo: accion,
+          pedidoId: accion == 'agregar' ? 9 : null,
+          cuerpo: {
+            'mesa': mesa,
+            'tipo': tipo,
+            'productos': [
+              {'producto_id': 1, 'cantidad': 1},
+            ],
+          },
+          creado: DateTime(2026, 9, 22, 18),
+          resumen: 'Mesa $mesa',
+          total: 50,
+        );
+
+    test('la mesa de un pedido que no se ha enviado ya no aparece libre', () {
+      final mesas = estadoMesas(const [], cola: [envio(mesa: 3)]);
+      final mesa3 = mesas.firstWhere((m) => m.numero == 3);
+      expect(mesa3.situacion, SituacionMesa.sinEnviar);
+      expect(mesa3.situacion, isNot(SituacionMesa.libre));
+      expect(mesa3.sinEnviar, hasLength(1));
+      expect(mesas.firstWhere((m) => m.numero == 1).situacion, SituacionMesa.libre);
+    });
+
+    test('para llevar y ampliaciones no ocupan mesa; una mesa fuera del salón sí aparece', () {
+      final mesas = estadoMesas(const [], cola: [
+        envio(mesa: 2, tipo: 'llevar'),
+        envio(mesa: 6, accion: 'agregar', operacion: 'op-2'),
+        envio(mesa: 20, operacion: 'op-3'),
+      ]);
+      expect(mesas.firstWhere((m) => m.numero == 2).situacion, SituacionMesa.libre);
+      expect(mesas.firstWhere((m) => m.numero == 6).situacion, SituacionMesa.libre);
+      expect(mesas.firstWhere((m) => m.numero == 20).situacion, SituacionMesa.sinEnviar);
+    });
+
+    test('si la mesa ya tiene cuentas, manda el estado de cocina', () {
+      final mesas = estadoMesas([pedido(id: 1, mesa: 3, estado: 'preparando')], cola: [envio(mesa: 3)]);
+      final mesa3 = mesas.firstWhere((m) => m.numero == 3);
+      expect(mesa3.situacion, SituacionMesa.enCocina);
+      expect(mesa3.sinEnviar, hasLength(1));
+    });
   });
 
   test('cocina agrupa por mesa y deja cada pedido para llevar aparte', () {

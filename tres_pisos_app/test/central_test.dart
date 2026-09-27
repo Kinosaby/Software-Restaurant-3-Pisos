@@ -139,6 +139,34 @@ void main() {
       expect(items, hasLength(3));
     });
 
+    test('un extra sobre un pedido listo queda pendiente hasta que cocina lo termina', () async {
+      final mesero = await usuario('luis', 'mesero');
+      final cocina = await usuario('chef', 'cocina');
+      final id = (await central.crearPedido(pedidoDe(1), usuario: mesero))['id'] as int;
+      await central.cambiarEstado(id, 'listo', usuario: cocina);
+
+      // Mismo producto que ya se sirvió: va en renglón aparte, marcado como extra.
+      await central.agregarProductos(id, pedidoDe(1), usuario: mesero);
+      await central.agregarProductos(id, pedidoDe(1), usuario: mesero);
+      var pedido = central.obtenerPedido(id);
+      var items = pedido['productos'] as List;
+      expect(pedido['estado'], 'listo');
+      expect(items.map((i) => (i['cantidad'], i.containsKey('extra_desde'))), [(1, false), (2, true)]);
+
+      // La marca sobrevive a un reinicio de la central.
+      await central.cerrar();
+      central = await abrir();
+      expect((central.obtenerPedido(id)['productos'] as List).last['extra_desde'], isNotNull);
+
+      eventos.clear();
+      await central.cambiarEstado(id, 'listo', usuario: cocina);
+      pedido = central.obtenerPedido(id);
+      items = pedido['productos'] as List;
+      expect(items.any((i) => i.containsKey('extra_desde')), isFalse);
+      expect(eventos.single.$1, 'pedido_actualizado');
+      expect(pedido['total'], 126.0, reason: 'el extra se cobra con la cuenta');
+    });
+
     test('agregar a una cuenta pagada abre una cuenta nueva', () async {
       final mesero = await usuario('luis', 'mesero');
       final id = (await central.crearPedido(pedidoDe(1), usuario: mesero))['id'] as int;
