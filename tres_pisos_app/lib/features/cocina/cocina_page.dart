@@ -345,7 +345,7 @@ class _TarjetaExtra extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final marcas = ref.watch(marcasCocinaProvider)['e${extra.clave}'] ?? const <int>{};
-    final titulo = extra.tipo == TipoPedido.llevar ? 'Para llevar (mesa ${extra.mesa})' : 'Mesa ${extra.mesa}';
+    final titulo = etiquetaMesa(extra.mesa, llevar: extra.tipo == TipoPedido.llevar);
     return Card(
       color: Colores.dorado.withValues(alpha: 0.10),
       shape: RoundedRectangleBorder(

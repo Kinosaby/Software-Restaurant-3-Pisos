@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tres_pisos_app/core/formato.dart';
 import 'package:tres_pisos_app/features/mesero/editar_pedido_page.dart';
 import 'package:tres_pisos_app/features/pedidos/modelos.dart';
 
@@ -34,5 +35,28 @@ void main() {
       {'detalle_id': 11, 'cantidad': 0, 'nota': null},
       {'detalle_id': 12, 'cantidad': 1, 'nota': null},
     ]);
+  });
+
+  test('la mesa interna para llevar se muestra como "Para llevar"', () {
+    expect(etiquetaMesa(mesaParaLlevar), 'Para llevar');
+    expect(etiquetaMesa(mesaParaLlevar, llevar: true), 'Para llevar');
+    expect(etiquetaMesa(4), 'Mesa 4');
+    expect(etiquetaMesa(4, llevar: true), 'Para llevar (mesa 4)');
+  });
+
+  group('mesa al guardar', () {
+    final llevar = Pedido.fromJson({...pedidoJson(), 'mesa': mesaParaLlevar, 'tipo': 'llevar'});
+
+    test('para llevar no pide mesa y usa la interna', () {
+      expect(mesaAlGuardar(llevar, TipoPedido.llevar, ''), mesaParaLlevar);
+      expect(mesaAlGuardar(pedido, TipoPedido.llevar, ''), mesaParaLlevar);
+    });
+
+    test('pasar de llevar a aquí exige una mesa real', () {
+      expect(mesaAlGuardar(llevar, TipoPedido.aqui, ''), isNull);
+      expect(mesaAlGuardar(llevar, TipoPedido.aqui, '99'), isNull);
+      expect(mesaAlGuardar(llevar, TipoPedido.aqui, '0'), isNull);
+      expect(mesaAlGuardar(llevar, TipoPedido.aqui, ' 7 '), 7);
+    });
   });
 }
