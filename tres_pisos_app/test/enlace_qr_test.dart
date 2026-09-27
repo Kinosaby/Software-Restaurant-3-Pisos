@@ -45,6 +45,22 @@ void main() {
     expect(DatosEnlace.leer('trespisos://enlace?ip=192.168.1.20&c=k7p29qxm')?.codigo, 'K7P2-9QXM');
   });
 
+  test('el QR solo lleva IP de la red local (nunca las de datos móviles)', () {
+    const conDatos = DatosEnlace(
+      ips: ['192.168.1.20', '210.23.40.129', '100.64.0.1', '10.0.0.5'],
+      puerto: 8787,
+      codigo: 'K7P2-9QXM',
+    );
+    final texto = conDatos.uri.toString();
+    expect(texto, isNot(contains('210.23.40.129')));
+    expect(texto, isNot(contains('100.64.0.1')));
+    expect(DatosEnlace.leer(texto)!.ips, ['192.168.1.20', '10.0.0.5']);
+
+    // Un QR manipulado con IP públicas: se descartan, y si no queda ninguna no vale.
+    expect(DatosEnlace.leer('trespisos://enlace?ip=8.8.8.8,192.168.0.3&c=K7P2-9QXM')!.ips, ['192.168.0.3']);
+    expect(DatosEnlace.leer('trespisos://enlace?ip=210.23.40.129&c=K7P2-9QXM'), isNull);
+  });
+
   test('la IP del Wi-Fi va primero', () {
     expect(ordenarIps(['100.64.0.1', '172.20.1.4', '10.1.1.1', '192.168.0.9']),
         ['192.168.0.9', '10.1.1.1', '172.20.1.4', '100.64.0.1']);

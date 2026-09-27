@@ -413,6 +413,15 @@ class Central {
   /// Avisos en tiempo real (`nuevo_pedido`, `pedido_actualizado`, `extra_pedido`, `pedido_eliminado`).
   Emisor? emitir;
 
+  /// Se llama cuando pueden haber dejado de valer sesiones abiertas (enlace
+  /// renovado, contraseña o rol cambiados, usuario borrado): el servidor cierra
+  /// los WebSockets afectados.
+  void Function()? alRevocarSesiones;
+
+  /// Hash con el que se compara la contraseña cuando el usuario no existe, para
+  /// que el tiempo de respuesta no revele qué usuarios hay.
+  Future<String>? _hashFalso;
+
   final _usuarios = <int, UsuarioCentral>{};
   final _productos = <int, ProductoCentral>{};
   final _pedidos = <int, PedidoCentral>{};
@@ -627,6 +636,7 @@ class Central {
             'v': {'enlace': nuevo, 'secreto': idAleatorio(32)},
           },
         ]);
+        alRevocarSesiones?.call();
         return nuevo;
       });
 
@@ -638,14 +648,26 @@ class Central {
   /// PBKDF2 va en otro isolate para no congelar la central (y su pantalla) durante el cálculo.
   Future<Map<String, dynamic>> login(String username, String password) async {
     final usuario = _usuarios.values.where((u) => u.username.toLowerCase() == username.trim().toLowerCase()).firstOrNull;
-    final hash = usuario?.passwordHash;
-    final valida = hash != null && await Isolate.run(() => verificarPassword(password, hash));
+    // Con un usuario inexistente se calcula igual un PBKDF2 completo.
+    final hash = usuario?.passwordHash ?? await (_hashFalso ??= _hash(idAleatorio()));
+    final valida = await Isolate.run(() => verificarPassword(password, hash));
     if (usuario == null || !valida) {
       throw ErrorCentral(401, 'INVALID_CREDENTIALS', 'Usuario o contraseña incorrectos.');
     }
+    return _sesion(usuario);
+  }
+
+  /// Token nuevo (con otras 12 h) para quien ya tiene una sesión vigente; la
+  /// tablet lo pide al pasar la mitad de la vigencia para no quedarse fuera a
+  /// mitad del servicio. Conserva la versión (`ver`): cambiar contraseña o rol
+  /// sigue invalidando también los tokens renovados.
+  Map<String, dynamic> renovarSesion(UsuarioCentral usuario) => _sesion(usuario);
+
+  Map<String, dynamic> _sesion(UsuarioCentral usuario) {
     final token = firmarToken(
       {'id': usuario.id, 'username': usuario.username, 'role': usuario.rol, 'ver': usuario.versionToken},
       _secreto,
+      ahora: _reloj(),
     );
     return {'token': token, 'user': usuario.publico()};
   }
@@ -723,6 +745,7 @@ class Central {
         await _confirmar([
           {'t': 'usuario', 'v': usuario.toJson()},
         ]);
+        if (cambiaAcceso) alRevocarSesiones?.call();
         return usuario.publico();
       });
 
@@ -735,6 +758,7 @@ class Central {
         await _confirmar([
           {'t': 'borrar', 'tabla': 'usuario', 'id': id},
         ]);
+        alRevocarSesiones?.call();
         return usuario.publico();
       });
 

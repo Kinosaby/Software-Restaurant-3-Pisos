@@ -390,7 +390,8 @@ class ColaEnvios extends Notifier<List<EnvioPendiente>> {
   @override
   List<EnvioPendiente> build() {
     final guardados = ref.watch(almacenLocalProvider).lista('cola') ?? const [];
-    if (ref.watch(authControllerProvider) != null) {
+    // Solo si hay sesión o no: renovar el token no reinicia la cola.
+    if (ref.watch(authControllerProvider.select((s) => s != null))) {
       final reloj = Timer.periodic(const Duration(seconds: 8), (_) => unawaited(procesar()));
       ref.onDispose(reloj.cancel);
       ref.listen(conexionTiempoRealProvider, (_, conectado) {

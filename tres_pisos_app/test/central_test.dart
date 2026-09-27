@@ -12,6 +12,13 @@ const menu = [
   {'nombre': 'Birria', 'precio': '100.00', 'categoria': 'Platillos', 'activo': false},
 ];
 
+/// El servidor registra el WebSocket un instante después de que el cliente conecta.
+Future<void> hastaQue(bool Function() condicion) async {
+  for (var i = 0; i < 100 && !condicion(); i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
+}
+
 void main() {
   late Directory carpeta;
   late Central central;
@@ -525,6 +532,200 @@ void main() {
       }
       final (status, _) = await pedir('POST', '/api/auth/login', cuerpo: {'username': 'admin', 'password': 'secreto1'});
       expect(status, 429);
+    });
+
+    test('logins en paralelo no esquivan el límite de intentos', () async {
+      var probadas = 0;
+      for (var ronda = 0; ronda < 6; ronda++) {
+        final respuestas = await Future.wait([
+          for (var i = 0; i < 6; i++)
+            pedir('POST', '/api/auth/login', cuerpo: {'username': i.isEven ? 'admin' : 'nadie', 'password': 'mala'}),
+        ]);
+        for (final (status, _) in respuestas) {
+          expect(status, anyOf(401, 429));
+          if (status == 401) probadas++;
+        }
+      }
+      expect(probadas, lessThanOrEqualTo(ServidorCentral.maxFallosLogin));
+      final (status, cuerpo) =
+          await pedir('POST', '/api/auth/login', cuerpo: {'username': 'admin', 'password': 'secreto1'});
+      expect(status, 429);
+      expect(cuerpo['code'], 'TOO_MANY_ATTEMPTS');
+    });
+
+    test('limita los códigos de enlace incorrectos por IP', () async {
+      for (var i = 0; i < ServidorCentral.maxFallosEnlace; i++) {
+        final (status, _) = await pedir('GET', '/api/central/info', enlace: 'AAAA-BBBB');
+        expect(status, 403);
+      }
+      // Ni con el código correcto mientras dure el bloqueo.
+      final (status, _) = await pedir('GET', '/api/central/info');
+      expect(status, 429);
+    });
+
+    test('con el código viejo y un token que ya no vale responde 401 (cerrar sesión)', () async {
+      final token = (await central.login('admin', 'secreto1'))['token'] as String;
+      final viejo = central.codigoEnlace;
+      await central.renovarEnlace();
+      final (status, _) = await pedir('GET', '/api/auth/me', token: token, enlace: viejo);
+      expect(status, 401);
+      final (sinToken, cuerpo) = await pedir('GET', '/api/auth/me', enlace: viejo);
+      expect((sinToken, cuerpo['code']), (403, 'ENLACE'));
+    });
+
+    Future<WebSocket> abrirWs(String token) => WebSocket.connect(
+          'ws://127.0.0.1:${servidor.puertoEnUso}/ws?token=$token&enlace=${central.codigoEnlace}',
+        );
+
+    /// Espera a que el servidor cierre el socket y devuelve el código de cierre.
+    Future<int?> cierre(WebSocket ws) async {
+      await ws.drain<void>().timeout(const Duration(seconds: 5));
+      return ws.closeCode;
+    }
+
+    test('renovar el código de enlace cierra los WebSockets abiertos', () async {
+      final ws = await abrirWs((await central.login('admin', 'secreto1'))['token'] as String);
+      await hastaQue(() => servidor.clientesConectados == 1);
+      expect(servidor.clientesConectados, 1);
+      await central.renovarEnlace();
+      expect(await cierre(ws), cierreSesionInvalida);
+      expect(servidor.clientesConectados, 0);
+    });
+
+    test('cambiar contraseña o rol, o borrar al usuario, cierra solo sus WebSockets', () async {
+      final luis = await usuario('luis', 'mesero');
+      final ana = await usuario('ana', 'mesero');
+      final wsLuis = await abrirWs((await central.login('luis', 'clave123'))['token'] as String);
+      final wsAna = await abrirWs((await central.login('ana', 'clave123'))['token'] as String);
+      final wsAdmin = await abrirWs((await central.login('admin', 'secreto1'))['token'] as String);
+      await hastaQue(() => servidor.clientesConectados == 3);
+      expect(servidor.clientesConectados, 3);
+
+      await central.actualizarUsuario(luis.id, {'username': 'luis', 'role': 'cocina'});
+      expect(await cierre(wsLuis), cierreSesionInvalida);
+      expect(servidor.clientesConectados, 2);
+
+      final admin = central.autenticar((await central.login('admin', 'secreto1'))['token'] as String)!;
+      await central.eliminarUsuario(ana.id, actorId: admin.id);
+      expect(await cierre(wsAna), cierreSesionInvalida);
+      expect(servidor.clientesConectados, 1, reason: 'el admin sigue conectado');
+
+      // Un token revocado ya no abre el WebSocket.
+      final viejo = (await central.login('admin', 'secreto1'))['token'] as String;
+      await central.actualizarUsuario(admin.id, {'username': 'admin', 'role': 'admin', 'password': 'nueva123'});
+      expect(await cierre(wsAdmin), cierreSesionInvalida);
+      await expectLater(
+        abrirWs(viejo),
+        throwsA(isA<WebSocketException>().having((e) => e.httpStatusCode, 'httpStatusCode', 401)),
+      );
+    });
+
+    test('POST /api/auth/renovar da un token nuevo que conserva la revocación por versión', () async {
+      final luis = await usuario('luis', 'mesero');
+      final token = (await central.login('luis', 'clave123'))['token'] as String;
+
+      final (status, cuerpo) = await pedir('POST', '/api/auth/renovar', token: token);
+      expect(status, 200);
+      final nuevo = cuerpo['token'] as String;
+      expect(central.autenticar(nuevo)?.id, luis.id);
+      expect((cuerpo['user'] as Map)['username'], 'luis');
+
+      final (sinToken, _) = await pedir('POST', '/api/auth/renovar');
+      expect(sinToken, 401);
+
+      await central.actualizarUsuario(luis.id, {'username': 'luis', 'role': 'mesero', 'password': 'nueva123'});
+      expect(central.autenticar(nuevo), isNull, reason: 'el token renovado también se revoca');
+      final (revocado, _) = await pedir('POST', '/api/auth/renovar', token: nuevo);
+      expect(revocado, 401);
+    });
+  });
+
+  group('caducidad y renovación de sesiones', () {
+    late Directory carpetaReloj;
+    late Central conReloj;
+    late ServidorCentral servidor;
+    var ahora = DateTime.now();
+
+    setUp(() async {
+      ahora = DateTime.now();
+      carpetaReloj = await Directory.systemTemp.createTemp('central_reloj');
+      conReloj = await Central.abrir(carpetaReloj, iteraciones: 1000, reloj: () => ahora);
+      await conReloj.inicializar(admin: 'admin', password: 'secreto1');
+      servidor = ServidorCentral(conReloj, puerto: 0, anunciar: false);
+      await servidor.iniciar();
+    });
+
+    tearDown(() async {
+      await servidor.detener();
+      await conReloj.cerrar();
+      await carpetaReloj.delete(recursive: true);
+    });
+
+    test('renovar a mitad del turno alarga la sesión 12 h desde la renovación', () async {
+      final token = (await conReloj.login('admin', 'secreto1'))['token'] as String;
+      ahora = ahora.add(const Duration(hours: 7));
+      final renovado = conReloj.renovarSesion(conReloj.autenticar(token)!)['token'] as String;
+
+      ahora = ahora.add(const Duration(hours: 6)); // 13 h desde el login
+      expect(conReloj.autenticar(token), isNull, reason: 'el token original caducó');
+      expect(conReloj.autenticar(renovado), isNotNull, reason: 'el renovado sigue vigente');
+    });
+
+    test('un WebSocket con el token caducado se cierra al revisarlo', () async {
+      final token = (await conReloj.login('admin', 'secreto1'))['token'] as String;
+      final ws = await WebSocket.connect(
+        'ws://127.0.0.1:${servidor.puertoEnUso}/ws?token=$token&enlace=${conReloj.codigoEnlace}',
+      );
+      await hastaQue(() => servidor.clientesConectados == 1);
+      servidor.revisarSesiones();
+      expect(servidor.clientesConectados, 1, reason: 'aún vigente');
+
+      ahora = ahora.add(const Duration(hours: 13));
+      servidor.revisarSesiones();
+      await ws.drain<void>().timeout(const Duration(seconds: 5));
+      expect(ws.closeCode, cierreSesionInvalida);
+      expect(servidor.clientesConectados, 0);
+    });
+  });
+
+  group('red local', () {
+    test('clasifica IP privadas, locales y públicas', () {
+      for (final ip in [
+        '192.168.1.20',
+        '10.0.0.5',
+        '172.16.0.1',
+        '172.31.255.254',
+        '127.0.0.1',
+        '169.254.10.1',
+        '::1',
+        'fd12:3456::1',
+        'fe80::1',
+        '::ffff:192.168.1.7',
+      ]) {
+        expect(esIpLocalTexto(ip), isTrue, reason: ip);
+      }
+      for (final ip in [
+        '210.23.40.129', // datos móviles
+        '8.8.8.8',
+        '172.32.0.1',
+        '172.15.255.255',
+        '100.64.0.1', // CGNAT de la operadora
+        '192.169.0.1',
+        '11.0.0.1',
+        '2001:4860::8888',
+        '::ffff:8.8.8.8',
+        'central.local',
+        '',
+      ]) {
+        expect(esIpLocalTexto(ip), isFalse, reason: ip);
+      }
+    });
+
+    test('ipsLocales nunca ofrece IP públicas ni loopback', () async {
+      for (final ip in await ipsLocales()) {
+        expect(esIpLocalTexto(ip), isTrue, reason: ip);
+        expect(ip, isNot(startsWith('127.')));
+      }
     });
   });
 
