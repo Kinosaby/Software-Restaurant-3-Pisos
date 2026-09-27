@@ -210,19 +210,31 @@ class PedidosActivos extends AsyncNotifier<List<Pedido>> {
     TipoPedido? tipo,
     Opcional<String>? comensal,
   }) =>
-      _ejecutar((repo) => repo.editar(pedidoId, items: items, mesa: mesa, tipo: tipo, comensal: comensal));
+      _ejecutar('guardar los cambios del pedido',
+          (repo) => repo.editar(pedidoId, items: items, mesa: mesa, tipo: tipo, comensal: comensal));
 
-  Future<Pedido> cambiarEstado(int pedidoId, EstadoPedido estado) =>
-      _ejecutar((repo) => repo.cambiarEstado(pedidoId, estado));
+  Future<Pedido> cambiarEstado(int pedidoId, EstadoPedido estado) => _ejecutar(
+      estado == EstadoPedido.cancelado ? 'cancelar el pedido' : 'cambiar el estado del pedido',
+      (repo) => repo.cambiarEstado(pedidoId, estado));
 
   /// Cambia varios pedidos a la vez (p. ej. "todo listo" de una mesa o cobrar la mesa completa).
+  /// Si la conexión se corta a la mitad, el aviso dice cuántos sí cambiaron.
   Future<void> cambiarEstadoVarios(Iterable<int> ids, EstadoPedido estado) async {
-    for (final id in ids) {
-      await cambiarEstado(id, estado);
+    final lista = ids.toList();
+    var hechos = 0;
+    for (final id in lista) {
+      try {
+        await cambiarEstado(id, estado);
+      } on ApiException catch (e) {
+        if (hechos == 0) rethrow;
+        throw ApiException('${e.mensaje}\nDe ${lista.length} pedidos, $hechos sí se cambiaron.',
+            status: e.status, codigo: e.codigo, sinConexion: e.sinConexion, entregaIncierta: e.entregaIncierta);
+      }
+      hechos++;
     }
   }
 
-  Future<Pedido> cancelar(int pedidoId) => _ejecutar((repo) => repo.cancelar(pedidoId));
+  Future<Pedido> cancelar(int pedidoId) => _ejecutar('cancelar el pedido', (repo) => repo.cancelar(pedidoId));
 
   /// Pasa [cantidad] piezas de un renglón a otra cuenta de la misma mesa.
   Future<Reparto> moverProducto(Pedido origen, PedidoItem item, {required int cantidad, required Pedido destino}) =>
@@ -237,11 +249,7 @@ class PedidosActivos extends AsyncNotifier<List<Pedido>> {
     try {
       reparto = await accion(ref.read(pedidosRepositoryProvider));
     } on ApiException catch (e) {
-      if (e.sinConexion) {
-        throw ApiException('Sin conexión con la central: para mover o dividir productos la tablet '
-            'de cocina debe estar encendida y en el mismo Wi-Fi.');
-      }
-      rethrow;
+      throw _sinCentral(e, 'mover o dividir el producto');
     }
     final actuales = state.value;
     if (ref.mounted && actuales != null) _fijar(aplicarReparto(actuales, reparto));
@@ -252,7 +260,7 @@ class PedidosActivos extends AsyncNotifier<List<Pedido>> {
   /// Como los demás cobros, no se encola: sin conexión falla con el mismo aviso.
   Future<List<Pedido>> cobrar(Iterable<int> ids, Pago pago) async {
     final cobrados = <Pedido>[];
-    await _ejecutar((repo) async {
+    await _ejecutar('registrar el cobro', (repo) async {
       cobrados.addAll(await repo.cobrar(ids.toList(), pago));
       return cobrados.last;
     });
@@ -264,19 +272,31 @@ class PedidosActivos extends AsyncNotifier<List<Pedido>> {
     return cobrados;
   }
 
-  Future<Pedido> _ejecutar(Future<Pedido> Function(PedidosRepository repo) accion) async {
+  Future<Pedido> _ejecutar(String que, Future<Pedido> Function(PedidosRepository repo) accion) async {
     try {
       final pedido = await accion(ref.read(pedidosRepositoryProvider));
       if (ref.mounted) aplicar(pedido);
       return pedido;
     } on ApiException catch (e) {
-      // Cobros y cambios de estado no se encolan: deben confirmarse en el momento.
-      if (e.sinConexion) {
-        throw ApiException('Sin conexión con la central: los cobros y cambios de estado necesitan '
-            'que la tablet de cocina esté encendida y en el mismo Wi-Fi.');
-      }
-      rethrow;
+      throw _sinCentral(e, que);
     }
+  }
+
+  /// Cobros, cambios de estado, ediciones, cancelaciones y repartos no se
+  /// encolan: deben confirmarse en el momento. Sin conexión se explica qué
+  /// pasó; si la central pudo recibirlo sin contestar, se recarga la lista para
+  /// que se vea cómo quedó y nadie lo repita a ciegas.
+  ApiException _sinCentral(ApiException e, String que) {
+    if (!e.sinConexion) return e;
+    if (e.entregaIncierta) {
+      if (ref.mounted) unawaited(recargar());
+      return ApiException('La central no respondió a tiempo: no se sabe si se alcanzó a $que. '
+          'Revisa el pedido cuando vuelva la conexión antes de repetirlo.',
+          sinConexion: true, entregaIncierta: true);
+    }
+    return ApiException('Sin conexión con la central: no se pudo $que (no quedó registrado). Esto no '
+        'se guarda para después; hazlo cuando la tablet de cocina esté encendida y en el mismo Wi-Fi.',
+        sinConexion: true);
   }
 }
 
@@ -400,17 +420,19 @@ class ColaEnvios extends Notifier<List<EnvioPendiente>> {
     return [for (final e in guardados) EnvioPendiente.fromJson(e)];
   }
 
-  void _guardar(List<EnvioPendiente> cola) {
+  Future<void> _guardar(List<EnvioPendiente> cola) {
     state = cola;
-    unawaited(ref.read(almacenLocalProvider).guardarLista('cola', [for (final e in cola) e.toJson()]));
+    return ref.read(almacenLocalProvider).guardarLista('cola', [for (final e in cola) e.toJson()]);
   }
 
-  Future<void> encolar(EnvioPendiente envio) async => _guardar([...state, envio]);
+  /// Se espera a que quede escrito: si la app se cierra justo después, el envío no se pierde.
+  Future<void> encolar(EnvioPendiente envio) => _guardar([...state, envio]);
 
-  void descartar(EnvioPendiente envio) => _guardar([for (final e in state) if (e.operacion != envio.operacion) e]);
+  void descartar(EnvioPendiente envio) =>
+      unawaited(_guardar([for (final e in state) if (e.operacion != envio.operacion) e]));
 
   Future<void> reintentar(EnvioPendiente envio) async {
-    _guardar([for (final e in state) e.operacion == envio.operacion ? e.conError(null) : e]);
+    await _guardar([for (final e in state) e.operacion == envio.operacion ? e.conError(null) : e]);
     await procesar();
   }
 
@@ -426,7 +448,7 @@ class ColaEnvios extends Notifier<List<EnvioPendiente>> {
               ? await repo.crear(envio.cuerpo, operacion: envio.operacion)
               : await repo.agregar(envio.pedidoId!, envio.cuerpo, operacion: envio.operacion);
           if (!ref.mounted) return;
-          _guardar([for (final e in state) if (e.operacion != envio.operacion) e]);
+          unawaited(_guardar([for (final e in state) if (e.operacion != envio.operacion) e]));
           ref.read(favoritosProvider.notifier).registrar(envio.cuerpo);
           ref.read(sinConexionProvider.notifier).fijar(false);
           if (ref.exists(pedidosActivosProvider)) ref.read(pedidosActivosProvider.notifier).aplicar(pedido);
@@ -434,7 +456,7 @@ class ColaEnvios extends Notifier<List<EnvioPendiente>> {
           if (!ref.mounted) return;
           // Sin conexión o sin sesión: se reintenta más tarde con la misma operación.
           if (e.noAutorizado || e.sinConexion) break;
-          _guardar([for (final x in state) x.operacion == envio.operacion ? x.conError(e.mensaje) : x]);
+          unawaited(_guardar([for (final x in state) x.operacion == envio.operacion ? x.conError(e.mensaje) : x]));
         }
       }
     } finally {

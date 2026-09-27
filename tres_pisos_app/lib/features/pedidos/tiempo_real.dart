@@ -89,6 +89,7 @@ class TiempoRealCentral extends TiempoReal {
   }
 
   final Uri _url;
+  final _cliente = HttpClient()..connectionTimeout = const Duration(seconds: 6);
   WebSocket? _ws;
   bool _cerrado = false;
   int _intentos = 0;
@@ -96,7 +97,12 @@ class TiempoRealCentral extends TiempoReal {
   Future<void> _conectar() async {
     while (!_cerrado) {
       try {
-        final ws = await WebSocket.connect(_url.toString()).timeout(const Duration(seconds: 6));
+        final intento = WebSocket.connect(_url.toString(), customClient: _cliente);
+        final ws = await intento.timeout(const Duration(seconds: 6), onTimeout: () {
+          // Si el intento lento acaba conectando después, se cierra para no dejar un socket huérfano.
+          unawaited(intento.then((tarde) => tarde.close(), onError: (_) {}));
+          throw TimeoutException('La central no respondió');
+        });
         if (_cerrado) {
           await ws.close();
           return;
@@ -128,6 +134,7 @@ class TiempoRealCentral extends TiempoReal {
   void cerrar() {
     _cerrado = true;
     _ws?.close();
+    _cliente.close(force: true);
     super.cerrar();
   }
 }

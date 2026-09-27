@@ -345,7 +345,8 @@ class _FormularioEnlaceState extends ConsumerState<_FormularioEnlace> {
         mostrarMensaje(
           context,
           e.code == 'DESCARGANDO'
-              ? 'Google está descargando el escáner. Conecta la tablet a internet y vuelve a intentarlo en un minuto.'
+              ? 'El escáner de Google aún no está instalado en esta tablet (se descarga con internet). '
+                  'Sin internet: abre la cámara de la tablet y apunta al QR, o escribe la IP y el código abajo.'
               : 'El escáner falló (${e.message ?? e.code}). Abre la cámara y apunta al QR, o escribe la IP y el código.',
           error: true,
         );

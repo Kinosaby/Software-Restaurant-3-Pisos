@@ -36,7 +36,10 @@ class ApiClient {
   }) : _dio = dio ??
             Dio(BaseOptions(
               baseUrl: servidor,
+              // Todo es en la red local: si la central no contesta en estos
+              // tiempos, la tablet avisa en vez de quedarse cargando.
               connectTimeout: const Duration(seconds: 6),
+              sendTimeout: const Duration(seconds: 10),
               receiveTimeout: const Duration(seconds: 15),
               headers: {
                 if (token != null) 'Authorization': 'Bearer $token',

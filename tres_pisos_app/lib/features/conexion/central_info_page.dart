@@ -26,8 +26,12 @@ class _CentralInfoPageState extends ConsumerState<CentralInfoPage> {
   @override
   void initState() {
     super.initState();
-    // Actualiza el número de tablets conectadas.
-    _refresco = Timer.periodic(const Duration(seconds: 3), (_) => setState(() {}));
+    // Actualiza el número de tablets conectadas y la IP: si la central arrancó
+    // sin Wi-Fi o el router le dio otra IP, el QR se corrige solo.
+    _refresco = Timer.periodic(const Duration(seconds: 3), (_) {
+      ref.invalidate(_ipsProvider);
+      setState(() {});
+    });
   }
 
   @override
