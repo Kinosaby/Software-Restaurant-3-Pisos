@@ -192,7 +192,14 @@ typedef Reparto = ({List<Pedido> pedidos, int? eliminado});
 /// Otras cuentas abiertas de la misma mesa a las que se pueden pasar productos de [pedido].
 List<Pedido> cuentasHermanas(Iterable<Pedido> activos, Pedido pedido) => [
       for (final p in activos)
-        if (p.id != pedido.id && p.mesa == pedido.mesa && p.estado.activo && !p.cobrado) p,
+        // Los pedidos para llevar son de clientes distintos aunque compartan la mesa interna.
+        if (pedido.tipo == TipoPedido.aqui &&
+            p.tipo == TipoPedido.aqui &&
+            p.id != pedido.id &&
+            p.mesa == pedido.mesa &&
+            p.estado.activo &&
+            !p.cobrado)
+          p,
     ];
 
 /// Redondea a centavos para comparar y repartir importes sin errores de coma flotante.

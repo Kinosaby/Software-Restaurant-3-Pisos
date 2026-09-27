@@ -947,7 +947,8 @@ class Central {
         if (pedido.estado == 'cancelado') {
           throw ErrorCentral(400, 'INVALID_STATUS', 'No se puede modificar un pedido cancelado.');
         }
-        final esExtra = pedido.estado == 'listo';
+        // Sobre una cuenta cobrada se abre una nueva: ahí no son extras.
+        final esExtra = pedido.estado == 'listo' && !pedido.cobrado;
         final nuevos = _numerar(_itemsNuevos(datos['productos']), extraDesde: esExtra ? _reloj() : null);
 
         if (pedido.cobrado) {
@@ -1091,6 +1092,9 @@ class Central {
     final ids = {for (final d in destinos) d.id};
     if (ids.length != destinos.length || ids.contains(origen.id)) {
       throw ErrorCentral(400, 'VALIDATION_ERROR', 'Elige cuentas distintas a la de origen.');
+    }
+    if (origen.tipo == 'llevar' || destinos.any((d) => d.tipo == 'llevar')) {
+      throw ErrorCentral(400, 'DIFFERENT_TABLE', 'Los pedidos para llevar no se reparten entre cuentas.');
     }
     if (destinos.any((d) => d.mesa != origen.mesa)) {
       throw ErrorCentral(400, 'DIFFERENT_TABLE', 'Solo se pueden repartir productos entre cuentas de la misma mesa.');
@@ -1293,6 +1297,10 @@ class Central {
               estado == 'listo' ||
               (estado == 'cancelado' && (pedido.estado == 'pendiente' || pedido.estado == 'preparando'));
           if (!permitido) throw ErrorCentral(403, 'FORBIDDEN', 'Cocina no puede cambiar el pedido a "$estado".');
+        }
+        // Una tablet con la versión anterior no conoce el cobro por adelantado.
+        if (pedido.pago != null && estado == 'pagado') {
+          throw ErrorCentral(400, 'ALREADY_PAID', 'Esta cuenta ya se cobró. Actualiza la app de esta tablet.');
         }
         if (pedido.pago != null && estado == 'cancelado') {
           throw ErrorCentral(400, 'ALREADY_PAID',
