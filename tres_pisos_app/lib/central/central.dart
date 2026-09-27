@@ -1380,7 +1380,8 @@ class Central {
     }
     final porProducto = <String, int>{};
     for (final p in _pedidos.values.where((p) => p.estado != 'cancelado')) {
-      for (final i in p.items) {
+      // Un platillo dividido es uno solo: se cuenta en su parte 1, como lo ve cocina.
+      for (final i in p.items.where((i) => i.compartido == null || i.compartido!.parte == 1)) {
         porProducto[i.nombre] = (porProducto[i.nombre] ?? 0) + i.cantidad;
       }
     }

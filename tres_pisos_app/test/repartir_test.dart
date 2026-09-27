@@ -223,6 +223,10 @@ void main() {
       final visibles = pedidos.expand((p) => p.items).where((i) => i.paraCocina && i.compartido != null);
       expect(visibles, hasLength(1));
 
+      // En "más pedidos" siguen siendo 2 pizzas, no 4.
+      final top = central.resumen()['productosTop'] as List;
+      expect(top.firstWhere((e) => e['nombre'] == deAna.first['nombre'])['total_pedido'], 2);
+
       // Una parte no se vuelve a dividir, ni cambia de cantidad.
       await expectLater(
         central.dividirProducto(beto['id'] as int, {

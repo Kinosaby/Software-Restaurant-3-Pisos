@@ -135,6 +135,8 @@ class _HojaCobro extends ConsumerStatefulWidget {
 class _HojaCobroState extends ConsumerState<_HojaCobro> {
   final _recibido = TextEditingController();
   final _tarjeta = TextEditingController();
+  final _focoRecibido = FocusNode();
+  final _focoTarjeta = FocusNode();
   FormaPago _forma = FormaPago.efectivo;
   bool _cobrando = false;
   String? _error;
@@ -150,7 +152,27 @@ class _HojaCobroState extends ConsumerState<_HojaCobro> {
   void dispose() {
     _recibido.dispose();
     _tarjeta.dispose();
+    _focoRecibido.dispose();
+    _focoTarjeta.dispose();
     super.dispose();
+  }
+
+  /// Al cambiar la forma de pago el teclado pasa al campo que toca llenar; sin
+  /// esto seguía conectado al campo anterior y lo que se escribía no aparecía.
+  void _cambiarForma(FormaPago forma) {
+    setState(() => _forma = forma);
+    final foco = switch (forma) {
+      FormaPago.efectivo => _focoRecibido,
+      FormaPago.mixto => _focoTarjeta,
+      FormaPago.tarjeta => null,
+    };
+    if (foco == null) {
+      FocusScope.of(context).unfocus();
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) foco.requestFocus();
+      });
+    }
   }
 
   Future<void> _cobrar(CalculoCobro calculo) async {
@@ -179,8 +201,10 @@ class _HojaCobroState extends ConsumerState<_HojaCobro> {
     final cambio = calculo.cambio;
     final pideEfectivo = _forma != FormaPago.tarjeta && calculo.tarjetaValida && calculo.hayEfectivo;
 
-    Widget campoDinero(TextEditingController c, String etiqueta, {bool enfocar = false}) => TextField(
+    Widget campoDinero(TextEditingController c, FocusNode foco, String etiqueta, {bool enfocar = false}) => TextField(
+          key: ObjectKey(c), // cada campo con su propio estado aunque cambie de lugar
           controller: c,
+          focusNode: foco,
           autofocus: enfocar,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]'))],
@@ -240,11 +264,11 @@ class _HojaCobroState extends ConsumerState<_HojaCobro> {
                 ],
                 selected: {_forma},
                 showSelectedIcon: false,
-                onSelectionChanged: (s) => setState(() => _forma = s.first),
+                onSelectionChanged: (s) => _cambiarForma(s.first),
               ),
               const SizedBox(height: 16),
               if (_forma == FormaPago.mixto) ...[
-                campoDinero(_tarjeta, 'Con tarjeta o transferencia', enfocar: true),
+                campoDinero(_tarjeta, _focoTarjeta, 'Con tarjeta o transferencia', enfocar: true),
                 const SizedBox(height: 8),
                 if (!calculo.tarjetaValida && _tarjeta.text.isNotEmpty)
                   const Text('La parte con tarjeta no puede pasar del total.', style: TextStyle(color: Colores.peligro))
@@ -260,6 +284,7 @@ class _HojaCobroState extends ConsumerState<_HojaCobro> {
               if (pideEfectivo) ...[
                 campoDinero(
                   _recibido,
+                  _focoRecibido,
                   _forma == FormaPago.mixto ? 'Con cuánto paga lo de efectivo' : 'Con cuánto paga (efectivo)',
                   enfocar: _forma == FormaPago.efectivo,
                 ),
