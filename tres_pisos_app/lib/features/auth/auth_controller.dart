@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/almacen_local.dart';
 import '../../core/api_client.dart';
 import 'almacen_sesion.dart';
 import 'sesion.dart';
@@ -24,7 +25,17 @@ class ConexionController extends Notifier<Conexion?> {
   /// Cambiar de conexión cierra la sesión: el token de un servidor no vale en otro.
   Future<void> usar(Conexion conexion) async {
     await ref.read(authControllerProvider.notifier).cerrarSesion();
-    await ref.read(almacenSesionProvider).guardarConexion(conexion);
+    final anterior = state;
+    final almacen = ref.read(almacenSesionProvider);
+    // Misma central (mismo código) con otra IP: la cola sin enviar no se queda atrás.
+    if (anterior != null &&
+        anterior.modo == ModoConexion.enlazada &&
+        conexion.modo == ModoConexion.enlazada &&
+        anterior.enlace != null &&
+        anterior.enlace == conexion.enlace) {
+      await AlmacenLocal.mudar(almacen.prefs, desde: anterior.url, hacia: conexion.url);
+    }
+    await almacen.guardarConexion(conexion);
     state = conexion;
   }
 

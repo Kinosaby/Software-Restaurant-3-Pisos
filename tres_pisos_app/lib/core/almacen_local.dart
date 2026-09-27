@@ -44,6 +44,28 @@ class AlmacenLocal {
   Future<void> guardarMapa(String nombre, Map<String, dynamic> datos) =>
       _prefs.setString(_clave(nombre), jsonEncode(datos));
 
+  /// La misma central cambió de IP (el router le dio otra) y la tablet se volvió
+  /// a enlazar: los envíos que esperaban en la cola y los favoritos pasan a la
+  /// dirección nueva para no perderse. Los envíos se juntan sin repetir operación.
+  static Future<void> mudar(SharedPreferences prefs, {required String desde, required String hacia}) async {
+    if (desde == hacia) return;
+    final origen = AlmacenLocal(prefs, desde);
+    final destino = AlmacenLocal(prefs, hacia);
+
+    final cola = origen.lista('cola');
+    if (cola != null && cola.isNotEmpty) {
+      final actual = destino.lista('cola') ?? const [];
+      final vistas = {for (final e in actual) e['operacion']};
+      await destino.guardarLista('cola', [...actual, for (final e in cola) if (!vistas.contains(e['operacion'])) e]);
+    }
+    await prefs.remove(origen._clave('cola'));
+
+    final favoritos = origen.mapa('favoritos');
+    if (favoritos.isNotEmpty && destino.mapa('favoritos').isEmpty) {
+      await destino.guardarMapa('favoritos', favoritos);
+    }
+  }
+
   /// Preferencias de la tablet (no dependen del servidor).
   bool preferencia(String nombre, {bool porDefecto = true}) => _prefs.getBool('pref:$nombre') ?? porDefecto;
 
