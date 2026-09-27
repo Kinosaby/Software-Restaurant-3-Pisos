@@ -6,6 +6,7 @@ import '../../core/formato.dart';
 import '../../core/tema.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
+import '../auth/sesion.dart';
 import '../caja/cobro.dart';
 import '../caja/ticket.dart';
 import '../pedidos/modelos.dart';
@@ -67,14 +68,16 @@ class _PedidoDetallePageState extends ConsumerState<PedidoDetallePage> {
     final ok = await confirmar(
       context,
       titulo: 'Cancelar pedido #${pedido.id}',
-      mensaje: 'Cocina dejará de verlo. Esta acción no se puede deshacer.',
-      accion: 'Cancelar pedido',
+      mensaje: pedido.cobrado
+          ? mensajeReembolso(pedido)
+          : 'Cocina dejará de verlo. Esta acción no se puede deshacer.',
+      accion: pedido.cobrado ? 'Cancelar y devolver' : 'Cancelar pedido',
       destructiva: true,
     );
     if (!ok || !mounted) return;
     await _accionYSalir(
       () => ref.read(pedidosActivosProvider.notifier).cancelar(pedido.id),
-      'Pedido #${pedido.id} cancelado',
+      pedido.cobrado ? 'Pedido #${pedido.id} cancelado: devuelve ${dinero(pedido.total)}' : 'Pedido #${pedido.id} cancelado',
     );
   }
 
@@ -199,7 +202,8 @@ class _PedidoDetallePageState extends ConsumerState<PedidoDetallePage> {
                   ],
                 ],
               ),
-              if ((rol?.tomaPedidos ?? false) && pedido.estado.modificable && !pedido.cobrado) ...[
+              // Ya cobrado solo lo cancela el administrador, y eso devuelve el dinero.
+              if ((rol?.tomaPedidos ?? false) && pedido.estado.modificable && (!pedido.cobrado || rol == Rol.admin)) ...[
                 const SizedBox(height: 10),
                 TextButton.icon(
                   onPressed: _ocupado ? null : () => _cancelar(pedido),

@@ -74,6 +74,20 @@ CalculoCobro calcularCobro({required double total, required FormaPago forma, dou
   );
 }
 
+/// Confirmación al cancelar una cuenta ya cobrada: se devuelve el dinero y se
+/// resta de las ventas del día.
+String mensajeReembolso(Pedido pedido) {
+  final pago = pedido.pago;
+  final desglose = pago == null
+      ? ''
+      : ' (${[
+          if (pago.efectivo >= 0.005) 'efectivo ${dinero(pago.efectivo)}',
+          if (pago.tarjeta >= 0.005) 'tarjeta ${dinero(pago.tarjeta)}',
+        ].join(' + ')})';
+  return 'Esta cuenta ya se cobró. Al cancelarla se devuelven ${dinero(pedido.total)}$desglose al cliente '
+      'y se restan de las ventas del día. Cocina deja de verla. No se puede deshacer.';
+}
+
 /// Advertencia si alguna de las cuentas sigue en cocina (sin terminar o con un
 /// extra pendiente); `null` si todas se pueden servir ya.
 String? avisoEnCocina(List<Pedido> pedidos) {

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/formato.dart';
 import '../../core/tema.dart';
 import '../../core/widgets.dart';
+import '../caja/cobro.dart';
 import '../caja/ticket.dart';
 import '../pedidos/modelos.dart';
 import '../pedidos/pedidos_repository.dart';
@@ -49,7 +50,51 @@ class _HistorialPageState extends ConsumerState<HistorialPage> {
   EstadoPedido? _estado;
   int _mostrar = 100;
 
+  /// Cuenta cobrada: devolver el dinero (se cancela y se resta de las ventas)
+  /// o solo quitarla del historial (la venta se conserva).
+  Future<void> _cobrada(Pedido pedido) async {
+    final eleccion = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Pedido #${pedido.id} ya cobrado'),
+        content: Text(
+          '${mensajeReembolso(pedido)}\n\n'
+          'Si solo quieres quitarlo de esta lista, la venta se sigue contando.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Volver')),
+          TextButton(onPressed: () => Navigator.pop(context, 'quitar'), child: const Text('Solo quitar')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colores.peligro),
+            onPressed: () => Navigator.pop(context, 'devolver'),
+            child: const Text('Devolver el dinero'),
+          ),
+        ],
+      ),
+    );
+    if (eleccion == null || !mounted) return;
+    try {
+      if (eleccion == 'devolver') {
+        await ref.read(pedidosRepositoryProvider).cancelar(pedido.id);
+      } else {
+        await ref.read(pedidosRepositoryProvider).eliminar(pedido.id);
+      }
+      ref.invalidate(historialProvider);
+      if (mounted) {
+        mostrarMensaje(
+          context,
+          eleccion == 'devolver'
+              ? 'Pedido #${pedido.id} cancelado: devuelve ${dinero(pedido.total)}'
+              : 'Pedido #${pedido.id} quitado del historial',
+        );
+      }
+    } on Object catch (e) {
+      if (mounted) mostrarMensaje(context, '$e', error: true);
+    }
+  }
+
   Future<void> _eliminar(Pedido pedido) async {
+    if (pedido.cobrado) return _cobrada(pedido);
     final ok = await confirmar(
       context,
       titulo: 'Eliminar pedido #${pedido.id}',

@@ -299,7 +299,8 @@ class PedidoCentral {
   double get total => items.fold(0, (s, i) => s + i.precio * i.cantidad);
 
   /// Ya hay una venta registrada para este pedido.
-  bool get cobrado => estado == 'pagado' || pago != null;
+  /// Cancelado después de cobrar = reembolsado: ya no cuenta como cobrado.
+  bool get cobrado => estado == 'pagado' || (pago != null && estado != 'cancelado');
 
   PedidoCentral copyWith({
     int? mesa,
@@ -389,7 +390,8 @@ class _Totales {
 
   void sumar(VentaCentral v) {
     total += v.total;
-    pedidos++;
+    // Un reembolso (venta negativa) deshace el pedido que se había contado.
+    pedidos += v.total < 0 ? -1 : 1;
     if (v.conDesglose) {
       efectivo += v.efectivo ?? 0;
       tarjeta += v.tarjeta ?? 0;
@@ -1371,6 +1373,8 @@ class Central {
           throw ErrorCentral(400, 'INVALID_STATUS', 'Estado inválido. Valores: ${estadosValidos.join(', ')}.');
         }
         final pedido = _pedido(id);
+        // Cancelar algo ya cobrado es devolver el dinero: solo el administrador.
+        if (estado == 'cancelado' && pedido.cobrado) return _reembolsar(pedido, usuario);
         if (pedido.estado == 'pagado' || pedido.estado == 'cancelado') {
           throw ErrorCentral(400, 'INVALID_STATUS', 'El pedido ya está ${pedido.estado}.');
         }
@@ -1383,11 +1387,6 @@ class Central {
         // Una tablet con la versión anterior no conoce el cobro por adelantado.
         if (pedido.pago != null && estado == 'pagado') {
           throw ErrorCentral(400, 'ALREADY_PAID', 'Esta cuenta ya se cobró. Actualiza la app de esta tablet.');
-        }
-        if (pedido.pago != null && estado == 'cancelado') {
-          throw ErrorCentral(400, 'ALREADY_PAID',
-              'El pedido ya se cobró; no se puede cancelar. Márcalo listo para cerrarlo. '
-              'Si devuelves el dinero, la venta sigue contando: eliminar el pedido no la resta.');
         }
         final cerrarPagado = pedido.pago != null && estado == 'listo';
         // Marcar listo también termina los extras que cocina tenía pendientes.
@@ -1416,6 +1415,47 @@ class Central {
         }
         return json;
       });
+
+  /// Cancela una cuenta ya cobrada (por adelantado o cerrada) y devuelve el
+  /// dinero: registra una venta negativa con el mismo desglose que se cobró,
+  /// así las ventas del día y el efectivo de caja bajan. Se ejecuta dentro de
+  /// [cambiarEstado], ya en serie.
+  Future<Map<String, dynamic>> _reembolsar(PedidoCentral pedido, UsuarioCentral usuario) async {
+    if (usuario.rol != 'admin') {
+      throw ErrorCentral(403, 'ALREADY_PAID',
+          'El pedido ya se cobró. Solo el administrador puede cancelarlo, y al hacerlo se devuelve el dinero.');
+    }
+    final cobradas = _ventas.values.where((v) => v.pedidoId == pedido.id).toList();
+    final total = cobradas.fold<double>(0, (s, v) => s + v.total);
+    final conDesglose = cobradas.any((v) => v.conDesglose);
+    final actualizado = pedido.copyWith(
+      estado: 'cancelado',
+      items: [for (final i in pedido.items) i.copyWith(terminarExtra: true)],
+    );
+    final relevos = _relevarPartes(pedido, const []);
+    await _confirmar([
+      {'t': 'pedido', 'v': actualizado.toJson()},
+      for (final r in relevos) {'t': 'pedido', 'v': r.toJson()},
+      if (_centavos(total) > 0)
+        {
+          't': 'venta',
+          'v': VentaCentral(
+            id: _siguiente('venta'),
+            pedidoId: pedido.id,
+            total: -total,
+            fecha: _reloj(),
+            efectivo: conDesglose ? -cobradas.fold<double>(0, (s, v) => s + (v.efectivo ?? 0)) : null,
+            tarjeta: conDesglose ? -cobradas.fold<double>(0, (s, v) => s + (v.tarjeta ?? 0)) : null,
+          ).toJson(),
+        },
+    ]);
+    final json = actualizado.toJson();
+    emitir?.call('pedido_actualizado', {...json, '_accion': 'reembolsado'});
+    for (final r in relevos) {
+      emitir?.call('pedido_actualizado', {...r.toJson(), '_accion': 'parte_relevada'});
+    }
+    return json;
+  }
 
   /// Cobra una o varias cuentas con su forma de pago: `efectivo` + `tarjeta`
   /// debe sumar el total. Se puede cobrar antes de que cocina termine (el cliente

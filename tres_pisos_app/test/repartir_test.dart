@@ -410,6 +410,40 @@ void main() {
       expect((central.resumen()['dia'] as Map)['total_ventas'], 122.0, reason: 'una sola venta');
     });
 
+    test('solo el administrador cancela lo cobrado, y eso resta la venta', () async {
+      final admin = central.autenticar((await central.login('admin', 'secreto1'))['token'] as String)!;
+      Map dia() => central.resumen()['dia'] as Map;
+      final ana = await cuenta('Ana', [(1, 1)]);
+      final beto = await cuenta('Beto', [(2, 1)]);
+      await central.cobrar({'pedidos': [ana['id']], 'efectivo': 60, 'tarjeta': 40});
+      await central.cambiarEstado(beto['id'] as int, 'listo', usuario: cocina);
+      await central.cobrar({'pedidos': [beto['id']], 'efectivo': 22, 'tarjeta': 0});
+      expect(dia()['total_ventas'], 122.0);
+
+      for (final quien in [mesero, cocina]) {
+        await expectLater(
+          central.cambiarEstado(ana['id'] as int, 'cancelado', usuario: quien),
+          throwsA(isA<ErrorCentral>().having((e) => e.codigo, 'codigo', 'ALREADY_PAID')),
+        );
+      }
+
+      // Cobrada por adelantado (sigue en cocina) y cerrada (pagado): las dos se devuelven.
+      await central.cambiarEstado(ana['id'] as int, 'cancelado', usuario: admin);
+      await central.cambiarEstado(beto['id'] as int, 'cancelado', usuario: admin);
+      expect(central.obtenerPedido(ana['id'] as int)['estado'], 'cancelado');
+      expect(dia()['total_ventas'], 0.0);
+      expect(dia()['efectivo'], 0.0);
+      expect(dia()['tarjeta'], 0.0);
+      final semana = central.ventasPorDia(1).last;
+      expect(semana['pedidos'], 0, reason: 'el reembolso deshace el pedido contado');
+      expect(Pedido.fromJson(central.obtenerPedido(ana['id'] as int)).reembolsado, isTrue);
+
+      // Después de reiniciar la central sigue igual.
+      await central.cerrar();
+      central = await abrir();
+      expect((central.resumen()['dia'] as Map)['total_ventas'], 0.0);
+    });
+
     test('la lista de pedidos se puede pedir desde una fecha', () async {
       await cuenta('Ana', [(1, 1)]);
       expect(central.listarPedidos(desde: DateTime.now().subtract(const Duration(hours: 1))), hasLength(1));

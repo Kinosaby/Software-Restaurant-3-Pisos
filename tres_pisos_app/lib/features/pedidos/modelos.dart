@@ -312,7 +312,11 @@ class Pedido {
   final Pago? pago;
 
   /// Ya se cobró, aunque cocina todavía lo esté preparando (el cliente pagó por adelantado).
-  bool get cobrado => estado == EstadoPedido.pagado || pago != null;
+  /// Cancelado después de cobrar = reembolsado: ya no cuenta como cobrado.
+  bool get cobrado => estado == EstadoPedido.pagado || (pago != null && estado != EstadoPedido.cancelado);
+
+  /// Se cobró y luego se canceló devolviendo el dinero.
+  bool get reembolsado => estado == EstadoPedido.cancelado && pago != null;
 
   int get piezas => items.fold(0, (suma, item) => suma + item.cantidad);
 

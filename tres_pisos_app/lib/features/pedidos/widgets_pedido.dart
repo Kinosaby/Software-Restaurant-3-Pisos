@@ -149,6 +149,10 @@ class TarjetaPedido extends StatelessWidget {
                     const ChipEstado(EstadoPedido.pagado),
                     const SizedBox(width: 6),
                   ],
+                  if (pedido.reembolsado) ...[
+                    const Text('Reembolsado', style: TextStyle(color: Colores.peligro, fontWeight: FontWeight.w600)),
+                    const SizedBox(width: 6),
+                  ],
                   ChipEstado(pedido.estado),
                 ],
               ),
