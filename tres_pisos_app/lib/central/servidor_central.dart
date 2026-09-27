@@ -226,6 +226,12 @@ class ServidorCentral {
       case ('PATCH', ['pedidos', final id, 'editar']):
         _usuario(peticion, salon);
         return (200, {'mensaje': 'Pedido editado', 'pedido': await central.editarPedido(_id(id), cuerpo)});
+      case ('PATCH', ['pedidos', final id, 'mover']):
+        _usuario(peticion, salon);
+        return (200, {'mensaje': 'Producto movido', ...await central.moverProducto(_id(id), cuerpo)});
+      case ('PATCH', ['pedidos', final id, 'dividir']):
+        _usuario(peticion, salon);
+        return (200, {'mensaje': 'Producto dividido', ...await central.dividirProducto(_id(id), cuerpo)});
       case ('DELETE', ['pedidos', final id]):
         _usuario(peticion, admin);
         return (200, {'mensaje': 'Pedido eliminado', 'pedido': await central.eliminarPedido(_id(id))});

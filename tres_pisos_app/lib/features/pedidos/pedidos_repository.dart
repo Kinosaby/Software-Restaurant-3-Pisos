@@ -94,6 +94,26 @@ class PedidosRepository {
     return _pedido(datos);
   }
 
+  /// `PATCH /mover`: pasa [cantidad] piezas del renglón [detalleId] a la cuenta [destino].
+  Future<Reparto> mover(int pedidoId, {required int detalleId, required int cantidad, required int destino}) async =>
+      _reparto(await _api.patch('/api/pedidos/$pedidoId/mover', {
+        'detalle_id': detalleId,
+        'cantidad': cantidad,
+        'destino': destino,
+      }));
+
+  /// `PATCH /dividir`: reparte una pieza del renglón entre esta cuenta y [destinos].
+  Future<Reparto> dividir(int pedidoId, {required int detalleId, required List<int> destinos}) async =>
+      _reparto(await _api.patch('/api/pedidos/$pedidoId/dividir', {'detalle_id': detalleId, 'destinos': destinos}));
+
+  static Reparto _reparto(Map<String, dynamic> datos) => (
+        pedidos: [
+          for (final p in (datos['pedidos'] as List? ?? const []))
+            if (p is Map<String, dynamic>) Pedido.fromJson(p),
+        ],
+        eliminado: datos['eliminado'] == null ? null : leerEntero(datos['eliminado']),
+      );
+
   Pedido _pedido(Map<String, dynamic> datos) {
     final pedido = datos['pedido'];
     if (pedido is! Map<String, dynamic>) {

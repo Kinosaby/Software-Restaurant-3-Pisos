@@ -226,8 +226,11 @@ class _TarjetaGrupo extends ConsumerWidget {
     final marcas = ref.watch(marcasCocinaProvider);
     final minutos = DateTime.now().difference(grupo.desde).inMinutes;
     final color = grupo.hayPendientes ? Colores.aviso : Colores.azul;
-    final renglones = grupo.pedidos.fold(0, (s, p) => s + p.items.length);
-    final hechos = grupo.pedidos.fold(0, (s, p) => s + (marcas['p${p.id}']?.length ?? 0));
+    // Las partes 2..N de un platillo dividido no se muestran: es un solo platillo.
+    bool visible(Pedido p, int i) => i < p.items.length && p.items[i].paraCocina;
+    final renglones = grupo.pedidos.fold(0, (s, p) => s + p.items.where((i) => i.paraCocina).length);
+    final hechos =
+        grupo.pedidos.fold(0, (s, p) => s + (marcas['p${p.id}']?.where((i) => visible(p, i)).length ?? 0));
     final todoMarcado = renglones > 0 && hechos >= renglones;
 
     return Card(
@@ -282,10 +285,19 @@ class _TarjetaGrupo extends ConsumerWidget {
                       ],
                     ),
                     for (var i = 0; i < p.items.length; i++)
-                      _RenglonMarcable(
-                        item: p.items[i],
-                        hecho: marcas['p${p.id}']?.contains(i) ?? false,
-                        onTap: () => ref.read(marcasCocinaProvider.notifier).alternar('p${p.id}', i),
+                      if (p.items[i].paraCocina)
+                        _RenglonMarcable(
+                          item: p.items[i],
+                          hecho: marcas['p${p.id}']?.contains(i) ?? false,
+                          onTap: () => ref.read(marcasCocinaProvider.notifier).alternar('p${p.id}', i),
+                        ),
+                    if (!p.items.any((i) => i.paraCocina))
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 4),
+                        child: Text(
+                          'Solo comparte un platillo de otra cuenta',
+                          style: TextStyle(color: Colores.apagado, fontStyle: FontStyle.italic),
+                        ),
                       ),
                     const SizedBox(height: 8),
                   ],

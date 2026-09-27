@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 
@@ -105,6 +105,31 @@ class ProductoCentral {
       };
 }
 
+/// Reparte [monto] en [partes] importes de centavos exactos cuya suma es [monto]:
+/// los centavos que sobran van a las primeras partes (100 / 3 → 33.34, 33.33, 33.33).
+List<double> repartirCentavos(double monto, int partes) {
+  if (partes < 1) throw ArgumentError.value(partes, 'partes', 'debe ser al menos 1');
+  final centavos = (monto * 100).round();
+  final base = centavos ~/ partes;
+  final resto = centavos % partes;
+  return [for (var i = 0; i < partes; i++) (base + (i < resto ? 1 : 0)) / 100];
+}
+
+/// Parte de un platillo dividido entre varias cuentas. Todas las partes de un
+/// mismo platillo comparten [grupo]; cocina solo ve la parte 1 (es un solo platillo).
+class ParteCompartida {
+  const ParteCompartida({required this.grupo, required this.parte, required this.partes});
+
+  factory ParteCompartida.fromJson(Map<String, dynamic> j) =>
+      ParteCompartida(grupo: j['grupo'] as int, parte: j['parte'] as int, partes: j['partes'] as int);
+
+  final int grupo;
+  final int parte;
+  final int partes;
+
+  Map<String, dynamic> toJson() => {'grupo': grupo, 'parte': parte, 'partes': partes};
+}
+
 /// Renglón de un pedido. Guarda nombre y precio del momento en que se pidió.
 class ItemCentral {
   ItemCentral({
@@ -115,6 +140,7 @@ class ItemCentral {
     required this.cantidad,
     this.nota,
     this.extraDesde,
+    this.compartido,
   });
 
   factory ItemCentral.fromJson(Map<String, dynamic> j) => ItemCentral(
@@ -125,6 +151,7 @@ class ItemCentral {
         cantidad: j['cantidad'] as int,
         nota: j['nota'] as String?,
         extraDesde: j['extra_desde'] == null ? null : DateTime.parse(j['extra_desde'] as String),
+        compartido: j['compartido'] == null ? null : ParteCompartida.fromJson(j['compartido'] as Map<String, dynamic>),
       );
 
   final int id;
@@ -138,16 +165,37 @@ class ItemCentral {
   /// termina. Se borra cuando cocina vuelve a marcar el pedido como listo.
   final DateTime? extraDesde;
 
-  ItemCentral copyWith({int? cantidad, String? nota, bool borrarNota = false, bool terminarExtra = false}) =>
+  /// Solo en los renglones que son parte de un platillo dividido entre cuentas.
+  final ParteCompartida? compartido;
+
+  ItemCentral copyWith({
+    int? id,
+    int? cantidad,
+    String? nota,
+    bool borrarNota = false,
+    DateTime? extraDesde,
+    bool terminarExtra = false,
+  }) =>
       ItemCentral(
-        id: id,
+        id: id ?? this.id,
         productoId: productoId,
         nombre: nombre,
         precio: precio,
         cantidad: cantidad ?? this.cantidad,
         nota: borrarNota ? null : (nota ?? this.nota),
-        extraDesde: terminarExtra ? null : extraDesde,
+        extraDesde: terminarExtra ? null : (extraDesde ?? this.extraDesde),
+        compartido: compartido,
       );
+
+  /// Se puede sumar a [otro] en un solo renglón (mismo producto, nota, precio y
+  /// estado de extra, sin dividir).
+  bool combinableCon(ItemCentral otro) =>
+      compartido == null &&
+      otro.compartido == null &&
+      productoId == otro.productoId &&
+      nota == otro.nota &&
+      precio == otro.precio &&
+      extraDesde == otro.extraDesde;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -157,6 +205,7 @@ class ItemCentral {
         'nota': nota,
         'precio': precio,
         if (extraDesde != null) 'extra_desde': extraDesde!.toUtc().toIso8601String(),
+        if (compartido != null) 'compartido': compartido!.toJson(),
       };
 }
 
@@ -830,8 +879,12 @@ class Central {
         // renglón (marcado) hasta que cocina lo termine.
         final items = [...pedido.items];
         for (final nuevo in nuevos) {
+          // Una parte de un platillo dividido tampoco se mezcla.
           final i = items.indexWhere((x) =>
-              x.productoId == nuevo.productoId && x.nota == nuevo.nota && (x.extraDesde != null) == esExtra);
+              x.compartido == null &&
+              x.productoId == nuevo.productoId &&
+              x.nota == nuevo.nota &&
+              (x.extraDesde != null) == esExtra);
           if (i >= 0) {
             items[i] = items[i].copyWith(cantidad: items[i].cantidad + nuevo.cantidad);
           } else {
@@ -881,6 +934,10 @@ class Central {
             if (cantidad == 0) {
               items = [for (final i in items) if (i.id != detalleId) i];
             } else {
+              final compartido = items.any((i) => i.id == detalleId && i.compartido != null);
+              if (compartido && cantidad > 1) {
+                throw ErrorCentral(400, 'SHARED_ITEM', 'Un producto dividido entre cuentas no puede cambiar de cantidad.');
+              }
               final nota = _nota(c['nota']);
               items = [
                 for (final i in items)
@@ -905,6 +962,168 @@ class Central {
         final json = actualizado.toJson();
         emitir?.call('pedido_actualizado', {...json, '_accion': 'pedido_editado'});
         return json;
+      });
+
+  // ── Repartir productos entre cuentas ─────────────────────
+
+  static const maxPartes = 20;
+
+  int _idPedido(Object? valor) => int.tryParse(valor?.toString() ?? '') ??
+      (throw ErrorCentral(400, 'VALIDATION_ERROR', 'Cuenta de destino inválida.'));
+
+  /// Origen y destinos deben seguir abiertos y ser de la misma mesa.
+  void _validarReparto(PedidoCentral origen, List<PedidoCentral> destinos) {
+    for (final p in [origen, ...destinos]) {
+      if (p.estado == 'pagado') {
+        throw ErrorCentral(400, 'ACCOUNT_PAID',
+            'La cuenta #${p.id}${p.comensal == null ? '' : ' (${p.comensal})'} ya está cobrada; no se pueden mover ni dividir sus productos.');
+      }
+      if (p.estado == 'cancelado') {
+        throw ErrorCentral(400, 'INVALID_STATUS', 'La cuenta #${p.id} está cancelada.');
+      }
+    }
+    final ids = {for (final d in destinos) d.id};
+    if (ids.length != destinos.length || ids.contains(origen.id)) {
+      throw ErrorCentral(400, 'VALIDATION_ERROR', 'Elige cuentas distintas a la de origen.');
+    }
+    if (destinos.any((d) => d.mesa != origen.mesa)) {
+      throw ErrorCentral(400, 'DIFFERENT_TABLE', 'Solo se pueden repartir productos entre cuentas de la misma mesa.');
+    }
+  }
+
+  ItemCentral _renglon(PedidoCentral pedido, Object? detalleId) {
+    final id = int.tryParse(detalleId?.toString() ?? '');
+    return pedido.items.where((i) => i.id == id).firstOrNull ??
+        (throw ErrorCentral(404, 'ITEM_NOT_FOUND', 'El producto ya no está en la cuenta #${pedido.id}.'));
+  }
+
+  /// Mueve un renglón (o [datos]`['cantidad']` piezas de él) a otra cuenta de la
+  /// misma mesa: `{detalle_id, destino, cantidad?}`. Si la cuenta de origen se
+  /// queda sin productos, se borra (nunca se cobró, así que no hay venta).
+  Future<Map<String, dynamic>> moverProducto(int id, Map<String, dynamic> datos) => _enSerie(() async {
+        final origen = _pedido(id);
+        final destino = _pedido(_idPedido(datos['destino']));
+        _validarReparto(origen, [destino]);
+        final item = _renglon(origen, datos['detalle_id']);
+        final cantidad = datos['cantidad'] == null ? item.cantidad : int.tryParse(datos['cantidad'].toString()) ?? 0;
+        if (cantidad < 1 || cantidad > item.cantidad) {
+          throw ErrorCentral(400, 'VALIDATION_ERROR', 'La cantidad a mover debe estar entre 1 y ${item.cantidad}.');
+        }
+
+        final completo = cantidad == item.cantidad;
+        // Lo que cocina aún no termina y llega a una cuenta ya lista, cocina lo
+        // ve como extra (`extra_desde`); en una cuenta que sigue en cocina se
+        // prepara junto con lo demás.
+        final loVeCocina = item.compartido == null || item.compartido!.parte == 1;
+        final sinHacer = origen.estado != 'listo' || item.extraDesde != null;
+        final nuevoExtra = loVeCocina && sinHacer && destino.estado == 'listo' && item.extraDesde == null;
+        final base = destino.estado == 'listo'
+            ? (nuevoExtra ? item.copyWith(extraDesde: _reloj()) : item)
+            : item.copyWith(terminarExtra: true);
+        final movido = completo ? base : base.copyWith(id: _siguiente('item'), cantidad: cantidad);
+        final itemsOrigen = [
+          for (final i in origen.items)
+            if (i.id != item.id) i else if (!completo) i.copyWith(cantidad: i.cantidad - cantidad),
+        ];
+        final itemsDestino = [...destino.items];
+        final igual = itemsDestino.indexWhere((x) => x.combinableCon(movido));
+        if (igual >= 0) {
+          itemsDestino[igual] = itemsDestino[igual].copyWith(cantidad: itemsDestino[igual].cantidad + cantidad);
+        } else {
+          itemsDestino.add(movido);
+        }
+
+        final nuevoDestino = destino.copyWith(items: itemsDestino);
+        final nuevoOrigen = itemsOrigen.isEmpty ? null : origen.copyWith(items: itemsOrigen);
+        await _confirmar([
+          {'t': 'pedido', 'v': nuevoDestino.toJson()},
+          if (nuevoOrigen == null) {'t': 'borrar', 'tabla': 'pedido', 'id': id} else {'t': 'pedido', 'v': nuevoOrigen.toJson()},
+        ]);
+
+        if (nuevoExtra) {
+          emitir?.call('extra_pedido', {
+            'pedido_id': destino.id,
+            'mesa': destino.mesa,
+            'tipo': destino.tipo,
+            'comensal': destino.comensal,
+            'items': [
+              {'nombre': movido.nombre, 'cantidad': cantidad, 'nota': movido.nota, 'precio': movido.precio},
+            ],
+            'total_extra': movido.precio * cantidad,
+          });
+        }
+        if (nuevoOrigen == null) {
+          emitir?.call('pedido_eliminado', {'id': id});
+        } else {
+          emitir?.call('pedido_actualizado', {...nuevoOrigen.toJson(), '_accion': 'producto_movido'});
+        }
+        final json = nuevoDestino.toJson();
+        emitir?.call('pedido_actualizado', {...json, '_accion': 'producto_movido'});
+        return {
+          'pedidos': [?nuevoOrigen?.toJson(), json],
+          'eliminado': nuevoOrigen == null ? id : null,
+        };
+      });
+
+  /// Divide una pieza de un renglón en partes iguales entre esta cuenta y
+  /// `destinos` (`{detalle_id, destinos: [ids]}`). La parte 1 se queda en esta
+  /// cuenta y es la única que ve cocina; los centavos sobrantes van a las primeras partes.
+  Future<Map<String, dynamic>> dividirProducto(int id, Map<String, dynamic> datos) => _enSerie(() async {
+        final origen = _pedido(id);
+        final lista = datos['destinos'];
+        if (lista is! List || lista.isEmpty) {
+          throw ErrorCentral(400, 'VALIDATION_ERROR', 'Elige al menos otra cuenta para dividir.');
+        }
+        final destinos = [for (final d in lista) _pedido(_idPedido(d))];
+        _validarReparto(origen, destinos);
+        final item = _renglon(origen, datos['detalle_id']);
+        if (item.compartido != null) {
+          throw ErrorCentral(400, 'ALREADY_SHARED', 'Este producto ya está dividido entre cuentas.');
+        }
+        final partes = destinos.length + 1;
+        if (partes > maxPartes) {
+          throw ErrorCentral(400, 'VALIDATION_ERROR', 'Se puede dividir entre $maxPartes cuentas como máximo.');
+        }
+        final montos = repartirCentavos(item.precio, partes);
+        if (montos.last <= 0) {
+          throw ErrorCentral(400, 'VALIDATION_ERROR', 'El precio es muy bajo para dividirlo entre $partes.');
+        }
+
+        // Con una sola pieza, la parte 1 conserva el renglón (y su lugar en cocina).
+        final grupo = item.cantidad == 1 ? item.id : _siguiente('item');
+        ItemCentral parte(int indice, int itemId) => ItemCentral(
+              id: itemId,
+              productoId: item.productoId,
+              nombre: item.nombre,
+              precio: montos[indice],
+              cantidad: 1,
+              nota: item.nota,
+              // Si era un extra que cocina aún prepara, lo sigue siendo en la parte que ve cocina.
+              extraDesde: indice == 0 ? item.extraDesde : null,
+              compartido: ParteCompartida(grupo: grupo, parte: indice + 1, partes: partes),
+            );
+        final itemsOrigen = [
+          for (final i in origen.items)
+            if (i.id != item.id)
+              i
+            else ...[
+              if (item.cantidad > 1) i.copyWith(cantidad: i.cantidad - 1),
+              parte(0, grupo),
+            ],
+        ];
+        final actualizados = [
+          origen.copyWith(items: itemsOrigen),
+          for (var d = 0; d < destinos.length; d++)
+            destinos[d].copyWith(items: [...destinos[d].items, parte(d + 1, _siguiente('item'))]),
+        ];
+        await _confirmar([
+          for (final p in actualizados) {'t': 'pedido', 'v': p.toJson()},
+        ]);
+        final pedidos = [for (final p in actualizados) p.toJson()];
+        for (final p in pedidos) {
+          emitir?.call('pedido_actualizado', {...p, '_accion': 'producto_dividido'});
+        }
+        return {'pedidos': pedidos};
       });
 
   /// Cocina solo avanza la preparación o cancela lo que aún no termina; el cobro

@@ -79,7 +79,11 @@ class TicketVista extends StatelessWidget {
                   child: Text('${p.comensal ?? 'Cuenta'} · #${p.id}', style: base.copyWith(fontWeight: FontWeight.w600)),
                 ),
               for (final i in p.items) ...[
-                linea('${i.cantidad} × ${i.nombre}${i.llevar ? ' (llevar)' : ''}', dinero(i.subtotal)),
+                linea(
+                  '${i.cantidad} × ${i.nombre}${i.llevar ? ' (llevar)' : ''}'
+                  '${i.compartido == null ? '' : ' (${i.compartido!.parte}/${i.compartido!.partes})'}',
+                  dinero(i.subtotal),
+                ),
                 if (i.notaVisible != null)
                   Text('   ${i.notaVisible}', style: base.copyWith(color: gris, fontSize: 12)),
               ],

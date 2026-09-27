@@ -74,6 +74,19 @@ class RenglonItem extends StatelessWidget {
                       Text('Extra en cocina', style: TextStyle(color: Colores.azul, fontWeight: FontWeight.w600)),
                     ],
                   ),
+                if (item.compartido case final c?)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.call_split, size: 16, color: Colores.azul),
+                      const SizedBox(width: 4),
+                      Text(
+                        // En cocina importa que es un solo platillo; en la cuenta, qué parte se cobra.
+                        grande ? 'Compartido entre ${c.partes}' : item.etiquetaCompartido!,
+                        style: const TextStyle(color: Colores.azul, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
                 if (item.notaVisible != null)
                   Text(
                     item.notaVisible!,

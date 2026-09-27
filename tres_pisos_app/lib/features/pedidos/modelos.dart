@@ -87,6 +87,16 @@ enum TipoPedido {
   static TipoPedido desde(String? valor) => valor == 'llevar' ? llevar : aqui;
 }
 
+/// Parte de un platillo dividido entre cuentas (p. ej. la 1 de 3).
+typedef Parte = ({int grupo, int parte, int partes});
+
+Parte? leerParte(Object? valor) {
+  if (valor is! Map) return null;
+  final partes = leerEntero(valor['partes']);
+  if (partes < 2) return null;
+  return (grupo: leerEntero(valor['grupo']), parte: leerEntero(valor['parte']), partes: partes);
+}
+
 class PedidoItem {
   const PedidoItem({
     required this.detalleId,
@@ -96,6 +106,7 @@ class PedidoItem {
     required this.precio,
     this.nota,
     this.extraDesde,
+    this.compartido,
   });
 
   factory PedidoItem.fromJson(Map<String, dynamic> json) => PedidoItem(
@@ -106,6 +117,7 @@ class PedidoItem {
         precio: leerDinero(json['precio']),
         nota: leerTextoOpcional(json['nota']),
         extraDesde: DateTime.tryParse(json['extra_desde']?.toString() ?? '')?.toLocal(),
+        compartido: leerParte(json['compartido']),
       );
 
   final int detalleId;
@@ -120,10 +132,19 @@ class PedidoItem {
   /// Extra agregado a un pedido ya listo que cocina aún no termina (`extra_desde`).
   final DateTime? extraDesde;
 
+  /// Solo si este renglón es una parte de un platillo dividido entre cuentas.
+  final Parte? compartido;
+
   double get subtotal => precio * cantidad;
   bool get llevar => leerNota(nota).llevar;
   String? get notaVisible => leerNota(nota).nota;
   bool get extraPendiente => extraDesde != null;
+
+  /// Cocina ve un platillo dividido una sola vez: en su parte 1.
+  bool get paraCocina => compartido == null || compartido!.parte == 1;
+
+  /// "Compartido 1/3", o `null` si no está dividido.
+  String? get etiquetaCompartido => compartido == null ? null : 'Compartido ${compartido!.parte}/${compartido!.partes}';
 
   Map<String, dynamic> toJson() => {
         'id': detalleId,
@@ -133,8 +154,19 @@ class PedidoItem {
         'nota': nota,
         'precio': precio,
         if (extraDesde != null) 'extra_desde': extraDesde!.toUtc().toIso8601String(),
+        if (compartido case final c?) 'compartido': {'grupo': c.grupo, 'parte': c.parte, 'partes': c.partes},
       };
 }
+
+/// Resultado de mover o dividir productos: las cuentas que cambiaron y, si la
+/// de origen se quedó sin productos, su id (la central la borra).
+typedef Reparto = ({List<Pedido> pedidos, int? eliminado});
+
+/// Otras cuentas abiertas de la misma mesa a las que se pueden pasar productos de [pedido].
+List<Pedido> cuentasHermanas(Iterable<Pedido> activos, Pedido pedido) => [
+      for (final p in activos)
+        if (p.id != pedido.id && p.mesa == pedido.mesa && p.estado.activo) p,
+    ];
 
 class Pedido {
   const Pedido({

@@ -224,6 +224,30 @@ class PedidosActivos extends AsyncNotifier<List<Pedido>> {
 
   Future<Pedido> cancelar(int pedidoId) => _ejecutar((repo) => repo.cancelar(pedidoId));
 
+  /// Pasa [cantidad] piezas de un renglón a otra cuenta de la misma mesa.
+  Future<Reparto> moverProducto(Pedido origen, PedidoItem item, {required int cantidad, required Pedido destino}) =>
+      _repartir((repo) => repo.mover(origen.id, detalleId: item.detalleId, cantidad: cantidad, destino: destino.id));
+
+  /// Divide una pieza de un renglón en partes iguales entre [origen] y [destinos].
+  Future<Reparto> dividirProducto(Pedido origen, PedidoItem item, List<Pedido> destinos) =>
+      _repartir((repo) => repo.dividir(origen.id, detalleId: item.detalleId, destinos: [for (final d in destinos) d.id]));
+
+  Future<Reparto> _repartir(Future<Reparto> Function(PedidosRepository repo) accion) async {
+    final Reparto reparto;
+    try {
+      reparto = await accion(ref.read(pedidosRepositoryProvider));
+    } on ApiException catch (e) {
+      if (e.sinConexion) {
+        throw ApiException('Sin conexión con la central: para mover o dividir productos la tablet '
+            'de cocina debe estar encendida y en el mismo Wi-Fi.');
+      }
+      rethrow;
+    }
+    final actuales = state.value;
+    if (ref.mounted && actuales != null) _fijar(aplicarReparto(actuales, reparto));
+    return reparto;
+  }
+
   Future<Pedido> _ejecutar(Future<Pedido> Function(PedidosRepository repo) accion) async {
     try {
       final pedido = await accion(ref.read(pedidosRepositoryProvider));
@@ -254,6 +278,15 @@ List<Pedido> reemplazarPedido(List<Pedido> actuales, Pedido pedido) => ordenarPe
         if (p.id != pedido.id) p,
       if (pedido.estado.activo) pedido,
     ]);
+
+/// Quita la cuenta que se quedó vacía y reemplaza las que cambiaron al mover o dividir.
+List<Pedido> aplicarReparto(List<Pedido> actuales, Reparto reparto) {
+  var lista = [for (final p in actuales) if (p.id != reparto.eliminado) p];
+  for (final p in reparto.pedidos) {
+    lista = reemplazarPedido(lista, p);
+  }
+  return lista;
+}
 
 /// Pedidos cobrados hoy (para el historial del día del mesero y "repetir pedido").
 final pagadosHoyProvider = FutureProvider.autoDispose<List<Pedido>>((ref) async {

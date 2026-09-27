@@ -12,6 +12,7 @@ import '../pedidos/modelos.dart';
 import '../pedidos/pedidos_controller.dart';
 import '../pedidos/widgets_pedido.dart';
 import 'pedidos_page.dart';
+import 'repartir_producto.dart';
 
 class PedidoDetallePage extends ConsumerStatefulWidget {
   const PedidoDetallePage({super.key, required this.pedidoId});
@@ -45,6 +46,21 @@ class _PedidoDetallePageState extends ConsumerState<PedidoDetallePage> {
     if (!mounted) return;
     final sigueActivo = ref.read(pedidosActivosProvider).value?.any((p) => p.id == pedido.id) ?? false;
     if (!sigueActivo) context.pop();
+  }
+
+  /// Mueve o divide un producto con otra cuenta de la mesa.
+  Future<void> _repartir(Pedido pedido, PedidoItem item, {required bool dividir}) async {
+    final reparto = dividir
+        ? await mostrarDividirProducto(context, pedido, item)
+        : await mostrarMoverProducto(context, pedido, item);
+    if (reparto == null || !mounted) return;
+    final otras = [for (final p in reparto.pedidos) if (p.id != pedido.id) nombreCuenta(p)];
+    mostrarMensaje(
+      context,
+      dividir ? '${item.nombre} dividido con ${otras.join(', ')}' : '${item.nombre} pasó a ${otras.join(', ')}',
+    );
+    // La cuenta se quedó sin productos y la central la quitó.
+    if (reparto.eliminado == pedido.id) context.pop();
   }
 
   Future<void> _cancelar(Pedido pedido) async {
@@ -100,7 +116,20 @@ class _PedidoDetallePageState extends ConsumerState<PedidoDetallePage> {
                   padding: const EdgeInsets.all(16),
                   child: Column(
                     children: [
-                      for (final item in pedido.items) RenglonItem(item, mostrarPrecio: true),
+                      for (final item in pedido.items)
+                        if (rol?.tomaPedidos ?? false)
+                          Row(
+                            children: [
+                              Expanded(child: RenglonItem(item, mostrarPrecio: true)),
+                              _MenuReparto(
+                                item: item,
+                                activo: !_ocupado,
+                                onElegir: (dividir) => _repartir(pedido, item, dividir: dividir),
+                              ),
+                            ],
+                          )
+                        else
+                          RenglonItem(item, mostrarPrecio: true),
                       const Divider(height: 24),
                       Row(
                         children: [
@@ -170,6 +199,36 @@ class _PedidoDetallePageState extends ConsumerState<PedidoDetallePage> {
             ],
           ),
       },
+    );
+  }
+}
+
+/// Menú de cada producto: moverlo a otra cuenta de la mesa o dividirlo entre varias.
+class _MenuReparto extends StatelessWidget {
+  const _MenuReparto({required this.item, required this.activo, required this.onElegir});
+
+  final PedidoItem item;
+  final bool activo;
+  final void Function(bool dividir) onElegir;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<bool>(
+      tooltip: 'Mover o dividir',
+      enabled: activo,
+      icon: const Icon(Icons.more_vert, size: 20),
+      onSelected: onElegir,
+      itemBuilder: (_) => [
+        const PopupMenuItem(
+          value: false,
+          child: ListTile(leading: Icon(Icons.move_down), title: Text('Mover a otra cuenta')),
+        ),
+        if (item.compartido == null)
+          const PopupMenuItem(
+            value: true,
+            child: ListTile(leading: Icon(Icons.call_split), title: Text('Dividir entre cuentas')),
+          ),
+      ],
     );
   }
 }
