@@ -38,6 +38,10 @@ class CentralLocal {
 /// Se sobreescribe en `main()` si esta tablet ya era la central.
 final centralArranqueProvider = Provider<CentralLocal?>((ref) => null);
 
+/// Error por el que la central no pudo arrancar al abrir la app (se sobreescribe
+/// en `main()`). Mientras la central no esté corriendo se avisa en pantalla.
+final errorArranqueCentralProvider = Provider<String?>((ref) => null);
+
 final centralLocalProvider = NotifierProvider<CentralLocalController, CentralLocal?>(CentralLocalController.new);
 
 class CentralLocalController extends Notifier<CentralLocal?> {
