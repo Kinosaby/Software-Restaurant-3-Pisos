@@ -209,6 +209,42 @@ class ItemCentral {
       };
 }
 
+/// Desglose de lo cobrado a un pedido. Los pedidos cobrados antes del pago
+/// mixto no lo tienen (sus ventas quedan "sin desglose").
+class PagoCentral {
+  PagoCentral({required this.efectivo, required this.tarjeta, required this.fecha});
+
+  factory PagoCentral.fromJson(Map<String, dynamic> j) => PagoCentral(
+        efectivo: (j['efectivo'] as num? ?? 0).toDouble(),
+        tarjeta: (j['tarjeta'] as num? ?? 0).toDouble(),
+        fecha: DateTime.parse(j['fecha'] as String),
+      );
+
+  final double efectivo;
+  final double tarjeta;
+  final DateTime fecha;
+
+  Map<String, dynamic> toJson() =>
+      {'efectivo': efectivo, 'tarjeta': tarjeta, 'fecha': fecha.toUtc().toIso8601String()};
+}
+
+int _centavos(double valor) => (valor * 100).round();
+
+/// Reparte un cobro de varias cuentas: el efectivo cubre las cuentas en orden y
+/// el resto de cada una va con tarjeta. Cada parte suma exactamente su total.
+List<({double efectivo, double tarjeta})> repartirPago(List<double> totales, double efectivo) {
+  var restante = _centavos(efectivo);
+  return [
+    for (final total in totales)
+      () {
+        final cuenta = _centavos(total);
+        final enEfectivo = restante < cuenta ? restante : cuenta;
+        restante -= enEfectivo;
+        return (efectivo: enEfectivo / 100, tarjeta: (cuenta - enEfectivo) / 100);
+      }(),
+  ];
+}
+
 class PedidoCentral {
   PedidoCentral({
     required this.id,
@@ -220,6 +256,7 @@ class PedidoCentral {
     this.comensal,
     this.usuarioId,
     this.mesero,
+    this.pago,
   });
 
   factory PedidoCentral.fromJson(Map<String, dynamic> j) => PedidoCentral(
@@ -232,6 +269,7 @@ class PedidoCentral {
         mesero: j['mesero'] as String?,
         creadoEn: DateTime.parse(j['creado_en'] as String),
         items: [for (final i in j['productos'] as List) ItemCentral.fromJson(i as Map<String, dynamic>)],
+        pago: j['pago'] == null ? null : PagoCentral.fromJson(j['pago'] as Map<String, dynamic>),
       );
 
   final int id;
@@ -244,7 +282,13 @@ class PedidoCentral {
   final DateTime creadoEn;
   final List<ItemCentral> items;
 
+  /// Cobrado por adelantado (sigue en cocina) o al cerrarse la cuenta.
+  final PagoCentral? pago;
+
   double get total => items.fold(0, (s, i) => s + i.precio * i.cantidad);
+
+  /// Ya hay una venta registrada para este pedido.
+  bool get cobrado => estado == 'pagado' || pago != null;
 
   PedidoCentral copyWith({
     int? mesa,
@@ -253,6 +297,7 @@ class PedidoCentral {
     String? comensal,
     bool borrarComensal = false,
     List<ItemCentral>? items,
+    PagoCentral? pago,
   }) =>
       PedidoCentral(
         id: id,
@@ -264,6 +309,7 @@ class PedidoCentral {
         mesero: mesero,
         creadoEn: creadoEn,
         items: items ?? this.items,
+        pago: pago ?? this.pago,
       );
 
   /// Forma con la que viaja el pedido a las tablets.
@@ -278,26 +324,76 @@ class PedidoCentral {
         'mesero': mesero,
         'creado_en': creadoEn.toUtc().toIso8601String(),
         'productos': [for (final i in items) i.toJson()],
+        if (pago != null) 'pago': pago!.toJson(),
       };
 }
 
+/// Venta registrada al cobrar. [efectivo] y [tarjeta] son `null` en las ventas
+/// anteriores al pago mixto (y en los cobros por `PUT /estado`): "sin desglose".
 class VentaCentral {
-  VentaCentral({required this.id, required this.pedidoId, required this.total, required this.fecha});
+  VentaCentral({
+    required this.id,
+    required this.pedidoId,
+    required this.total,
+    required this.fecha,
+    this.efectivo,
+    this.tarjeta,
+  });
 
   factory VentaCentral.fromJson(Map<String, dynamic> j) => VentaCentral(
         id: j['id'] as int,
         pedidoId: j['pedido_id'] as int,
         total: (j['total'] as num).toDouble(),
         fecha: DateTime.parse(j['fecha'] as String),
+        efectivo: (j['efectivo'] as num?)?.toDouble(),
+        tarjeta: (j['tarjeta'] as num?)?.toDouble(),
       );
 
   final int id;
   final int pedidoId;
   final double total;
   final DateTime fecha;
+  final double? efectivo;
+  final double? tarjeta;
 
-  Map<String, dynamic> toJson() =>
-      {'id': id, 'pedido_id': pedidoId, 'total': total, 'fecha': fecha.toUtc().toIso8601String()};
+  bool get conDesglose => efectivo != null || tarjeta != null;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'pedido_id': pedidoId,
+        'total': total,
+        'fecha': fecha.toUtc().toIso8601String(),
+        'efectivo': ?efectivo,
+        'tarjeta': ?tarjeta,
+      };
+}
+
+/// Suma de ventas con su desglose por forma de pago.
+class _Totales {
+  double total = 0;
+  double efectivo = 0;
+  double tarjeta = 0;
+  double sinDesglose = 0;
+  int pedidos = 0;
+
+  void sumar(VentaCentral v) {
+    total += v.total;
+    pedidos++;
+    if (v.conDesglose) {
+      efectivo += v.efectivo ?? 0;
+      tarjeta += v.tarjeta ?? 0;
+    } else {
+      sinDesglose += v.total;
+    }
+  }
+
+  static double _dosDecimales(double x) => double.parse(x.toStringAsFixed(2));
+
+  Map<String, dynamic> desglose() => {
+        'efectivo': _dosDecimales(efectivo),
+        'tarjeta': _dosDecimales(tarjeta),
+        'sin_desglose': _dosDecimales(sinDesglose),
+      };
 }
 
 /// La central del restaurante: guarda usuarios, menú, pedidos y ventas en la
@@ -834,8 +930,8 @@ class Central {
         return json;
       });
 
-  /// Agrega productos. Sobre una cuenta pagada abre una cuenta nueva; sobre una
-  /// lista, avisa a cocina solo con lo nuevo (`extra_pedido`).
+  /// Agrega productos. Sobre una cuenta ya cobrada (aunque siga en cocina) abre
+  /// una cuenta nueva; sobre una lista, avisa a cocina solo con lo nuevo (`extra_pedido`).
   Future<Map<String, dynamic>> agregarProductos(
     int id,
     Map<String, dynamic> datos, {
@@ -853,7 +949,7 @@ class Central {
         final esExtra = pedido.estado == 'listo';
         final nuevos = _numerar(_itemsNuevos(datos['productos']), extraDesde: esExtra ? _reloj() : null);
 
-        if (pedido.estado == 'pagado') {
+        if (pedido.cobrado) {
           final cuenta = PedidoCentral(
             id: _siguiente('pedido'),
             mesa: pedido.mesa,
@@ -920,6 +1016,9 @@ class Central {
           throw ErrorCentral(400, 'INVALID_STATUS', 'Solo se pueden editar pedidos pendientes o en preparación.');
         }
         final cambios = datos['items'];
+        if (pedido.pago != null && cambios is List && cambios.isNotEmpty) {
+          throw ErrorCentral(400, 'ALREADY_PAID', 'El pedido ya se cobró; sus productos no se pueden cambiar.');
+        }
         final hayMetadatos = datos.containsKey('mesa') || datos.containsKey('tipo') || datos.containsKey('comensal');
         if ((cambios is! List || cambios.isEmpty) && !hayMetadatos) {
           throw ErrorCentral(400, 'EMPTY_FIELDS', 'Debe enviar al menos un campo a editar.');
@@ -974,7 +1073,8 @@ class Central {
   /// Origen y destinos deben seguir abiertos y ser de la misma mesa.
   void _validarReparto(PedidoCentral origen, List<PedidoCentral> destinos) {
     for (final p in [origen, ...destinos]) {
-      if (p.estado == 'pagado') {
+      // También las cobradas por adelantado que siguen en cocina.
+      if (p.cobrado) {
         throw ErrorCentral(400, 'ACCOUNT_PAID',
             'La cuenta #${p.id}${p.comensal == null ? '' : ' (${p.comensal})'} ya está cobrada; no se pueden mover ni dividir sus productos.');
       }
@@ -1128,6 +1228,10 @@ class Central {
 
   /// Cocina solo avanza la preparación o cancela lo que aún no termina; el cobro
   /// es de mesero y admin. Un pedido pagado o cancelado ya no cambia de estado.
+  ///
+  /// Un pedido cobrado por adelantado sigue en cocina con su estado; cuando
+  /// cocina lo marca listo se cierra solo (pasa a `pagado`) sin registrar otra
+  /// venta, y el evento lleva `_accion: 'listo_pagado'` para avisar al mesero.
   Future<Map<String, dynamic>> cambiarEstado(int id, String estado, {required UsuarioCentral usuario}) =>
       _enSerie(() async {
         if (!estadosValidos.contains(estado)) {
@@ -1143,16 +1247,22 @@ class Central {
               (estado == 'cancelado' && (pedido.estado == 'pendiente' || pedido.estado == 'preparando'));
           if (!permitido) throw ErrorCentral(403, 'FORBIDDEN', 'Cocina no puede cambiar el pedido a "$estado".');
         }
+        if (pedido.pago != null && estado == 'cancelado') {
+          throw ErrorCentral(400, 'ALREADY_PAID',
+              'El pedido ya se cobró; no se puede cancelar. Márcalo listo o pide al administrador que lo elimine.');
+        }
+        final cerrarPagado = pedido.pago != null && estado == 'listo';
         // Marcar listo también termina los extras que cocina tenía pendientes.
         final actualizado = pedido.copyWith(
-          estado: estado,
+          estado: cerrarPagado ? 'pagado' : estado,
           items: estado == 'listo' && pedido.items.any((i) => i.extraDesde != null)
               ? [for (final i in pedido.items) i.copyWith(terminarExtra: true)]
               : null,
         );
         await _confirmar([
           {'t': 'pedido', 'v': actualizado.toJson()},
-          if (estado == 'pagado')
+          // Cobro sin desglose (clientes anteriores al pago mixto). Si ya se cobró por adelantado, no se repite.
+          if (estado == 'pagado' && pedido.pago == null)
             {
               't': 'venta',
               'v': VentaCentral(id: _siguiente('venta'), pedidoId: id, total: actualizado.total, fecha: _reloj())
@@ -1160,8 +1270,79 @@ class Central {
             },
         ]);
         final json = actualizado.toJson();
-        emitir?.call('pedido_actualizado', json);
+        emitir?.call('pedido_actualizado', cerrarPagado ? {...json, '_accion': 'listo_pagado'} : json);
         return json;
+      });
+
+  /// Cobra una o varias cuentas con su forma de pago: `efectivo` + `tarjeta`
+  /// debe sumar el total. Se puede cobrar antes de que cocina termine (el cliente
+  /// paga y se va): la venta se registra ya y el pedido sigue en cocina con su
+  /// estado hasta que lo marque listo. Los pedidos listos pasan a `pagado`
+  /// (salvo que tengan extras pendientes: se cierran cuando cocina los termine).
+  Future<List<Map<String, dynamic>>> cobrar(Map<String, dynamic> datos) => _enSerie(() async {
+        final ids = [
+          for (final id in (datos['pedidos'] is List ? datos['pedidos'] as List : const []))
+            int.tryParse(id.toString()) ?? (throw ErrorCentral(400, 'VALIDATION_ERROR', 'ID inválido.')),
+        ];
+        if (ids.isEmpty || ids.toSet().length != ids.length) {
+          throw ErrorCentral(400, 'VALIDATION_ERROR', 'Indica las cuentas a cobrar, sin repetir.');
+        }
+        final pedidos = [for (final id in ids) _pedido(id)];
+        for (final p in pedidos) {
+          if (p.estado == 'cancelado') {
+            throw ErrorCentral(400, 'INVALID_STATUS', 'El pedido #${p.id} está cancelado.');
+          }
+          if (p.cobrado) throw ErrorCentral(400, 'ALREADY_PAID', 'El pedido #${p.id} ya se cobró.');
+        }
+        double importe(String campo) {
+          final valor = datos[campo] == null ? 0.0 : double.tryParse(datos[campo].toString());
+          if (valor == null || valor < 0 || !valor.isFinite) {
+            throw ErrorCentral(400, 'VALIDATION_ERROR', 'El importe en $campo no es válido.');
+          }
+          return valor;
+        }
+
+        final efectivo = importe('efectivo');
+        final tarjeta = importe('tarjeta');
+        final total = pedidos.fold<double>(0, (s, p) => s + p.total);
+        if (_centavos(efectivo) + _centavos(tarjeta) != _centavos(total)) {
+          throw ErrorCentral(400, 'PAGO_INCOMPLETO',
+              'Efectivo y tarjeta deben sumar el total (${total.toStringAsFixed(2)}).');
+        }
+
+        final ahora = _reloj();
+        final partes = repartirPago([for (final p in pedidos) p.total], efectivo);
+        final actualizados = [
+          for (var i = 0; i < pedidos.length; i++)
+            pedidos[i].copyWith(
+              // Un listo con extras que cocina aún prepara sigue abierto hasta que los termine.
+              estado: pedidos[i].estado == 'listo' && !pedidos[i].items.any((it) => it.extraDesde != null)
+                  ? 'pagado'
+                  : null,
+              pago: PagoCentral(efectivo: partes[i].efectivo, tarjeta: partes[i].tarjeta, fecha: ahora),
+            ),
+        ];
+        await _confirmar([
+          for (var i = 0; i < actualizados.length; i++) ...[
+            {'t': 'pedido', 'v': actualizados[i].toJson()},
+            {
+              't': 'venta',
+              'v': VentaCentral(
+                id: _siguiente('venta'),
+                pedidoId: actualizados[i].id,
+                total: actualizados[i].total,
+                fecha: ahora,
+                efectivo: partes[i].efectivo,
+                tarjeta: partes[i].tarjeta,
+              ).toJson(),
+            },
+          ],
+        ]);
+        final respuesta = [for (final p in actualizados) p.toJson()];
+        for (final json in respuesta) {
+          emitir?.call('pedido_actualizado', {...json, '_accion': 'cobrado'});
+        }
+        return respuesta;
       });
 
   /// Eliminar no es un reembolso: la venta registrada se conserva.
@@ -1184,7 +1365,11 @@ class Central {
   Map<String, dynamic> resumen() {
     final hoy = _dia(_reloj());
     final lunes = hoy.subtract(Duration(days: hoy.weekday - 1));
-    final ventasHoy = _ventas.values.where((v) => _dia(v.fecha) == hoy).fold<double>(0, (s, v) => s + v.total);
+    final hoyTotales = _Totales();
+    for (final v in _ventas.values.where((v) => _dia(v.fecha) == hoy)) {
+      hoyTotales.sumar(v);
+    }
+    final ventasHoy = hoyTotales.total;
     final ventasSemana =
         _ventas.values.where((v) => !_dia(v.fecha).isBefore(lunes)).fold<double>(0, (s, v) => s + v.total);
     final pedidosHoy = _pedidos.values.where((p) => p.estado != 'cancelado' && _dia(p.creadoEn) == hoy).length;
@@ -1202,7 +1387,7 @@ class Central {
     final top = porProducto.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
 
     return {
-      'dia': {'total_ventas': ventasHoy, 'total_pedidos': pedidosHoy},
+      'dia': {'total_ventas': ventasHoy, 'total_pedidos': pedidosHoy, ...hoyTotales.desglose()},
       'semana': ventasSemana,
       'estados': [
         for (final e in (estados.entries.toList()..sort((a, b) => a.key.compareTo(b.key))))
@@ -1214,15 +1399,15 @@ class Central {
     };
   }
 
-  /// Ventas cobradas agrupadas por día local: `[{fecha: 'AAAA-MM-DD', pedidos, total}]`.
+  /// Ventas cobradas agrupadas por día local:
+  /// `[{fecha: 'AAAA-MM-DD', pedidos, total, efectivo, tarjeta, sin_desglose}]`.
   List<Map<String, dynamic>> ventasPorDia(int dias) {
     final desde = _dia(_reloj()).subtract(Duration(days: dias));
-    final grupos = <DateTime, ({int pedidos, double total})>{};
+    final grupos = <DateTime, _Totales>{};
     for (final v in _ventas.values) {
       final dia = _dia(v.fecha);
       if (dia.isBefore(desde)) continue;
-      final previo = grupos[dia] ?? (pedidos: 0, total: 0.0);
-      grupos[dia] = (pedidos: previo.pedidos + 1, total: previo.total + v.total);
+      grupos.putIfAbsent(dia, _Totales.new).sumar(v);
     }
     final dias0 = grupos.keys.toList()..sort();
     String dosDigitos(int n) => n.toString().padLeft(2, '0');
@@ -1232,6 +1417,7 @@ class Central {
           'fecha': '${d.year}-${dosDigitos(d.month)}-${dosDigitos(d.day)}',
           'pedidos': grupos[d]!.pedidos,
           'total': double.parse(grupos[d]!.total.toStringAsFixed(2)),
+          ...grupos[d]!.desglose(),
         },
     ];
   }

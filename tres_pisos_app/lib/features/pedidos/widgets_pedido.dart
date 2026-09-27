@@ -130,6 +130,11 @@ class TarjetaPedido extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Expanded(child: Text(pedido.titulo, style: texto.titleMedium)),
+                  // Cobrado por adelantado: sigue en cocina pero ya no se cobra.
+                  if (pedido.cobrado && pedido.estado.activo) ...[
+                    const ChipEstado(EstadoPedido.pagado),
+                    const SizedBox(width: 6),
+                  ],
                   ChipEstado(pedido.estado),
                 ],
               ),

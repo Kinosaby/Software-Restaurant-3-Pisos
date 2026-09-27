@@ -43,6 +43,13 @@ List<DateTime> diasFinDeSemana(DateTime hoy) {
   return [for (var i = 0; i < 4; i++) DateTime(jueves.year, jueves.month, jueves.day + i)];
 }
 
+/// "Efectivo $X · Tarjeta $Y" (y lo cobrado antes del pago mixto, si hay).
+String desglosePago(VentaDia d) => [
+      'Efectivo ${dinero(d.efectivo)}',
+      'Tarjeta ${dinero(d.tarjeta)}',
+      if (d.sinDesglose >= 0.005) 'Sin desglose ${dinero(d.sinDesglose)}',
+    ].join(' · ');
+
 /// Valor del selector para la vista jueves a domingo.
 const _finDeSemana = 0;
 
@@ -96,7 +103,14 @@ class _MetricasPageState extends ConsumerState<MetricasPage> {
                 spacing: 12,
                 runSpacing: 12,
                 children: [
-                  _Cifra(titulo: 'Ventas de hoy', valor: dinero(r.ventasHoy)),
+                  _Cifra(
+                    titulo: 'Ventas de hoy',
+                    valor: dinero(r.ventasHoy),
+                    detalle: [
+                      'Efectivo ${dinero(r.efectivoHoy)} · Tarjeta ${dinero(r.tarjetaHoy)}',
+                      if (r.sinDesgloseHoy >= 0.005) 'Sin desglose ${dinero(r.sinDesgloseHoy)}',
+                    ].join('\n'),
+                  ),
                   _Cifra(titulo: 'Pedidos de hoy', valor: '${r.pedidosHoy}'),
                   _Cifra(titulo: 'Ventas de la semana', valor: dinero(r.ventasSemana)),
                 ],
@@ -183,10 +197,13 @@ class _MetricasPageState extends ConsumerState<MetricasPage> {
 
 /// Cifra destacada: una sola magnitud no necesita gráfica.
 class _Cifra extends StatelessWidget {
-  const _Cifra({required this.titulo, required this.valor});
+  const _Cifra({required this.titulo, required this.valor, this.detalle});
 
   final String titulo;
   final String valor;
+
+  /// Texto pequeño bajo la cifra (p. ej. el desglose por forma de pago).
+  final String? detalle;
 
   @override
   Widget build(BuildContext context) {
@@ -207,6 +224,10 @@ class _Cifra extends StatelessWidget {
                       fontWeight: FontWeight.bold,
                     ),
               ),
+              if (detalle != null) ...[
+                const SizedBox(height: 4),
+                Text(detalle!, style: const TextStyle(color: Colores.apagado, fontSize: 12)),
+              ],
             ],
           ),
         ),
@@ -246,7 +267,8 @@ class _GraficaVentas extends StatelessWidget {
                 Expanded(
                   child: Tooltip(
                     triggerMode: TooltipTriggerMode.tap,
-                    message: '${_dia.format(d.fecha)}\n${dinero(d.total)} · ${d.pedidos} pedidos',
+                    message: '${_dia.format(d.fecha)}\n${dinero(d.total)} · ${d.pedidos} pedidos'
+                        '${d.total > 0 ? '\n${desglosePago(d)}' : ''}',
                     // El área táctil es toda la columna, no solo la barra.
                     child: Container(
                       color: Colors.transparent,
@@ -313,14 +335,26 @@ class _TablaVentas extends StatelessWidget {
         for (final d in dias.reversed)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(child: Text(_fecha.format(d.fecha))),
-                SizedBox(
-                  width: 80,
-                  child: Text('${d.pedidos} ped.', textAlign: TextAlign.end, style: const TextStyle(color: Colores.apagado)),
+                Row(
+                  children: [
+                    Expanded(child: Text(_fecha.format(d.fecha))),
+                    SizedBox(
+                      width: 80,
+                      child:
+                          Text('${d.pedidos} ped.', textAlign: TextAlign.end, style: const TextStyle(color: Colores.apagado)),
+                    ),
+                    SizedBox(width: 110, child: Text(dinero(d.total), textAlign: TextAlign.end)),
+                  ],
                 ),
-                SizedBox(width: 110, child: Text(dinero(d.total), textAlign: TextAlign.end)),
+                if (d.total > 0)
+                  Text(
+                    desglosePago(d),
+                    textAlign: TextAlign.end,
+                    style: const TextStyle(color: Colores.apagado, fontSize: 12),
+                  ),
               ],
             ),
           ),

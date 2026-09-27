@@ -59,11 +59,18 @@ class ReglasAviso {
       case ExtraRecibido(:final extra) when cocina:
         final piezas = extra.items.fold(0, (s, i) => s + i.cantidad);
         return (aviso: Aviso('Extra · ${etiquetaMesa(extra.mesa, llevar: extra.tipo == TipoPedido.llevar)}: $piezas productos', urgente: true), sonido: 'pedido');
-      case PedidoCambiado(:final pedido, nuevo: false) when !cocina && _esMio(pedido):
+      case PedidoCambiado(:final pedido, nuevo: false, :final accion) when !cocina && _esMio(pedido):
         // Con un extra en cocina aún no se puede servir; cuando lo terminan cambian
         // las piezas y se vuelve a avisar.
         if (pedido.paraServir && _primeraVez('listo-${pedido.id}-${pedido.piezas}')) {
           return (aviso: Aviso('${pedido.titulo} está lista para servir', pedidoId: pedido.id), sonido: 'listo');
+        }
+        // Cobrado por adelantado: al terminarlo cocina se cierra solo, pero hay que entregarlo.
+        if (accion == 'listo_pagado' && _primeraVez('listo-${pedido.id}-${pedido.piezas}')) {
+          return (
+            aviso: Aviso('${pedido.titulo} está lista para entregar (ya pagada)', pedidoId: pedido.id),
+            sonido: 'listo',
+          );
         }
         if (pedido.estado == EstadoPedido.cancelado && _primeraVez('cancelado-${pedido.id}')) {
           return (

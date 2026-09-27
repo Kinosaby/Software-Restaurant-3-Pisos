@@ -10,7 +10,9 @@ import '../pedidos/pedidos_controller.dart';
 import '../pedidos/widgets_pedido.dart';
 import 'cobro.dart';
 
-/// Cuentas que cocina ya terminó, agrupadas por mesa para cobrarlas juntas o por separado.
+/// Cuentas por cobrar agrupadas por mesa para cobrarlas juntas o por separado.
+/// Incluye las que cocina aún no termina (el cliente puede pagar y irse); al
+/// cobrarlas se pide confirmación y siguen en cocina hasta que las marque listas.
 class CajaPage extends ConsumerWidget {
   const CajaPage({super.key});
 
@@ -34,7 +36,8 @@ class CajaPage extends ConsumerWidget {
                 alReintentar: () => ref.invalidate(pedidosActivosProvider),
               ),
               data: (todos) {
-                final porCobrar = todos.where((p) => p.estado == EstadoPedido.listo).toList();
+                final porCobrar = todos.where((p) => !p.cobrado).toList();
+                final pagadosEnCocina = todos.where((p) => p.cobrado).toList();
                 final totalPorCobrar = porCobrar.fold<double>(0, (s, p) => s + p.total);
                 final grupos = <String, List<Pedido>>{};
                 for (final p in porCobrar) {
@@ -100,6 +103,16 @@ class CajaPage extends ConsumerWidget {
                             ),
                           ),
                         const SizedBox(height: 8),
+                      ],
+                      if (pagadosEnCocina.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text('Pagados, aún en cocina', style: Theme.of(context).textTheme.titleMedium),
+                        const SizedBox(height: 8),
+                        for (final pedido in pagadosEnCocina)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: TarjetaPedido(pedido: pedido, onTap: () => context.push('/pedido/${pedido.id}')),
+                          ),
                       ],
                     ],
                   ),

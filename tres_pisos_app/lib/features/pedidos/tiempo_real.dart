@@ -13,9 +13,12 @@ sealed class EventoTiempoReal {
 
 /// `nuevo_pedido` o `pedido_actualizado`: el servidor manda el pedido completo.
 class PedidoCambiado extends EventoTiempoReal {
-  const PedidoCambiado(this.pedido, {required this.nuevo});
+  const PedidoCambiado(this.pedido, {required this.nuevo, this.accion});
   final Pedido pedido;
   final bool nuevo;
+
+  /// `_accion` del evento, p. ej. `listo_pagado`: cocina terminó un pedido cobrado por adelantado.
+  final String? accion;
 }
 
 /// `extra_pedido`: solo los productos añadidos a un pedido ya terminado.
@@ -60,7 +63,7 @@ abstract class TiempoReal {
       case 'nuevo_pedido':
         _eventos.add(PedidoCambiado(Pedido.fromJson(mapa), nuevo: true));
       case 'pedido_actualizado':
-        _eventos.add(PedidoCambiado(Pedido.fromJson(mapa), nuevo: false));
+        _eventos.add(PedidoCambiado(Pedido.fromJson(mapa), nuevo: false, accion: mapa['_accion']?.toString()));
       case 'extra_pedido':
         _eventos.add(ExtraRecibido(ExtraPedido.fromJson(mapa)));
       case 'pedido_eliminado':

@@ -165,8 +165,63 @@ typedef Reparto = ({List<Pedido> pedidos, int? eliminado});
 /// Otras cuentas abiertas de la misma mesa a las que se pueden pasar productos de [pedido].
 List<Pedido> cuentasHermanas(Iterable<Pedido> activos, Pedido pedido) => [
       for (final p in activos)
-        if (p.id != pedido.id && p.mesa == pedido.mesa && p.estado.activo) p,
+        if (p.id != pedido.id && p.mesa == pedido.mesa && p.estado.activo && !p.cobrado) p,
     ];
+
+/// Redondea a centavos para comparar y repartir importes sin errores de coma flotante.
+double aCentavos(double valor) => (valor * 100).round() / 100;
+
+/// Cómo se pagó una cuenta: parte en efectivo y parte con tarjeta (o transferencia).
+///
+/// La central lo guarda en `pago` del pedido como `{efectivo, tarjeta, fecha}`.
+/// Los pedidos cobrados antes del pago mixto no traen `pago` (sin desglose).
+class Pago {
+  const Pago({this.efectivo = 0, this.tarjeta = 0, this.recibido, this.fecha});
+
+  factory Pago.fromJson(Map<String, dynamic> json) => Pago(
+        efectivo: leerDinero(json['efectivo']),
+        tarjeta: leerDinero(json['tarjeta']),
+        recibido: json['recibido'] == null ? null : leerDinero(json['recibido']),
+        fecha: DateTime.tryParse(json['fecha']?.toString() ?? '')?.toLocal(),
+      );
+
+  /// Suma los pagos de varias cuentas (p. ej. una mesa cobrada junta).
+  factory Pago.sumar(Iterable<Pago> pagos) {
+    var efectivo = 0.0;
+    var tarjeta = 0.0;
+    for (final p in pagos) {
+      efectivo += p.efectivo;
+      tarjeta += p.tarjeta;
+    }
+    return Pago(efectivo: aCentavos(efectivo), tarjeta: aCentavos(tarjeta));
+  }
+
+  /// Parte de la cuenta pagada en efectivo.
+  final double efectivo;
+
+  /// Parte de la cuenta pagada con tarjeta o transferencia.
+  final double tarjeta;
+
+  /// Billetes que entregó el cliente para la parte en efectivo (solo en la tablet que cobra).
+  final double? recibido;
+  final DateTime? fecha;
+
+  double get total => aCentavos(efectivo + tarjeta);
+
+  /// El cambio se calcula solo sobre la parte en efectivo.
+  double? get cambio => recibido == null ? null : aCentavos(recibido! - efectivo);
+
+  bool get mixto => efectivo >= 0.005 && tarjeta >= 0.005;
+
+  String get metodo => mixto ? 'Mixto' : (tarjeta >= 0.005 ? 'Tarjeta' : 'Efectivo');
+
+  Map<String, dynamic> toJson() => {
+        'efectivo': efectivo,
+        'tarjeta': tarjeta,
+        'recibido': ?recibido,
+        if (fecha != null) 'fecha': fecha!.toUtc().toIso8601String(),
+      };
+}
 
 class Pedido {
   const Pedido({
@@ -180,6 +235,7 @@ class Pedido {
     this.comensal,
     this.usuarioId,
     this.mesero,
+    this.pago,
   });
 
   factory Pedido.fromJson(Map<String, dynamic> json) => Pedido(
@@ -196,6 +252,7 @@ class Pedido {
           for (final item in (json['productos'] as List? ?? const []))
             if (item is Map<String, dynamic>) PedidoItem.fromJson(item),
         ],
+        pago: json['pago'] is Map<String, dynamic> ? Pago.fromJson(json['pago'] as Map<String, dynamic>) : null,
       );
 
   final int id;
@@ -210,6 +267,12 @@ class Pedido {
   final String? mesero;
   final DateTime creadoEn;
   final List<PedidoItem> items;
+
+  /// Desglose del cobro; `null` si no se ha cobrado o se cobró antes del pago mixto.
+  final Pago? pago;
+
+  /// Ya se cobró, aunque cocina todavía lo esté preparando (el cliente pagó por adelantado).
+  bool get cobrado => estado == EstadoPedido.pagado || pago != null;
 
   int get piezas => items.fold(0, (suma, item) => suma + item.cantidad);
 
@@ -238,6 +301,7 @@ class Pedido {
         'mesero': mesero,
         'creado_en': creadoEn.toUtc().toIso8601String(),
         'productos': [for (final i in items) i.toJson()],
+        if (pago != null) 'pago': pago!.toJson(),
       };
 }
 

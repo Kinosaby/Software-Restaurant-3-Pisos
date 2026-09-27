@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -20,10 +20,82 @@ List<double> montosSugeridos(double total) {
   return lista.take(4).toList();
 }
 
+enum FormaPago {
+  efectivo('Efectivo', Icons.payments_outlined),
+  tarjeta('Tarjeta', Icons.credit_card),
+  mixto('Mixto', Icons.call_split);
+
+  const FormaPago(this.etiqueta, this.icono);
+  final String etiqueta;
+  final IconData icono;
+}
+
+/// Cuánto va en efectivo y cuánto con tarjeta según lo que se capturó en la hoja de cobro.
+class CalculoCobro {
+  const CalculoCobro({required this.total, required this.efectivo, required this.tarjeta, this.recibido});
+
+  final double total;
+  final double efectivo;
+  final double tarjeta;
+
+  /// Billetes que entrega el cliente para la parte en efectivo.
+  final double? recibido;
+
+  /// El cambio sale solo de la parte en efectivo.
+  double? get cambio => recibido == null ? null : aCentavos(recibido! - efectivo);
+
+  bool get hayEfectivo => efectivo >= 0.005;
+
+  /// La parte con tarjeta no puede pasar del total.
+  bool get tarjetaValida => tarjeta >= 0 && efectivo >= 0;
+
+  /// Se puede cobrar: las partes cuadran y, si hay efectivo, lo recibido alcanza.
+  bool get valido => tarjetaValida && (!hayEfectivo || (cambio != null && cambio! >= 0));
+
+  Pago get pago => Pago(efectivo: efectivo, tarjeta: tarjeta, recibido: hayEfectivo ? recibido : null);
+}
+
+/// Reparte el [total]: con tarjeta todo va a tarjeta; en efectivo, todo en
+/// efectivo; en mixto, lo que no se paga con [tarjeta] se paga en efectivo.
+CalculoCobro calcularCobro({required double total, required FormaPago forma, double? tarjeta, double? recibido}) {
+  final total0 = aCentavos(total);
+  final conTarjeta = switch (forma) {
+    FormaPago.efectivo => 0.0,
+    FormaPago.tarjeta => total0,
+    // Sin capturar la parte con tarjeta, el mixto no cuadra todavía.
+    FormaPago.mixto => tarjeta == null ? -1.0 : aCentavos(tarjeta),
+  };
+  return CalculoCobro(
+    total: total0,
+    tarjeta: conTarjeta,
+    efectivo: aCentavos(total0 - (conTarjeta < 0 ? 0 : conTarjeta)),
+    recibido: forma == FormaPago.tarjeta ? null : recibido,
+  );
+}
+
+/// Advertencia si alguna de las cuentas sigue en cocina (sin terminar o con un
+/// extra pendiente); `null` si todas se pueden servir ya.
+String? avisoEnCocina(List<Pedido> pedidos) {
+  final enCocina = pedidos.where((p) => !p.paraServir).length;
+  if (enCocina == 0) return null;
+  final inicio = pedidos.length == 1
+      ? 'Este pedido aún está en cocina.'
+      : enCocina == 1
+          ? 'Una de las cuentas aún está en cocina.'
+          : '$enCocina de las cuentas aún están en cocina.';
+  return '$inicio Puedes cobrar ahora: cocina lo seguirá viendo y, cuando lo marque listo, '
+      'la cuenta se cerrará sola y se avisará al mesero para entregarlo.';
+}
+
 /// Cobra una o varias cuentas (p. ej. la mesa completa). Al terminar ofrece compartir el ticket.
 Future<void> mostrarCobro(BuildContext context, WidgetRef ref, List<Pedido> pedidos) async {
   if (pedidos.isEmpty) return;
-  final resultado = await showModalBottomSheet<({double? pago, double? cambio})>(
+  final aviso = avisoEnCocina(pedidos);
+  if (aviso != null) {
+    final seguir = await confirmar(context, titulo: 'Aún en cocina', mensaje: aviso, accion: 'Cobrar de todos modos');
+    if (!seguir || !context.mounted) return;
+  }
+  final resultado = await showModalBottomSheet<({Pago pago, List<Pedido> cobrados})>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
@@ -41,8 +113,12 @@ Future<void> mostrarCobro(BuildContext context, WidgetRef ref, List<Pedido> pedi
       persist: false, // con botón, Flutter lo deja fijo por defecto
       action: SnackBarAction(
         label: 'Ticket',
-        onPressed: () =>
-            mostrarTicket(contextoRaiz, pedidos, pago: resultado.pago, cambio: resultado.cambio, pagado: true),
+        onPressed: () => mostrarTicket(
+          contextoRaiz,
+          resultado.cobrados.isEmpty ? pedidos : resultado.cobrados,
+          pago: resultado.pago,
+          pagado: true,
+        ),
       ),
     ));
 }
@@ -57,31 +133,38 @@ class _HojaCobro extends ConsumerStatefulWidget {
 }
 
 class _HojaCobroState extends ConsumerState<_HojaCobro> {
-  final _pago = TextEditingController();
+  final _recibido = TextEditingController();
+  final _tarjeta = TextEditingController();
+  FormaPago _forma = FormaPago.efectivo;
   bool _cobrando = false;
   String? _error;
 
   double get _total => widget.pedidos.fold(0, (s, p) => s + p.total);
-  double? get _recibido => double.tryParse(_pago.text.replaceAll(',', '.'));
+
+  static double? _leer(TextEditingController c) => double.tryParse(c.text.replaceAll(',', '.'));
+
+  CalculoCobro get _calculo =>
+      calcularCobro(total: _total, forma: _forma, tarjeta: _leer(_tarjeta), recibido: _leer(_recibido));
 
   @override
   void dispose() {
-    _pago.dispose();
+    _recibido.dispose();
+    _tarjeta.dispose();
     super.dispose();
   }
 
-  Future<void> _cobrar({required bool efectivo}) async {
+  Future<void> _cobrar(CalculoCobro calculo) async {
     setState(() {
       _cobrando = true;
       _error = null;
     });
     try {
-      await ref
+      final pago = calculo.pago;
+      final cobrados = await ref
           .read(pedidosActivosProvider.notifier)
-          .cambiarEstadoVarios([for (final p in widget.pedidos) p.id], EstadoPedido.pagado);
+          .cobrar([for (final p in widget.pedidos) p.id], pago);
       if (!mounted) return;
-      final pago = efectivo ? _recibido : null;
-      Navigator.pop(context, (pago: pago, cambio: pago == null ? null : pago - _total));
+      Navigator.pop(context, (pago: pago, cobrados: cobrados));
     } on Object catch (e) {
       if (mounted) setState(() => _error = '$e');
     } finally {
@@ -92,9 +175,31 @@ class _HojaCobroState extends ConsumerState<_HojaCobro> {
   @override
   Widget build(BuildContext context) {
     final texto = Theme.of(context).textTheme;
-    final recibido = _recibido;
-    final cambio = recibido == null ? null : recibido - _total;
-    final alcanza = cambio != null && cambio >= -0.005;
+    final calculo = _calculo;
+    final cambio = calculo.cambio;
+    final pideEfectivo = _forma != FormaPago.tarjeta && calculo.tarjetaValida && calculo.hayEfectivo;
+
+    Widget campoDinero(TextEditingController c, String etiqueta, {bool enfocar = false}) => TextField(
+          controller: c,
+          autofocus: enfocar,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]'))],
+          textAlign: TextAlign.end,
+          style: texto.headlineSmall,
+          decoration: InputDecoration(labelText: etiqueta, prefixText: r'$ '),
+          onChanged: (_) => setState(() {}),
+        );
+
+    Widget renglon(String etiqueta, double valor, {Color? color, TextStyle? estilo}) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(
+            children: [
+              Text(etiqueta, style: texto.titleMedium),
+              const Spacer(),
+              Text(dinero(valor), style: (estilo ?? texto.titleMedium)?.copyWith(color: color, fontWeight: FontWeight.bold)),
+            ],
+          ),
+        );
 
     return SafeArea(
       child: Padding(
@@ -129,62 +234,73 @@ class _HojaCobroState extends ConsumerState<_HojaCobro> {
                 ],
               ),
               const SizedBox(height: 16),
-              TextField(
-                controller: _pago,
-                autofocus: true,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]'))],
-                textAlign: TextAlign.end,
-                style: texto.headlineSmall,
-                decoration: const InputDecoration(labelText: 'Con cuánto paga (efectivo)', prefixText: r'$ '),
-                onChanged: (_) => setState(() {}),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                children: [
-                  ActionChip(
-                    label: const Text('Exacto'),
-                    onPressed: () => setState(() => _pago.text = _total.toStringAsFixed(2)),
-                  ),
-                  for (final monto in montosSugeridos(_total))
-                    ActionChip(
-                      label: Text(dinero(monto)),
-                      onPressed: () => setState(() => _pago.text = monto.toStringAsFixed(2)),
-                    ),
+              SegmentedButton<FormaPago>(
+                segments: [
+                  for (final f in FormaPago.values) ButtonSegment(value: f, label: Text(f.etiqueta), icon: Icon(f.icono)),
                 ],
+                selected: {_forma},
+                showSelectedIcon: false,
+                onSelectionChanged: (s) => setState(() => _forma = s.first),
               ),
-              const SizedBox(height: 12),
-              if (cambio != null)
-                Row(
+              const SizedBox(height: 16),
+              if (_forma == FormaPago.mixto) ...[
+                campoDinero(_tarjeta, 'Con tarjeta o transferencia', enfocar: true),
+                const SizedBox(height: 8),
+                if (!calculo.tarjetaValida && _tarjeta.text.isNotEmpty)
+                  const Text('La parte con tarjeta no puede pasar del total.', style: TextStyle(color: Colores.peligro))
+                else if (calculo.tarjeta >= 0)
+                  renglon('En efectivo', calculo.efectivo),
+                const SizedBox(height: 12),
+              ],
+              if (_forma == FormaPago.tarjeta)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 8),
+                  child: Text('Todo con tarjeta o transferencia.', style: TextStyle(color: Colores.apagado)),
+                ),
+              if (pideEfectivo) ...[
+                campoDinero(
+                  _recibido,
+                  _forma == FormaPago.mixto ? 'Con cuánto paga lo de efectivo' : 'Con cuánto paga (efectivo)',
+                  enfocar: _forma == FormaPago.efectivo,
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
                   children: [
-                    Text(alcanza ? 'Cambio' : 'Falta', style: texto.titleMedium),
-                    const Spacer(),
-                    Text(
-                      dinero(cambio.abs()),
-                      style: texto.headlineMedium?.copyWith(
-                        color: alcanza ? Colores.exito : Colores.peligro,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    ActionChip(
+                      label: const Text('Exacto'),
+                      onPressed: () => setState(() => _recibido.text = calculo.efectivo.toStringAsFixed(2)),
                     ),
+                    for (final monto in montosSugeridos(calculo.efectivo))
+                      ActionChip(
+                        label: Text(dinero(monto)),
+                        onPressed: () => setState(() => _recibido.text = monto.toStringAsFixed(2)),
+                      ),
                   ],
                 ),
+                const SizedBox(height: 12),
+                if (cambio != null)
+                  renglon(
+                    cambio >= 0 ? 'Cambio' : 'Falta',
+                    cambio.abs(),
+                    color: cambio >= 0 ? Colores.exito : Colores.peligro,
+                    estilo: texto.headlineMedium,
+                  ),
+              ],
               if (_error != null) ...[
                 const SizedBox(height: 8),
                 Text(_error!, style: const TextStyle(color: Colores.peligro)),
               ],
               const SizedBox(height: 16),
               FilledButton.icon(
-                onPressed: _cobrando || !alcanza ? null : () => _cobrar(efectivo: true),
+                onPressed: _cobrando || !calculo.valido ? null : () => _cobrar(calculo),
                 style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-                icon: const Icon(Icons.payments_outlined),
-                label: const Text('Cobrar en efectivo'),
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: _cobrando ? null : () => _cobrar(efectivo: false),
-                icon: const Icon(Icons.credit_card),
-                label: const Text('Tarjeta o transferencia'),
+                icon: Icon(_forma.icono),
+                label: Text(switch (_forma) {
+                  FormaPago.efectivo => 'Cobrar en efectivo',
+                  FormaPago.tarjeta => 'Cobrar con tarjeta',
+                  FormaPago.mixto => 'Cobrar mixto',
+                }),
               ),
             ],
           ),

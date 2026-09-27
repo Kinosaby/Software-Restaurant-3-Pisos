@@ -35,6 +35,23 @@ void main() {
     expect(r.productosTop.first, (nombre: 'Tacos de Pastor', cantidad: 58));
   });
 
+  test('desglose por forma de pago, compatible con centrales anteriores', () {
+    final r = ResumenMetricas.fromJson({
+      ...resumenJson,
+      'dia': {'total_ventas': 300, 'total_pedidos': 3, 'efectivo': 120, 'tarjeta': 150, 'sin_desglose': 30},
+    });
+    expect((r.efectivoHoy, r.tarjetaHoy, r.sinDesgloseHoy), (120.0, 150.0, 30.0));
+    // Sin campos de desglose todo lo vendido es "sin desglose".
+    final antiguo = ResumenMetricas.fromJson(resumenJson);
+    expect((antiguo.efectivoHoy, antiguo.tarjetaHoy, antiguo.sinDesgloseHoy), (0.0, 0.0, 1250.5));
+
+    final dia = VentaDia.fromJson({'fecha': '2026-09-21', 'pedidos': 2, 'total': 90, 'efectivo': 40, 'tarjeta': 50});
+    expect(desglosePago(dia), r'Efectivo $40.00 · Tarjeta $50.00');
+    final diaAntiguo = VentaDia.fromJson({'fecha': '2026-09-21', 'pedidos': 1, 'total': 90});
+    expect(diaAntiguo.sinDesglose, 90);
+    expect(desglosePago(diaAntiguo), contains(r'Sin desglose $90.00'));
+  });
+
   test('VentaDia no se corre al día anterior por la zona horaria', () {
     // Una fecha con hora UTC no debe moverse al día anterior en México.
     final v = VentaDia.fromJson({'fecha': '2026-09-21T00:00:00.000Z', 'pedidos': 9, 'total': '980.00'});
@@ -72,12 +89,17 @@ void main() {
 
     expect(find.text('Ventas de hoy'), findsOneWidget);
     expect(find.textContaining('1,250.50'), findsWidgets);
+    expect(find.textContaining('Sin desglose'), findsOneWidget, reason: 'resumen de una central anterior');
+    final lista = find.byType(Scrollable).first;
+    await tester.scrollUntilVisible(find.text('Tacos de Pastor'), 200, scrollable: lista);
     expect(find.text('Tacos de Pastor'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Ver tabla'), -200, scrollable: lista);
 
     await tester.tap(find.text('Ver tabla'));
     await tester.pumpAndSettle();
     expect(find.text('14 ped.'), findsOneWidget);
 
+    await tester.scrollUntilVisible(find.text('30 días'), -200, scrollable: lista);
     await tester.tap(find.text('30 días'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);

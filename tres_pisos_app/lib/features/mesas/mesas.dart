@@ -55,7 +55,9 @@ class EstadoMesa {
   }
 
   double get total => pedidos.fold(0, (s, p) => s + p.total);
-  List<Pedido> get porCobrar => [for (final p in pedidos) if (p.estado == EstadoPedido.listo) p];
+
+  /// Cuentas sin cobrar, aunque cocina no las haya terminado (el cliente puede pagar y irse).
+  List<Pedido> get porCobrar => [for (final p in pedidos) if (!p.cobrado) p];
 
   /// Desde cuándo está ocupada (la cuenta más antigua).
   DateTime? get desde => pedidos.isEmpty ? null : pedidos.map((p) => p.creadoEn).reduce((a, b) => a.isBefore(b) ? a : b);

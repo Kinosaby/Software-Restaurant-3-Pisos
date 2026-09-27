@@ -280,7 +280,8 @@ class _TarjetaGrupo extends ConsumerWidget {
                           tooltip: 'Cancelar pedido',
                           visualDensity: VisualDensity.compact,
                           icon: const Icon(Icons.close, size: 18, color: Colores.peligro),
-                          onPressed: ocupado ? null : () => onCancelar(p),
+                          // Ya cobrado por adelantado: no se cancela desde cocina.
+                          onPressed: ocupado || p.cobrado ? null : () => onCancelar(p),
                         ),
                       ],
                     ),

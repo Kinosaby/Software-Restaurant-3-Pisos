@@ -248,6 +248,22 @@ class PedidosActivos extends AsyncNotifier<List<Pedido>> {
     return reparto;
   }
 
+  /// Cobra varias cuentas de una vez con su forma de pago (efectivo, tarjeta o mixto).
+  /// Como los demás cobros, no se encola: sin conexión falla con el mismo aviso.
+  Future<List<Pedido>> cobrar(Iterable<int> ids, Pago pago) async {
+    final cobrados = <Pedido>[];
+    await _ejecutar((repo) async {
+      cobrados.addAll(await repo.cobrar(ids.toList(), pago));
+      return cobrados.last;
+    });
+    if (ref.mounted) {
+      for (final p in cobrados) {
+        aplicar(p);
+      }
+    }
+    return cobrados;
+  }
+
   Future<Pedido> _ejecutar(Future<Pedido> Function(PedidosRepository repo) accion) async {
     try {
       final pedido = await accion(ref.read(pedidosRepositoryProvider));

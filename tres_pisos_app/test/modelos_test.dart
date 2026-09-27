@@ -60,6 +60,36 @@ void main() {
     expect(extra.items.single.subtotal, 44.0);
   });
 
+  group('pago', () {
+    test('un pedido cobrado en mixto trae su desglose y lo conserva al guardarse', () {
+      final pedido = Pedido.fromJson({
+        ...pedidoJson(estado: 'preparando'),
+        'pago': {'efectivo': '32.00', 'tarjeta': 100, 'fecha': '2026-09-26T20:15:00.000Z'},
+      });
+      expect(pedido.cobrado, isTrue, reason: 'pagado por adelantado aunque siga en cocina');
+      expect(pedido.estado.activo, isTrue);
+      expect((pedido.pago!.efectivo, pedido.pago!.tarjeta, pedido.pago!.metodo), (32.0, 100.0, 'Mixto'));
+
+      final copia = Pedido.fromJson(pedido.toJson());
+      expect((copia.pago!.efectivo, copia.pago!.tarjeta), (32.0, 100.0));
+    });
+
+    test('los pedidos cobrados antes del pago mixto no traen desglose', () {
+      final antiguo = Pedido.fromJson(pedidoJson(estado: 'pagado'));
+      expect(antiguo.pago, isNull);
+      expect(antiguo.cobrado, isTrue);
+      expect(antiguo.toJson().containsKey('pago'), isFalse);
+      expect(Pedido.fromJson(pedidoJson(estado: 'listo')).cobrado, isFalse);
+    });
+
+    test('sumar pagos y cambio solo sobre el efectivo', () {
+      final total = Pago.sumar(const [Pago(efectivo: 10.1, tarjeta: 0.2), Pago(efectivo: 0.2)]);
+      expect((total.efectivo, total.tarjeta, total.total), (10.3, 0.2, 10.5));
+      expect(const Pago(efectivo: 150, tarjeta: 200, recibido: 200).cambio, 50);
+      expect(const Pago(tarjeta: 200).cambio, isNull);
+    });
+  });
+
   test('estados activos y modificables', () {
     expect(EstadoPedido.listo.activo, isTrue);
     expect(EstadoPedido.pagado.activo, isFalse);

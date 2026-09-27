@@ -16,6 +16,9 @@ class ResumenMetricas {
     required this.ventasSemana,
     required this.porEstado,
     required this.productosTop,
+    this.efectivoHoy = 0,
+    this.tarjetaHoy = 0,
+    this.sinDesgloseHoy = 0,
   });
 
   /// Forma de `GET /api/metricas/resumen`.
@@ -25,6 +28,10 @@ class ResumenMetricas {
       ventasHoy: leerDinero(dia['total_ventas']),
       pedidosHoy: leerEntero(dia['total_pedidos']),
       ventasSemana: leerDinero(json['semana']),
+      // Centrales anteriores al pago mixto no mandan el desglose: todo queda "sin desglose".
+      efectivoHoy: leerDinero(dia['efectivo']),
+      tarjetaHoy: leerDinero(dia['tarjeta']),
+      sinDesgloseHoy: dia.containsKey('efectivo') ? leerDinero(dia['sin_desglose']) : leerDinero(dia['total_ventas']),
       porEstado: {
         for (final e in (json['estados'] as List? ?? const []))
           if (e is Map) EstadoPedido.desde(e['estado']?.toString()): leerEntero(e['cantidad']),
@@ -41,10 +48,24 @@ class ResumenMetricas {
   final double ventasSemana;
   final Map<EstadoPedido, int> porEstado;
   final List<({String nombre, int cantidad})> productosTop;
+
+  /// Ventas de hoy por forma de pago. Un cobro mixto suma a las dos.
+  final double efectivoHoy;
+  final double tarjetaHoy;
+
+  /// Cobros anteriores al pago mixto (no guardaban la forma de pago).
+  final double sinDesgloseHoy;
 }
 
 class VentaDia {
-  const VentaDia({required this.fecha, required this.pedidos, required this.total});
+  const VentaDia({
+    required this.fecha,
+    required this.pedidos,
+    required this.total,
+    this.efectivo = 0,
+    this.tarjeta = 0,
+    this.sinDesglose = 0,
+  });
 
   /// `fecha` llega como "AAAA-MM-DD" (día local de la central). Se lee solo esa
   /// parte: convertir una fecha con hora a local podría moverla al día anterior.
@@ -55,12 +76,20 @@ class VentaDia {
       fecha: DateTime.tryParse(soloFecha) ?? DateTime(1970),
       pedidos: leerEntero(json['pedidos']),
       total: leerDinero(json['total']),
+      efectivo: leerDinero(json['efectivo']),
+      tarjeta: leerDinero(json['tarjeta']),
+      sinDesglose: json.containsKey('efectivo') ? leerDinero(json['sin_desglose']) : leerDinero(json['total']),
     );
   }
 
   final DateTime fecha;
   final int pedidos;
   final double total;
+
+  /// Desglose por forma de pago; lo cobrado antes del pago mixto va en [sinDesglose].
+  final double efectivo;
+  final double tarjeta;
+  final double sinDesglose;
 }
 
 /// Endpoints de administración: productos, usuarios y métricas (todos requieren rol admin).

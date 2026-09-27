@@ -89,6 +89,22 @@ class PedidosRepository {
     return _pedido(datos);
   }
 
+  /// `POST /api/pedidos/cobrar`: cobra las cuentas juntas con su forma de pago
+  /// (efectivo + tarjeta = total). Sirve también para pedidos que cocina no ha terminado.
+  Future<List<Pedido>> cobrar(List<int> pedidoIds, Pago pago) async {
+    final datos = await _api.post('/api/pedidos/cobrar', {
+      'pedidos': pedidoIds,
+      'efectivo': pago.efectivo,
+      'tarjeta': pago.tarjeta,
+    });
+    final pedidos = datos['pedidos'];
+    if (pedidos is! List || pedidos.isEmpty) throw ApiException('El servidor no devolvió los pedidos cobrados.');
+    return [
+      for (final p in pedidos)
+        if (p is Map<String, dynamic>) Pedido.fromJson(p),
+    ];
+  }
+
   Future<Pedido> cancelar(int pedidoId) async {
     final datos = await _api.patch('/api/pedidos/$pedidoId/cancelar');
     return _pedido(datos);

@@ -15,6 +15,27 @@ final historialProvider = FutureProvider.autoDispose<List<Pedido>>((ref) async {
   return pedidos.reversed.toList();
 });
 
+/// Lo cobrado en una lista de pedidos con su desglose. Incluye los cobrados por
+/// adelantado que siguen en cocina; los cobros anteriores al pago mixto van "sin desglose".
+({double total, double efectivo, double tarjeta, double sinDesglose}) resumenCobro(Iterable<Pedido> pedidos) {
+  var total = 0.0, efectivo = 0.0, tarjeta = 0.0, sinDesglose = 0.0;
+  for (final p in pedidos.where((p) => p.cobrado)) {
+    total += p.total;
+    if (p.pago case final pago?) {
+      efectivo += pago.efectivo;
+      tarjeta += pago.tarjeta;
+    } else {
+      sinDesglose += p.total;
+    }
+  }
+  return (
+    total: aCentavos(total),
+    efectivo: aCentavos(efectivo),
+    tarjeta: aCentavos(tarjeta),
+    sinDesglose: aCentavos(sinDesglose),
+  );
+}
+
 /// Historial para el administrador: hoy o todo, filtro por estado y borrado.
 class HistorialPage extends ConsumerStatefulWidget {
   const HistorialPage({super.key});
@@ -61,7 +82,7 @@ class _HistorialPageState extends ConsumerState<HistorialPage> {
         error: (e, _) => ErrorConReintento(error: e, alReintentar: () => ref.invalidate(historialProvider)),
         data: (todos) {
           final filtrados = todos.where((p) => (!_soloHoy || esHoy(p)) && (_estado == null || p.estado == _estado)).toList();
-          final cobrado = filtrados.where((p) => p.estado == EstadoPedido.pagado).fold<double>(0, (s, p) => s + p.total);
+          final cobro = resumenCobro(filtrados);
           return RefreshIndicator(
             onRefresh: () => ref.refresh(historialProvider.future),
             child: ListView(
@@ -91,7 +112,16 @@ class _HistorialPageState extends ConsumerState<HistorialPage> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                Text('${filtrados.length} pedidos · cobrado ${dinero(cobrado)}', style: const TextStyle(color: Colores.apagado)),
+                Text('${filtrados.length} pedidos · cobrado ${dinero(cobro.total)}', style: const TextStyle(color: Colores.apagado)),
+                if (cobro.total >= 0.005)
+                  Text(
+                    [
+                      'Efectivo ${dinero(cobro.efectivo)}',
+                      'Tarjeta ${dinero(cobro.tarjeta)}',
+                      if (cobro.sinDesglose >= 0.005) 'Sin desglose ${dinero(cobro.sinDesglose)}',
+                    ].join(' · '),
+                    style: const TextStyle(color: Colores.apagado, fontSize: 12),
+                  ),
                 const SizedBox(height: 12),
                 if (filtrados.isEmpty)
                   const Padding(

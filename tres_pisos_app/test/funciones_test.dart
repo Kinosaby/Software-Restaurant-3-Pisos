@@ -1,8 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tres_pisos_app/features/admin/historial_page.dart';
 import 'package:tres_pisos_app/features/admin/metricas_page.dart';
 import 'package:tres_pisos_app/features/auth/sesion.dart';
 import 'package:tres_pisos_app/features/avisos/avisos.dart';
 import 'package:tres_pisos_app/features/caja/cobro.dart';
+import 'package:tres_pisos_app/features/caja/ticket.dart';
 import 'package:tres_pisos_app/features/cocina/cocina_page.dart';
 import 'package:tres_pisos_app/features/mesas/mesas.dart';
 import 'package:tres_pisos_app/features/mesero/carrito.dart';
@@ -68,6 +70,115 @@ void main() {
     expect(montosSugeridos(200), [500, 1000]);
   });
 
+  group('pago mixto', () {
+    test('en efectivo el cambio sale del total', () {
+      final c = calcularCobro(total: 137, forma: FormaPago.efectivo, recibido: 200);
+      expect((c.efectivo, c.tarjeta, c.cambio, c.valido), (137.0, 0.0, 63.0, true));
+      expect(calcularCobro(total: 137, forma: FormaPago.efectivo, recibido: 100).valido, isFalse);
+      expect(calcularCobro(total: 137, forma: FormaPago.efectivo).valido, isFalse, reason: 'falta lo recibido');
+    });
+
+    test('con tarjeta no pide efectivo', () {
+      final c = calcularCobro(total: 137, forma: FormaPago.tarjeta, recibido: 500);
+      expect((c.efectivo, c.tarjeta, c.recibido, c.valido), (0.0, 137.0, null, true));
+      expect(c.pago.metodo, 'Tarjeta');
+    });
+
+    test('mixto: el cambio se calcula solo sobre la parte en efectivo', () {
+      final c = calcularCobro(total: 350.50, forma: FormaPago.mixto, tarjeta: 200, recibido: 200);
+      expect(c.efectivo, 150.5);
+      expect(c.cambio, 49.5);
+      expect(c.valido, isTrue);
+      expect(c.pago.mixto, isTrue);
+      expect(c.pago.metodo, 'Mixto');
+      expect(c.pago.total, 350.5);
+
+      expect(calcularCobro(total: 350.50, forma: FormaPago.mixto, tarjeta: 200, recibido: 100).valido, isFalse);
+      expect(calcularCobro(total: 100, forma: FormaPago.mixto).valido, isFalse, reason: 'falta la parte con tarjeta');
+      expect(calcularCobro(total: 100, forma: FormaPago.mixto, tarjeta: 120, recibido: 0).valido, isFalse);
+      // Si la tarjeta cubre todo, no hace falta efectivo.
+      expect(calcularCobro(total: 100, forma: FormaPago.mixto, tarjeta: 100).valido, isTrue);
+    });
+
+    test('sin errores de coma flotante', () {
+      final c = calcularCobro(total: 0.1 + 0.2, forma: FormaPago.mixto, tarjeta: 0.1, recibido: 0.2);
+      expect(c.efectivo, 0.2);
+      expect(c.cambio, 0);
+      expect(c.valido, isTrue);
+    });
+
+    test('el ticket muestra el desglose', () {
+      expect(lineasPago(const Pago(efectivo: 150.5, tarjeta: 200, recibido: 200)), [
+        ('Efectivo', 150.5),
+        ('Tarjeta', 200.0),
+        ('Recibido en efectivo', 200.0),
+        ('Cambio', 49.5),
+      ]);
+      expect(lineasPago(const Pago(tarjeta: 80)), [('Tarjeta', 80.0)]);
+    });
+
+    test('ticket e historial de cuentas cobradas antes del pago mixto', () {
+      final antiguo = pedido(id: 1, estado: 'pagado');
+      final nuevo = Pedido.fromJson({
+        ...pedido(id: 2, estado: 'pagado').toJson(),
+        'pago': {'efectivo': 20, 'tarjeta': 30, 'fecha': '2026-09-26T20:00:00Z'},
+      });
+      expect(antiguo.pago, isNull);
+      expect(antiguo.cobrado, isTrue);
+      expect(pagoDelTicket([antiguo], null), isNull, reason: 'sin desglose no se inventa');
+      expect(pagoDelTicket([nuevo], null)?.tarjeta, 30);
+      expect(pagoDelTicket([antiguo, nuevo], null), isNull);
+
+      final resumen = resumenCobro([antiguo, nuevo, pedido(id: 3)]);
+      expect(resumen, (total: 100.0, efectivo: 20.0, tarjeta: 30.0, sinDesglose: 50.0));
+    });
+  });
+
+  group('cobrar pedidos que cocina no ha terminado', () {
+    test('las cuentas en cocina se pueden cobrar con advertencia', () {
+      expect(avisoEnCocina([pedido(id: 1, estado: 'listo')]), isNull);
+      expect(avisoEnCocina([pedido(id: 1, estado: 'preparando')]), startsWith('Este pedido aún está en cocina.'));
+      expect(
+        avisoEnCocina([pedido(id: 1, estado: 'pendiente'), pedido(id: 2, estado: 'listo')]),
+        startsWith('Una de las cuentas'),
+      );
+      // Lista, pero con un extra que cocina aún prepara.
+      final conExtra = pedido(id: 3, estado: 'listo', productos: [
+        {'id': 30, 'producto_id': 1, 'nombre': 'Tacos', 'cantidad': 1, 'nota': null, 'precio': '50.00'},
+        {
+          'id': 31,
+          'producto_id': 2,
+          'nombre': 'Refresco',
+          'cantidad': 1,
+          'nota': null,
+          'precio': '22.00',
+          'extra_desde': '2026-09-22T18:30:00Z',
+        },
+      ]);
+      expect(avisoEnCocina([conExtra]), startsWith('Este pedido aún está en cocina.'));
+    });
+
+    test('una cuenta pagada por adelantado sigue en cocina pero ya no está por cobrar', () {
+      final pagada = Pedido.fromJson({
+        ...pedido(id: 1, mesa: 2, estado: 'preparando').toJson(),
+        'pago': {'efectivo': 50, 'tarjeta': 0, 'fecha': '2026-09-26T20:00:00Z'},
+      });
+      final mesa = estadoMesas([pagada, pedido(id: 2, mesa: 2)]).firstWhere((m) => m.numero == 2);
+      expect(mesa.porCobrar.map((p) => p.id), [2]);
+      expect(agruparCocina([pagada]).single.pedidos.single.id, 1, reason: 'cocina la sigue viendo');
+    });
+
+    test('al terminarla cocina se avisa al mesero que la entregue', () {
+      const mesero = Usuario(id: 5, username: 'luis', rol: Rol.mesero);
+      final reglas = ReglasAviso(mesero);
+      final cerrada = pedido(id: 8, estado: 'pagado', usuarioId: 5);
+      expect(reglas.evaluar(PedidoCambiado(cerrada, nuevo: false)), isNull, reason: 'un cobro normal no avisa');
+      final aviso = reglas.evaluar(PedidoCambiado(cerrada, nuevo: false, accion: 'listo_pagado'));
+      expect(aviso?.aviso.mensaje, contains('ya pagada'));
+      expect(reglas.evaluar(PedidoCambiado(cerrada, nuevo: false, accion: 'listo_pagado')), isNull);
+    });
+  });
+
   test('estado de las mesas: manda la cuenta más urgente', () {
     final mesas = estadoMesas([
       pedido(id: 1, mesa: 2, estado: 'pendiente'),
@@ -77,7 +188,8 @@ void main() {
     ]);
     expect(mesas.length, 14, reason: '13 mesas y la 20, que tiene cuenta');
     expect(mesas.firstWhere((m) => m.numero == 2).situacion, SituacionMesa.lista);
-    expect(mesas.firstWhere((m) => m.numero == 2).porCobrar.single.id, 2);
+    // Se puede cobrar aunque cocina no haya terminado.
+    expect(mesas.firstWhere((m) => m.numero == 2).porCobrar.map((p) => p.id), [1, 2]);
     expect(mesas.firstWhere((m) => m.numero == 5).situacion, SituacionMesa.enCocina);
     expect(mesas.firstWhere((m) => m.numero == 1).situacion, SituacionMesa.libre);
   });

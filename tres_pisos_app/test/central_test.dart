@@ -231,6 +231,156 @@ void main() {
     });
   });
 
+  group('cobro y pago mixto', () {
+    test('repartir un pago mixto entre varias cuentas cuadra al centavo', () {
+      expect(repartirPago([100, 50.5, 30], 120.25), [
+        (efectivo: 100.0, tarjeta: 0.0),
+        (efectivo: 20.25, tarjeta: 30.25),
+        (efectivo: 0.0, tarjeta: 30.0),
+      ]);
+      expect(repartirPago([42], 0), [(efectivo: 0.0, tarjeta: 42.0)]);
+    });
+
+    test('cobrar una cuenta lista en mixto la cierra y registra el desglose', () async {
+      final mesero = await usuario('luis', 'mesero');
+      final cocina = await usuario('chef', 'cocina');
+      final id = (await central.crearPedido(pedidoDe(1, cantidad: 3), usuario: mesero))['id'] as int;
+      await central.cambiarEstado(id, 'listo', usuario: cocina);
+
+      final cobrados = await central.cobrar({
+        'pedidos': [id],
+        'efectivo': 26,
+        'tarjeta': 100,
+      });
+      expect(cobrados.single['estado'], 'pagado');
+      expect((cobrados.single['pago'] as Map)['tarjeta'], 100);
+
+      final dia = central.resumen()['dia'] as Map;
+      expect((dia['total_ventas'], dia['efectivo'], dia['tarjeta'], dia['sin_desglose']), (126.0, 26.0, 100.0, 0.0));
+      final venta = central.ventasPorDia(7).single;
+      expect((venta['total'], venta['efectivo'], venta['tarjeta']), (126.0, 26.0, 100.0));
+    });
+
+    test('efectivo y tarjeta deben sumar el total y no se cobra dos veces', () async {
+      final mesero = await usuario('luis', 'mesero');
+      final id = (await central.crearPedido(pedidoDe(1), usuario: mesero))['id'] as int;
+      await expectLater(
+        central.cobrar({'pedidos': [id], 'efectivo': 20, 'tarjeta': 20}),
+        throwsA(isA<ErrorCentral>().having((e) => e.codigo, 'codigo', 'PAGO_INCOMPLETO')),
+      );
+      await expectLater(
+        central.cobrar({'pedidos': [id], 'efectivo': -2, 'tarjeta': 44}),
+        throwsA(isA<ErrorCentral>().having((e) => e.status, 'status', 400)),
+      );
+      await central.cobrar({'pedidos': [id], 'efectivo': 42});
+      await expectLater(
+        central.cobrar({'pedidos': [id], 'efectivo': 42}),
+        throwsA(isA<ErrorCentral>().having((e) => e.codigo, 'codigo', 'ALREADY_PAID')),
+      );
+      expect(central.ventasPorDia(7).single['pedidos'], 1);
+    });
+
+    test('cobrar antes de que cocina termine: cocina lo sigue viendo y al marcarlo listo se cierra', () async {
+      final mesero = await usuario('luis', 'mesero');
+      final cocina = await usuario('chef', 'cocina');
+      final a = (await central.crearPedido(pedidoDe(1), usuario: mesero))['id'] as int;
+      final b = (await central.crearPedido(pedidoDe(2), usuario: mesero))['id'] as int;
+      await central.cambiarEstado(b, 'preparando', usuario: cocina);
+
+      // Mesa completa (42 + 22) en mixto: el efectivo cubre la primera cuenta y parte de la segunda.
+      final cobrados = await central.cobrar({
+        'pedidos': [a, b],
+        'efectivo': 50,
+        'tarjeta': 14,
+      });
+      expect(cobrados.map((p) => p['estado']), ['pendiente', 'preparando'], reason: 'siguen en cocina');
+      expect(cobrados.map((p) => (p['pago'] as Map)['efectivo']), [42, 8]);
+      expect((central.resumen()['dia'] as Map)['total_ventas'], 64.0, reason: 'la venta cuenta desde el cobro');
+
+      // Ya cobrado: no se cancela ni se cambian sus productos; lo que se agregue va en cuenta nueva.
+      await expectLater(
+        central.cambiarEstado(a, 'cancelado', usuario: cocina),
+        throwsA(isA<ErrorCentral>().having((e) => e.codigo, 'codigo', 'ALREADY_PAID')),
+      );
+      final items = central.obtenerPedido(a)['productos'] as List;
+      await expectLater(
+        central.editarPedido(a, {
+          'items': [
+            {'detalle_id': items.first['id'], 'cantidad': 5},
+          ],
+        }),
+        throwsA(isA<ErrorCentral>().having((e) => e.codigo, 'codigo', 'ALREADY_PAID')),
+      );
+      final nueva = await central.agregarProductos(a, pedidoDe(2), usuario: mesero);
+      expect(nueva['id'], isNot(a));
+      expect(nueva['pago'], isNull);
+
+      await central.cambiarEstado(a, 'preparando', usuario: cocina);
+      expect(central.obtenerPedido(a)['pago'], isNotNull, reason: 'el pago se conserva al avanzar');
+      eventos.clear();
+      final listo = await central.cambiarEstado(a, 'listo', usuario: cocina);
+      expect(listo['estado'], 'pagado');
+      expect(eventos.single.$2['_accion'], 'listo_pagado');
+      expect(central.ventasPorDia(7).single['pedidos'], 2, reason: 'no se registra otra venta');
+    });
+
+    test('una cuenta lista con un extra en cocina se cobra pero sigue abierta hasta terminarlo', () async {
+      final mesero = await usuario('luis', 'mesero');
+      final cocina = await usuario('chef', 'cocina');
+      final id = (await central.crearPedido(pedidoDe(1), usuario: mesero))['id'] as int;
+      await central.cambiarEstado(id, 'listo', usuario: cocina);
+      await central.agregarProductos(id, pedidoDe(2), usuario: mesero);
+
+      final cobrado = (await central.cobrar({'pedidos': [id], 'efectivo': 64})).single;
+      expect(cobrado['estado'], 'listo', reason: 'cocina aún prepara el extra');
+      expect(cobrado['pago'], isNotNull);
+
+      eventos.clear();
+      final terminado = await central.cambiarEstado(id, 'listo', usuario: cocina);
+      expect(terminado['estado'], 'pagado');
+      expect((terminado['productos'] as List).every((i) => i['extra_desde'] == null), isTrue);
+      expect(eventos.single.$2['_accion'], 'listo_pagado');
+      expect(central.ventasPorDia(7).single['pedidos'], 1);
+    });
+
+    test('no se mueven ni dividen productos de una cuenta cobrada por adelantado', () async {
+      final mesero = await usuario('luis', 'mesero');
+      final a = await central.crearPedido(pedidoDe(1), usuario: mesero);
+      final b = (await central.crearPedido(pedidoDe(2), usuario: mesero))['id'] as int;
+      await central.cobrar({
+        'pedidos': [a['id']],
+        'tarjeta': 42,
+      });
+      await expectLater(
+        central.moverProducto(a['id'] as int, {'detalle_id': (a['productos'] as List).single['id'], 'destino': b}),
+        throwsA(isA<ErrorCentral>().having((e) => e.codigo, 'codigo', 'ACCOUNT_PAID')),
+      );
+    });
+
+    test('las ventas anteriores al pago mixto quedan sin desglose y sobreviven al reinicio', () async {
+      final mesero = await usuario('luis', 'mesero');
+      final viejo = (await central.crearPedido(pedidoDe(1), usuario: mesero))['id'] as int;
+      final nuevo = (await central.crearPedido(pedidoDe(2), usuario: mesero))['id'] as int;
+      // Cobro como lo hacían las versiones anteriores de la app.
+      await central.cambiarEstado(viejo, 'pagado', usuario: mesero);
+      await central.cobrar({'pedidos': [nuevo], 'tarjeta': 22});
+      await central.cerrar();
+
+      // Una venta escrita por una versión anterior no trae efectivo ni tarjeta.
+      final archivo = File('${carpeta.path}${Platform.pathSeparator}central.jsonl');
+      await archivo.writeAsString(
+        '\n[{"t":"venta","v":{"id":90,"pedido_id":$viejo,"total":10.0,"fecha":"${DateTime.now().toUtc().toIso8601String()}"}}]\n',
+        mode: FileMode.append,
+      );
+
+      central = await abrir();
+      final dia = central.resumen()['dia'] as Map;
+      expect((dia['total_ventas'], dia['efectivo'], dia['tarjeta'], dia['sin_desglose']), (74.0, 0.0, 22.0, 52.0));
+      expect(central.obtenerPedido(viejo)['pago'], isNull);
+      expect((central.obtenerPedido(nuevo)['pago'] as Map)['tarjeta'], 22);
+    });
+  });
+
   group('persistencia', () {
     test('todo sobrevive a un reinicio de la tablet', () async {
       final mesero = await usuario('luis', 'mesero');
@@ -346,6 +496,27 @@ void main() {
       // Un mesero no ve las métricas.
       final (statusMetricas, _) = await pedir('GET', '/api/metricas/resumen', token: token);
       expect(statusMetricas, 403);
+    });
+
+    test('POST /api/pedidos/cobrar cobra en mixto y cocina no puede cobrar', () async {
+      final mesero = await usuario('luis', 'mesero');
+      await usuario('chef', 'cocina');
+      final id = (await central.crearPedido(pedidoDe(1), usuario: mesero))['id'] as int;
+      final tokenCocina = (await central.login('chef', 'clave123'))['token'] as String;
+      final tokenMesero = (await central.login('luis', 'clave123'))['token'] as String;
+      final cuerpo = {
+        'pedidos': [id],
+        'efectivo': 12,
+        'tarjeta': 30,
+      };
+
+      final (statusCocina, _) = await pedir('POST', '/api/pedidos/cobrar', token: tokenCocina, cuerpo: cuerpo);
+      expect(statusCocina, 403);
+      final (status, respuesta) = await pedir('POST', '/api/pedidos/cobrar', token: tokenMesero, cuerpo: cuerpo);
+      expect(status, 200);
+      final pedido = (respuesta['pedidos'] as List).single as Map;
+      expect(pedido['estado'], 'pendiente', reason: 'sigue en cocina');
+      expect(pedido['pago'], containsPair('tarjeta', 30));
     });
 
     test('bloquea el login tras varios intentos fallidos', () async {

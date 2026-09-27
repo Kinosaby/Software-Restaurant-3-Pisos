@@ -117,7 +117,8 @@ class _PedidoDetallePageState extends ConsumerState<PedidoDetallePage> {
                   child: Column(
                     children: [
                       for (final item in pedido.items)
-                        if (rol?.tomaPedidos ?? false)
+                        // Una cuenta ya cobrada (aunque siga en cocina) no reparte productos.
+                        if ((rol?.tomaPedidos ?? false) && !pedido.cobrado)
                           Row(
                             children: [
                               Expanded(child: RenglonItem(item, mostrarPrecio: true)),
@@ -148,6 +149,16 @@ class _PedidoDetallePageState extends ConsumerState<PedidoDetallePage> {
                   ),
                 ),
               ),
+              if (pedido.pago case final pago?) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'Pagado por adelantado · ${[
+                    if (pago.efectivo >= 0.005) 'efectivo ${dinero(pago.efectivo)}',
+                    if (pago.tarjeta >= 0.005) 'tarjeta ${dinero(pago.tarjeta)}',
+                  ].join(' + ')}',
+                  style: const TextStyle(color: Colores.exito),
+                ),
+              ],
               const SizedBox(height: 20),
               if (rol?.tomaPedidos ?? false)
                 OutlinedButton.icon(
@@ -155,7 +166,8 @@ class _PedidoDetallePageState extends ConsumerState<PedidoDetallePage> {
                   icon: const Icon(Icons.add),
                   label: const Text('Agregar productos'),
                 ),
-              if ((rol?.tomaPedidos ?? false) && pedido.estado.modificable) ...[
+              // Ya cobrado: sus productos no cambian ni se cancela.
+              if ((rol?.tomaPedidos ?? false) && pedido.estado.modificable && !pedido.cobrado) ...[
                 const SizedBox(height: 10),
                 OutlinedButton.icon(
                   onPressed: _ocupado ? null : () => context.push('/pedido/${pedido.id}/editar'),
@@ -163,7 +175,7 @@ class _PedidoDetallePageState extends ConsumerState<PedidoDetallePage> {
                   label: const Text('Editar pedido o cambiar mesa'),
                 ),
               ],
-              if ((rol?.cobra ?? false) && pedido.estado == EstadoPedido.listo) ...[
+              if ((rol?.cobra ?? false) && !pedido.cobrado) ...[
                 const SizedBox(height: 10),
                 FilledButton.icon(
                   onPressed: _ocupado ? null : () => _cobrar(pedido),
@@ -187,7 +199,7 @@ class _PedidoDetallePageState extends ConsumerState<PedidoDetallePage> {
                   ],
                 ],
               ),
-              if ((rol?.tomaPedidos ?? false) && pedido.estado.modificable) ...[
+              if ((rol?.tomaPedidos ?? false) && pedido.estado.modificable && !pedido.cobrado) ...[
                 const SizedBox(height: 10),
                 TextButton.icon(
                   onPressed: _ocupado ? null : () => _cancelar(pedido),

@@ -208,6 +208,9 @@ class ServidorCentral {
       case ('GET', ['pedidos', final id]):
         _usuario(peticion, todos);
         return (200, {'pedido': central.obtenerPedido(_id(id))});
+      case ('POST', ['pedidos', 'cobrar']):
+        _usuario(peticion, salon);
+        return (200, {'mensaje': 'Cobro registrado', 'pedidos': await central.cobrar(cuerpo)});
       case ('POST', ['pedidos']):
         final usuario = _usuario(peticion, salon);
         final pedido = await central.crearPedido(cuerpo, usuario: usuario, operacion: operacion);

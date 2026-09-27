@@ -11,14 +11,33 @@ import '../../core/widgets.dart';
 import '../conexion/central_local.dart';
 import '../pedidos/modelos.dart';
 
+/// Pago que muestra el ticket: el recién capturado o, si todas las cuentas lo
+/// guardan, la suma de sus desgloses. Los cobros antiguos no tienen desglose.
+Pago? pagoDelTicket(List<Pedido> pedidos, Pago? capturado) {
+  if (capturado != null) return capturado;
+  if (pedidos.isEmpty || pedidos.any((p) => p.pago == null)) return null;
+  return Pago.sumar([for (final p in pedidos) p.pago!]);
+}
+
+/// Renglones de la forma de pago en el ticket: efectivo (con lo recibido y el cambio) y tarjeta.
+List<(String, double)> lineasPago(Pago pago) => [
+      if (pago.efectivo >= 0.005) ('Efectivo', pago.efectivo),
+      if (pago.tarjeta >= 0.005) ('Tarjeta', pago.tarjeta),
+      if (pago.efectivo >= 0.005 && pago.recibido != null) ...[
+        ('Recibido en efectivo', pago.recibido!),
+        ('Cambio', pago.cambio!),
+      ],
+    ];
+
 /// Cuenta o ticket con estilo de recibo, sobre fondo blanco para verse bien al imprimir o en WhatsApp.
 class TicketVista extends StatelessWidget {
-  const TicketVista({super.key, required this.pedidos, required this.restaurante, this.pago, this.cambio, this.pagado = false});
+  const TicketVista({super.key, required this.pedidos, required this.restaurante, this.pago, this.pagado = false});
 
   final List<Pedido> pedidos;
   final String restaurante;
-  final double? pago;
-  final double? cambio;
+
+  /// Forma de pago recién capturada; sin ella se usa la que guardan los pedidos.
+  final Pago? pago;
 
   /// Recién cobrado (los pedidos que recibe pueden seguir marcados como listos).
   final bool pagado;
@@ -32,7 +51,8 @@ class TicketVista extends StatelessWidget {
     const base = TextStyle(color: tinta, fontSize: 14, height: 1.35);
     final total = pedidos.fold<double>(0, (s, p) => s + p.total);
     final primero = pedidos.first;
-    final cobrado = pagado || pedidos.every((p) => p.estado == EstadoPedido.pagado);
+    final cobrado = pagado || pedidos.every((p) => p.cobrado);
+    final formaPago = pagoDelTicket(pedidos, pago);
 
     Widget linea(String izquierda, String derecha, {TextStyle? estilo}) => Padding(
           padding: const EdgeInsets.symmetric(vertical: 1),
@@ -91,8 +111,8 @@ class TicketVista extends StatelessWidget {
             ],
             const Divider(color: gris, height: 24),
             linea('TOTAL', dinero(total), estilo: base.copyWith(fontSize: 18, fontWeight: FontWeight.bold)),
-            if (pago != null) linea('Efectivo', dinero(pago!)),
-            if (cambio != null) linea('Cambio', dinero(cambio!)),
+            if (formaPago != null)
+              for (final (etiqueta, importe) in lineasPago(formaPago)) linea(etiqueta, dinero(importe)),
             const SizedBox(height: 16),
             Text(
               cobrado ? '¡Gracias por su visita!' : 'Cuenta por pagar',
@@ -107,19 +127,18 @@ class TicketVista extends StatelessWidget {
 }
 
 /// Vista previa del ticket con el botón para compartirlo como imagen (WhatsApp, impresora, correo...).
-Future<void> mostrarTicket(BuildContext context, List<Pedido> pedidos, {double? pago, double? cambio, bool pagado = false}) {
+Future<void> mostrarTicket(BuildContext context, List<Pedido> pedidos, {Pago? pago, bool pagado = false}) {
   return showDialog<void>(
     context: context,
-    builder: (context) => _DialogoTicket(pedidos: pedidos, pago: pago, cambio: cambio, pagado: pagado),
+    builder: (context) => _DialogoTicket(pedidos: pedidos, pago: pago, pagado: pagado),
   );
 }
 
 class _DialogoTicket extends ConsumerStatefulWidget {
-  const _DialogoTicket({required this.pedidos, this.pago, this.cambio, this.pagado = false});
+  const _DialogoTicket({required this.pedidos, this.pago, this.pagado = false});
 
   final List<Pedido> pedidos;
-  final double? pago;
-  final double? cambio;
+  final Pago? pago;
   final bool pagado;
 
   @override
@@ -167,7 +186,6 @@ class _DialogoTicketState extends ConsumerState<_DialogoTicket> {
                   pedidos: widget.pedidos,
                   restaurante: restaurante,
                   pago: widget.pago,
-                  cambio: widget.cambio,
                   pagado: widget.pagado,
                 ),
               ),
