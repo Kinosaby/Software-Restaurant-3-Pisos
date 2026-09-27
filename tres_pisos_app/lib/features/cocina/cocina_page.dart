@@ -227,10 +227,11 @@ class _TarjetaGrupo extends ConsumerWidget {
     final minutos = DateTime.now().difference(grupo.desde).inMinutes;
     final color = grupo.hayPendientes ? Colores.aviso : Colores.azul;
     // Las partes 2..N de un platillo dividido no se muestran: es un solo platillo.
-    bool visible(Pedido p, int i) => i < p.items.length && p.items[i].paraCocina;
+    // Las marcas van por id de renglón: mover o dividir no las pasa a otro producto.
+    bool visible(Pedido p, int detalleId) => p.items.any((i) => i.detalleId == detalleId && i.paraCocina);
     final renglones = grupo.pedidos.fold(0, (s, p) => s + p.items.where((i) => i.paraCocina).length);
     final hechos =
-        grupo.pedidos.fold(0, (s, p) => s + (marcas['p${p.id}']?.where((i) => visible(p, i)).length ?? 0));
+        grupo.pedidos.fold(0, (s, p) => s + (marcas['p${p.id}']?.where((id) => visible(p, id)).length ?? 0));
     final todoMarcado = renglones > 0 && hechos >= renglones;
 
     return Card(
@@ -288,18 +289,18 @@ class _TarjetaGrupo extends ConsumerWidget {
                         ),
                       ],
                     ),
-                    for (var i = 0; i < p.items.length; i++)
-                      if (p.items[i].paraCocina)
+                    for (final item in p.items)
+                      if (item.paraCocina)
                         _RenglonMarcable(
-                          item: p.items[i],
-                          hecho: marcas['p${p.id}']?.contains(i) ?? false,
-                          onTap: () => ref.read(marcasCocinaProvider.notifier).alternar('p${p.id}', i),
+                          item: item,
+                          hecho: marcas['p${p.id}']?.contains(item.detalleId) ?? false,
+                          onTap: () => ref.read(marcasCocinaProvider.notifier).alternar('p${p.id}', item.detalleId),
                         ),
                     if (!p.items.any((i) => i.paraCocina))
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 4),
                         child: Text(
-                          'Solo comparte un platillo de otra cuenta',
+                          'Nada que preparar: ya se sirvió o lo prepara otra cuenta',
                           style: TextStyle(color: Colores.apagado, fontStyle: FontStyle.italic),
                         ),
                       ),
@@ -409,11 +410,11 @@ class _TarjetaExtra extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 6),
-            for (var i = 0; i < items.length; i++)
+            for (final item in items)
               _RenglonMarcable(
-                item: items[i],
-                hecho: marcas.contains(i),
-                onTap: () => ref.read(marcasCocinaProvider.notifier).alternar('x${pedido.id}', i),
+                item: item,
+                hecho: marcas.contains(item.detalleId),
+                onTap: () => ref.read(marcasCocinaProvider.notifier).alternar('x${pedido.id}', item.detalleId),
               ),
             Align(
               alignment: Alignment.centerRight,

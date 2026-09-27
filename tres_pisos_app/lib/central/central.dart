@@ -141,6 +141,7 @@ class ItemCentral {
     this.nota,
     this.extraDesde,
     this.compartido,
+    this.servido = false,
   });
 
   factory ItemCentral.fromJson(Map<String, dynamic> j) => ItemCentral(
@@ -152,6 +153,7 @@ class ItemCentral {
         nota: j['nota'] as String?,
         extraDesde: j['extra_desde'] == null ? null : DateTime.parse(j['extra_desde'] as String),
         compartido: j['compartido'] == null ? null : ParteCompartida.fromJson(j['compartido'] as Map<String, dynamic>),
+        servido: j['servido'] == true,
       );
 
   final int id;
@@ -168,6 +170,10 @@ class ItemCentral {
   /// Solo en los renglones que son parte de un platillo dividido entre cuentas.
   final ParteCompartida? compartido;
 
+  /// Ya se cocinó y se sirvió en otra cuenta (se pasó aquí después): cocina no
+  /// lo vuelve a preparar.
+  final bool servido;
+
   ItemCentral copyWith({
     int? id,
     int? cantidad,
@@ -176,6 +182,7 @@ class ItemCentral {
     DateTime? extraDesde,
     bool terminarExtra = false,
     ParteCompartida? compartido,
+    bool? servido,
   }) =>
       ItemCentral(
         id: id ?? this.id,
@@ -186,6 +193,7 @@ class ItemCentral {
         nota: borrarNota ? null : (nota ?? this.nota),
         extraDesde: terminarExtra ? null : (extraDesde ?? this.extraDesde),
         compartido: compartido ?? this.compartido,
+        servido: servido ?? this.servido,
       );
 
   /// Se puede sumar a [otro] en un solo renglón (mismo producto, nota, precio y
@@ -196,7 +204,8 @@ class ItemCentral {
       productoId == otro.productoId &&
       nota == otro.nota &&
       precio == otro.precio &&
-      extraDesde == otro.extraDesde;
+      extraDesde == otro.extraDesde &&
+      servido == otro.servido;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -207,6 +216,7 @@ class ItemCentral {
         'precio': precio,
         if (extraDesde != null) 'extra_desde': extraDesde!.toUtc().toIso8601String(),
         if (compartido != null) 'compartido': compartido!.toJson(),
+        if (servido) 'servido': true,
       };
 }
 
@@ -843,8 +853,12 @@ class Central {
 
   // ── Pedidos ──────────────────────────────────────────────
 
-  List<Map<String, dynamic>> listarPedidos({String? estado}) {
-    final lista = _pedidos.values.where((p) => estado == null || !estadosValidos.contains(estado) || p.estado == estado).toList()
+  /// [desde]: solo pedidos creados a partir de esa fecha (para no mandar todo el historial).
+  List<Map<String, dynamic>> listarPedidos({String? estado, DateTime? desde}) {
+    final lista = _pedidos.values
+        .where((p) => estado == null || !estadosValidos.contains(estado) || p.estado == estado)
+        .where((p) => desde == null || !p.creadoEn.isBefore(desde))
+        .toList()
       ..sort((a, b) {
         final c = a.creadoEn.compareTo(b.creadoEn);
         return c != 0 ? c : a.id.compareTo(b.id);
@@ -936,6 +950,15 @@ class Central {
     if (previa == null) return null;
     return _pedidos[previa.pedidoId]?.toJson();
   }
+
+  /// Para operaciones que tocan varias cuentas (mover, dividir, cobrar): un
+  /// reintento con el mismo identificador no se repite; responde cómo quedó.
+  bool _yaHecha(String? operacion) => operacion != null && _operaciones.containsKey(operacion);
+
+  List<Map<String, dynamic>> _comoQuedaron(Iterable<int> ids) => [
+        for (final id in ids)
+          if (_pedidos[id] case final p?) p.toJson(),
+      ];
 
   Map<String, dynamic> _registroOperacion(String operacion, int pedidoId) =>
       {'t': 'op', 'id': operacion, 'pedido': pedidoId, 'fecha': _reloj().toUtc().toIso8601String()};
@@ -1145,12 +1168,15 @@ class Central {
   /// no pierda el platillo. Si cocina aún no lo había hecho y esa cuenta ya está
   /// lista, le llega como extra. Devuelve las cuentas que cambian.
   List<PedidoCentral> _relevarPartes(PedidoCentral antes, List<ItemCentral> quedan) {
+    // Grupo → si el platillo ya se había cocinado en la cuenta que lo deja.
     final grupos = {
       for (final i in antes.items)
-        if (i.compartido?.parte == 1 && !quedan.any((q) => q.id == i.id)) i.compartido!.grupo,
+        if (i.compartido?.parte == 1 && !quedan.any((q) => q.id == i.id))
+          i.compartido!.grupo:
+              i.servido || ((antes.estado == 'listo' || antes.estado == 'pagado') && i.extraDesde == null),
     };
     final cambios = <int, PedidoCentral>{};
-    for (final grupo in grupos) {
+    for (final MapEntry(key: grupo, value: yaHecho) in grupos.entries) {
       PedidoCentral? cuenta;
       ItemCentral? relevo;
       for (final p in _pedidos.values) {
@@ -1164,14 +1190,16 @@ class Central {
         }
       }
       if (cuenta == null || relevo == null) continue;
-      final sinHacer = antes.estado != 'listo' && cuenta.estado == 'listo';
+      // Ya cocinado: queda como servido. Si no, y esa cuenta ya estaba lista, a cocina le llega como extra.
+      final comoExtra = !yaHecho && cuenta.estado == 'listo';
       final elegido = relevo;
       cambios[cuenta.id] = cuenta.copyWith(items: [
         for (final i in cuenta.items)
           if (i.id == elegido.id)
             i.copyWith(
               compartido: ParteCompartida(grupo: grupo, parte: 1, partes: elegido.compartido!.partes),
-              extraDesde: sinHacer ? _reloj() : null,
+              extraDesde: comoExtra ? _reloj() : null,
+              servido: yaHecho ? true : null,
             )
           else
             i,
@@ -1189,7 +1217,14 @@ class Central {
   /// Mueve un renglón (o [datos]`['cantidad']` piezas de él) a otra cuenta de la
   /// misma mesa: `{detalle_id, destino, cantidad?}`. Si la cuenta de origen se
   /// queda sin productos, se borra (nunca se cobró, así que no hay venta).
-  Future<Map<String, dynamic>> moverProducto(int id, Map<String, dynamic> datos) => _enSerie(() async {
+  Future<Map<String, dynamic>> moverProducto(int id, Map<String, dynamic> datos, {String? operacion}) =>
+      _enSerie(() async {
+        if (_yaHecha(operacion)) {
+          return {
+            'pedidos': _comoQuedaron([id, _idPedido(datos['destino'])]),
+            'eliminado': _pedidos.containsKey(id) ? null : id,
+          };
+        }
         final origen = _pedido(id);
         final destino = _pedido(_idPedido(datos['destino']));
         _validarReparto(origen, [destino]);
@@ -1203,12 +1238,14 @@ class Central {
         // Lo que cocina aún no termina y llega a una cuenta ya lista, cocina lo
         // ve como extra (`extra_desde`); en una cuenta que sigue en cocina se
         // prepara junto con lo demás.
+        // Lo que ya se sirvió (cuenta de origen lista, sin ser extra pendiente) no
+        // se vuelve a cocinar aunque llegue a una cuenta que sigue en cocina.
         final loVeCocina = item.compartido == null || item.compartido!.parte == 1;
-        final sinHacer = origen.estado != 'listo' || item.extraDesde != null;
-        final nuevoExtra = loVeCocina && sinHacer && destino.estado == 'listo' && item.extraDesde == null;
+        final yaHecho = item.servido || (origen.estado == 'listo' && item.extraDesde == null);
+        final nuevoExtra = loVeCocina && !yaHecho && destino.estado == 'listo' && item.extraDesde == null;
         final base = destino.estado == 'listo'
             ? (nuevoExtra ? item.copyWith(extraDesde: _reloj()) : item)
-            : item.copyWith(terminarExtra: true);
+            : item.copyWith(terminarExtra: true, servido: yaHecho);
         final movido = completo ? base : base.copyWith(id: _siguiente('item'), cantidad: cantidad);
         final itemsOrigen = [
           for (final i in origen.items)
@@ -1227,6 +1264,7 @@ class Central {
         await _confirmar([
           {'t': 'pedido', 'v': nuevoDestino.toJson()},
           if (nuevoOrigen == null) {'t': 'borrar', 'tabla': 'pedido', 'id': id} else {'t': 'pedido', 'v': nuevoOrigen.toJson()},
+          if (operacion != null) _registroOperacion(operacion, destino.id),
         ]);
 
         if (nuevoExtra) {
@@ -1257,12 +1295,16 @@ class Central {
   /// Divide una pieza de un renglón en partes iguales entre esta cuenta y
   /// `destinos` (`{detalle_id, destinos: [ids]}`). La parte 1 se queda en esta
   /// cuenta y es la única que ve cocina; los centavos sobrantes van a las primeras partes.
-  Future<Map<String, dynamic>> dividirProducto(int id, Map<String, dynamic> datos) => _enSerie(() async {
-        final origen = _pedido(id);
+  Future<Map<String, dynamic>> dividirProducto(int id, Map<String, dynamic> datos, {String? operacion}) =>
+      _enSerie(() async {
         final lista = datos['destinos'];
         if (lista is! List || lista.isEmpty) {
           throw ErrorCentral(400, 'VALIDATION_ERROR', 'Elige al menos otra cuenta para dividir.');
         }
+        if (_yaHecha(operacion)) {
+          return {'pedidos': _comoQuedaron([id, for (final d in lista) _idPedido(d)])};
+        }
+        final origen = _pedido(id);
         final destinos = [for (final d in lista) _pedido(_idPedido(d))];
         _validarReparto(origen, destinos);
         final item = _renglon(origen, datos['detalle_id']);
@@ -1290,6 +1332,7 @@ class Central {
               // Si era un extra que cocina aún prepara, lo sigue siendo en la parte que ve cocina.
               extraDesde: indice == 0 ? item.extraDesde : null,
               compartido: ParteCompartida(grupo: grupo, parte: indice + 1, partes: partes),
+              servido: item.servido,
             );
         final itemsOrigen = [
           for (final i in origen.items)
@@ -1307,6 +1350,7 @@ class Central {
         ];
         await _confirmar([
           for (final p in actualizados) {'t': 'pedido', 'v': p.toJson()},
+          if (operacion != null) _registroOperacion(operacion, id),
         ]);
         final pedidos = [for (final p in actualizados) p.toJson()];
         for (final p in pedidos) {
@@ -1342,7 +1386,8 @@ class Central {
         }
         if (pedido.pago != null && estado == 'cancelado') {
           throw ErrorCentral(400, 'ALREADY_PAID',
-              'El pedido ya se cobró; no se puede cancelar. Márcalo listo o pide al administrador que lo elimine.');
+              'El pedido ya se cobró; no se puede cancelar. Márcalo listo para cerrarlo. '
+              'Si devuelves el dinero, la venta sigue contando: eliminar el pedido no la resta.');
         }
         final cerrarPagado = pedido.pago != null && estado == 'listo';
         // Marcar listo también termina los extras que cocina tenía pendientes.
@@ -1377,7 +1422,7 @@ class Central {
   /// paga y se va): la venta se registra ya y el pedido sigue en cocina con su
   /// estado hasta que lo marque listo. Los pedidos listos pasan a `pagado`
   /// (salvo que tengan extras pendientes: se cierran cuando cocina los termine).
-  Future<List<Map<String, dynamic>>> cobrar(Map<String, dynamic> datos) => _enSerie(() async {
+  Future<List<Map<String, dynamic>>> cobrar(Map<String, dynamic> datos, {String? operacion}) => _enSerie(() async {
         final ids = [
           for (final id in (datos['pedidos'] is List ? datos['pedidos'] as List : const []))
             int.tryParse(id.toString()) ?? (throw ErrorCentral(400, 'VALIDATION_ERROR', 'ID inválido.')),
@@ -1385,6 +1430,8 @@ class Central {
         if (ids.isEmpty || ids.toSet().length != ids.length) {
           throw ErrorCentral(400, 'VALIDATION_ERROR', 'Indica las cuentas a cobrar, sin repetir.');
         }
+        // Reintento del mismo cobro (se perdió la respuesta): ya quedó registrado.
+        if (_yaHecha(operacion)) return _comoQuedaron(ids);
         final pedidos = [for (final id in ids) _pedido(id)];
         for (final p in pedidos) {
           if (p.estado == 'cancelado') {
@@ -1404,8 +1451,10 @@ class Central {
         final tarjeta = importe('tarjeta');
         final total = pedidos.fold<double>(0, (s, p) => s + p.total);
         if (_centavos(efectivo) + _centavos(tarjeta) != _centavos(total)) {
+          // Casi siempre es porque la cuenta cambió (otra tablet agregó o quitó algo) con el cobro abierto.
           throw ErrorCentral(400, 'PAGO_INCOMPLETO',
-              'Efectivo y tarjeta deben sumar el total (${total.toStringAsFixed(2)}).');
+              'El total de la cuenta ahora es \$${total.toStringAsFixed(2)} y el pago no coincide. '
+              'Puede que alguien la haya cambiado: cierra el cobro y vuelve a abrirlo.');
         }
 
         final ahora = _reloj();
@@ -1435,6 +1484,7 @@ class Central {
               ).toJson(),
             },
           ],
+          if (operacion != null) _registroOperacion(operacion, ids.first),
         ]);
         final respuesta = [for (final p in actualizados) p.toJson()];
         for (final json in respuesta) {

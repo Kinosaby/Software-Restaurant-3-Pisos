@@ -133,6 +133,7 @@ class PedidoItem {
     this.nota,
     this.extraDesde,
     this.compartido,
+    this.servido = false,
   });
 
   factory PedidoItem.fromJson(Map<String, dynamic> json) => PedidoItem(
@@ -144,6 +145,7 @@ class PedidoItem {
         nota: leerTextoOpcional(json['nota']),
         extraDesde: DateTime.tryParse(json['extra_desde']?.toString() ?? '')?.toLocal(),
         compartido: leerParte(json['compartido']),
+        servido: json['servido'] == true,
       );
 
   final int detalleId;
@@ -161,14 +163,17 @@ class PedidoItem {
   /// Solo si este renglón es una parte de un platillo dividido entre cuentas.
   final Parte? compartido;
 
+  /// Ya se sirvió en otra cuenta y se pasó a esta: cocina no lo vuelve a preparar.
+  final bool servido;
+
   double get subtotal => precio * cantidad;
   bool get llevar => leerNota(nota).llevar;
   Set<Aparte> get apartes => leerNota(nota).apartes;
   String? get notaVisible => leerNota(nota).nota;
   bool get extraPendiente => extraDesde != null;
 
-  /// Cocina ve un platillo dividido una sola vez: en su parte 1.
-  bool get paraCocina => compartido == null || compartido!.parte == 1;
+  /// Cocina ve un platillo dividido una sola vez (en su parte 1) y no ve lo ya servido.
+  bool get paraCocina => !servido && (compartido == null || compartido!.parte == 1);
 
   /// "Compartido 1/3", o `null` si no está dividido.
   String? get etiquetaCompartido => compartido == null ? null : 'Compartido ${compartido!.parte}/${compartido!.partes}';
@@ -182,6 +187,7 @@ class PedidoItem {
         'precio': precio,
         if (extraDesde != null) 'extra_desde': extraDesde!.toUtc().toIso8601String(),
         if (compartido case final c?) 'compartido': {'grupo': c.grupo, 'parte': c.parte, 'partes': c.partes},
+        if (servido) 'servido': true,
       };
 }
 

@@ -54,7 +54,8 @@ class EstadoMesa {
     return SituacionMesa.esperando;
   }
 
-  double get total => pedidos.fold(0, (s, p) => s + p.total);
+  /// Lo que falta cobrar: las cuentas pagadas por adelantado ya no cuentan.
+  double get total => porCobrar.fold(0, (s, p) => s + p.total);
 
   /// Cuentas sin cobrar, aunque cocina no las haya terminado (el cliente puede pagar y irse).
   List<Pedido> get porCobrar => [for (final p in pedidos) if (!p.cobrado) p];
@@ -214,7 +215,8 @@ class _TarjetaMesa extends StatelessWidget {
               Text(s.etiqueta, style: TextStyle(color: s.color, fontWeight: FontWeight.w600, fontSize: 13)),
               if (mesa.pedidos.isNotEmpty)
                 Text(
-                  '${mesa.pedidos.length == 1 ? '1 cuenta' : '${mesa.pedidos.length} cuentas'} · ${dinero(mesa.total)}'
+                  '${mesa.pedidos.length == 1 ? '1 cuenta' : '${mesa.pedidos.length} cuentas'} · '
+                  '${mesa.porCobrar.isEmpty ? 'pagado' : dinero(mesa.total)}'
                   '${minutos > 0 ? ' · $minutos min' : ''}'
                   '${mesa.sinEnviar.isEmpty ? '' : ' · ${mesa.sinEnviar.length} sin enviar'}',
                   maxLines: 1,
@@ -333,7 +335,7 @@ class MesaPage extends ConsumerWidget {
                     Text(mesa.situacion.etiqueta, style: TextStyle(color: mesa.situacion.color)),
                     const Spacer(),
                     Text(
-                      dinero(mesa.total),
+                      mesa.porCobrar.isEmpty ? 'Pagado' : 'Por cobrar ${dinero(mesa.total)}',
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colores.dorado),
                     ),
                   ],

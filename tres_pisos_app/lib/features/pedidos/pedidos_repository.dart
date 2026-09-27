@@ -22,8 +22,12 @@ class PedidosRepository {
     ];
   }
 
-  Future<List<Pedido>> pedidos({EstadoPedido? estado}) async {
-    final datos = await _api.get('/api/pedidos', query: {if (estado != null) 'estado': estado.name});
+  /// [desde]: solo los creados a partir de esa fecha (una central anterior lo ignora).
+  Future<List<Pedido>> pedidos({EstadoPedido? estado, DateTime? desde}) async {
+    final datos = await _api.get('/api/pedidos', query: {
+      if (estado != null) 'estado': estado.name,
+      if (desde != null) 'desde': desde.toUtc().toIso8601String(),
+    });
     return [
       for (final p in (datos['pedidos'] as List? ?? const []))
         if (p is Map<String, dynamic>) Pedido.fromJson(p),
@@ -91,12 +95,12 @@ class PedidosRepository {
 
   /// `POST /api/pedidos/cobrar`: cobra las cuentas juntas con su forma de pago
   /// (efectivo + tarjeta = total). Sirve también para pedidos que cocina no ha terminado.
-  Future<List<Pedido>> cobrar(List<int> pedidoIds, Pago pago) async {
-    final datos = await _api.post('/api/pedidos/cobrar', {
-      'pedidos': pedidoIds,
-      'efectivo': pago.efectivo,
-      'tarjeta': pago.tarjeta,
-    });
+  Future<List<Pedido>> cobrar(List<int> pedidoIds, Pago pago, {String? operacion}) async {
+    final datos = await _api.post(
+      '/api/pedidos/cobrar',
+      {'pedidos': pedidoIds, 'efectivo': pago.efectivo, 'tarjeta': pago.tarjeta},
+      operacion: operacion,
+    );
     final pedidos = datos['pedidos'];
     if (pedidos is! List || pedidos.isEmpty) throw ApiException('El servidor no devolvió los pedidos cobrados.');
     return [
@@ -111,16 +115,27 @@ class PedidosRepository {
   }
 
   /// `PATCH /mover`: pasa [cantidad] piezas del renglón [detalleId] a la cuenta [destino].
-  Future<Reparto> mover(int pedidoId, {required int detalleId, required int cantidad, required int destino}) async =>
-      _reparto(await _api.patch('/api/pedidos/$pedidoId/mover', {
-        'detalle_id': detalleId,
-        'cantidad': cantidad,
-        'destino': destino,
-      }));
+  /// Con [operacion], repetirlo (p. ej. tras perder la respuesta) no mueve otra pieza.
+  Future<Reparto> mover(
+    int pedidoId, {
+    required int detalleId,
+    required int cantidad,
+    required int destino,
+    String? operacion,
+  }) async =>
+      _reparto(await _api.patch(
+        '/api/pedidos/$pedidoId/mover',
+        {'detalle_id': detalleId, 'cantidad': cantidad, 'destino': destino},
+        operacion,
+      ));
 
   /// `PATCH /dividir`: reparte una pieza del renglón entre esta cuenta y [destinos].
-  Future<Reparto> dividir(int pedidoId, {required int detalleId, required List<int> destinos}) async =>
-      _reparto(await _api.patch('/api/pedidos/$pedidoId/dividir', {'detalle_id': detalleId, 'destinos': destinos}));
+  Future<Reparto> dividir(int pedidoId, {required int detalleId, required List<int> destinos, String? operacion}) async =>
+      _reparto(await _api.patch(
+        '/api/pedidos/$pedidoId/dividir',
+        {'detalle_id': detalleId, 'destinos': destinos},
+        operacion,
+      ));
 
   static Reparto _reparto(Map<String, dynamic> datos) => (
         pedidos: [

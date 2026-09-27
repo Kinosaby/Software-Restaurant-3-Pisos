@@ -80,12 +80,15 @@ class PedidosActivos extends AsyncNotifier<List<Pedido>> {
     final sinConexion = ref.read(sinConexionProvider.notifier);
     final suscripcion = ref.watch(tiempoRealProvider).eventos.listen(_alEvento);
     ref.onDispose(suscripcion.cancel);
+    _cargas++;
     try {
-      final pedidos = ordenarPedidos(await repo.pedidosActivos());
+      // Lo que se creó mientras se cargaba la lista pudo quedar fuera de la respuesta.
+      final pedidos = _conLoQueLlegoMientras(ordenarPedidos(await repo.pedidosActivos()));
       unawaited(almacen.guardarLista('pedidos', [for (final p in pedidos) p.toJson()]));
       sinConexion.fijar(false);
       return pedidos;
     } on ApiException catch (e) {
+      _terminarCarga();
       final copia = almacen.lista('pedidos');
       if (!e.sinConexion || copia == null) rethrow;
       sinConexion.fijar(true);
@@ -117,21 +120,49 @@ class PedidosActivos extends AsyncNotifier<List<Pedido>> {
     _guardarCopia(pedidos);
   }
 
+  /// Pedidos que llegaron (creados aquí o por tiempo real) antes de terminar de
+  /// cargar la lista; se suman al terminar para que no se pierdan.
+  final _mientrasCarga = <Pedido>[];
+
   /// Inserta o reemplaza un pedido; si ya no está activo, lo quita de la lista.
   void aplicar(Pedido pedido) {
+    // También durante una recarga: su respuesta pudo salir de la central antes de este cambio.
+    if (_cargas > 0) _mientrasCarga.add(pedido);
     final actuales = state.value;
     if (actuales == null) return;
     _fijar(reemplazarPedido(actuales, pedido));
   }
 
+  /// Descargas de la lista en curso (la inicial y las recargas pueden cruzarse).
+  int _cargas = 0;
+
+  /// Suma a lo recién descargado los cambios que llegaron durante la descarga:
+  /// cuentas nuevas que la respuesta no incluía y las que ya se cerraron.
+  List<Pedido> _conLoQueLlegoMientras(List<Pedido> descargados) {
+    var pedidos = descargados;
+    for (final p in _mientrasCarga) {
+      if (!p.estado.activo || !pedidos.any((x) => x.id == p.id)) pedidos = reemplazarPedido(pedidos, p);
+    }
+    _terminarCarga();
+    return pedidos;
+  }
+
+  /// Solo se olvida lo recibido cuando ya no queda ninguna descarga que pudiera no traerlo.
+  void _terminarCarga() {
+    if (_cargas > 0) _cargas--;
+    if (_cargas == 0) _mientrasCarga.clear();
+  }
+
   /// Recarga sin tapar la lista actual con un indicador de carga.
   Future<void> recargar() async {
+    _cargas++;
     try {
       final pedidos = await ref.read(pedidosRepositoryProvider).pedidosActivos();
       if (!ref.mounted) return;
-      _fijar(ordenarPedidos(pedidos));
+      _fijar(_conLoQueLlegoMientras(ordenarPedidos(pedidos)));
       ref.read(sinConexionProvider.notifier).fijar(false);
     } on Object catch (e, st) {
+      _terminarCarga();
       if (!ref.mounted) return;
       if (e is ApiException && e.sinConexion) ref.read(sinConexionProvider.notifier).fijar(true);
       // Si ya teníamos datos, preferimos mostrarlos a mostrar un error por un fallo puntual.
@@ -237,12 +268,21 @@ class PedidosActivos extends AsyncNotifier<List<Pedido>> {
   Future<Pedido> cancelar(int pedidoId) => _ejecutar('cancelar el pedido', (repo) => repo.cancelar(pedidoId));
 
   /// Pasa [cantidad] piezas de un renglón a otra cuenta de la misma mesa.
-  Future<Reparto> moverProducto(Pedido origen, PedidoItem item, {required int cantidad, required Pedido destino}) =>
-      _repartir((repo) => repo.mover(origen.id, detalleId: item.detalleId, cantidad: cantidad, destino: destino.id));
+  /// [operacion] identifica la acción: si se reintenta con el mismo, la central no la repite.
+  Future<Reparto> moverProducto(
+    Pedido origen,
+    PedidoItem item, {
+    required int cantidad,
+    required Pedido destino,
+    String? operacion,
+  }) =>
+      _repartir((repo) => repo.mover(origen.id,
+          detalleId: item.detalleId, cantidad: cantidad, destino: destino.id, operacion: operacion));
 
   /// Divide una pieza de un renglón en partes iguales entre [origen] y [destinos].
-  Future<Reparto> dividirProducto(Pedido origen, PedidoItem item, List<Pedido> destinos) =>
-      _repartir((repo) => repo.dividir(origen.id, detalleId: item.detalleId, destinos: [for (final d in destinos) d.id]));
+  Future<Reparto> dividirProducto(Pedido origen, PedidoItem item, List<Pedido> destinos, {String? operacion}) =>
+      _repartir((repo) => repo.dividir(origen.id,
+          detalleId: item.detalleId, destinos: [for (final d in destinos) d.id], operacion: operacion));
 
   Future<Reparto> _repartir(Future<Reparto> Function(PedidosRepository repo) accion) async {
     final Reparto reparto;
@@ -258,10 +298,10 @@ class PedidosActivos extends AsyncNotifier<List<Pedido>> {
 
   /// Cobra varias cuentas de una vez con su forma de pago (efectivo, tarjeta o mixto).
   /// Como los demás cobros, no se encola: sin conexión falla con el mismo aviso.
-  Future<List<Pedido>> cobrar(Iterable<int> ids, Pago pago) async {
+  Future<List<Pedido>> cobrar(Iterable<int> ids, Pago pago, {String? operacion}) async {
     final cobrados = <Pedido>[];
     await _ejecutar('registrar el cobro', (repo) async {
-      cobrados.addAll(await repo.cobrar(ids.toList(), pago));
+      cobrados.addAll(await repo.cobrar(ids.toList(), pago, operacion: operacion));
       return cobrados.last;
     });
     if (ref.mounted) {
@@ -328,8 +368,11 @@ List<Pedido> aplicarReparto(List<Pedido> actuales, Reparto reparto) {
 final pagadosHoyProvider = FutureProvider.autoDispose<List<Pedido>>((ref) async {
   // Se refresca cuando cambia algún pedido activo (p. ej. al cobrar).
   ref.watch(pedidosActivosProvider.select((p) => p.value?.length));
-  final pagados = await ref.watch(pedidosRepositoryProvider).pedidos(estado: EstadoPedido.pagado);
   final hoy = DateTime.now();
+  // Solo los de hoy: sin el filtro se descargaba todo el historial de pagados.
+  final pagados = await ref
+      .watch(pedidosRepositoryProvider)
+      .pedidos(estado: EstadoPedido.pagado, desde: DateTime(hoy.year, hoy.month, hoy.day));
   bool esHoy(DateTime f) => f.year == hoy.year && f.month == hoy.month && f.day == hoy.day;
   return pagados.where((p) => esHoy(p.creadoEn)).toList().reversed.toList();
 });
@@ -503,19 +546,23 @@ class Favoritos extends Notifier<Map<int, int>> {
 // (`extra_desde`), así que cocina los ve en `pedidosActivosProvider` aunque la
 // pantalla no estuviera abierta cuando llegaron.
 
-/// Casillas de cocina: renglones ya preparados de cada pedido o extra (clave → índices).
+/// Casillas de cocina: renglones ya preparados de cada pedido o extra (clave → ids de renglón).
 final marcasCocinaProvider = NotifierProvider.autoDispose<MarcasCocina, Map<String, Set<int>>>(MarcasCocina.new);
 
 class MarcasCocina extends Notifier<Map<String, Set<int>>> {
+  // Antes se guardaban por posición del renglón ('marcas'); con la clave nueva
+  // esas marcas viejas no se leen como ids.
+  static const _clave = 'marcas_renglon';
+
   @override
   Map<String, Set<int>> build() => {
-        for (final MapEntry(:key, :value) in ref.read(almacenLocalProvider).mapa('marcas').entries)
+        for (final MapEntry(:key, :value) in ref.read(almacenLocalProvider).mapa(_clave).entries)
           key: {for (final i in value as List) leerEntero(i)},
       };
 
-  void alternar(String clave, int indice) {
+  void alternar(String clave, int detalleId) {
     final actual = {...?state[clave]};
-    actual.contains(indice) ? actual.remove(indice) : actual.add(indice);
+    actual.contains(detalleId) ? actual.remove(detalleId) : actual.add(detalleId);
     _guardar({...state, clave: actual});
   }
 
@@ -529,6 +576,6 @@ class MarcasCocina extends Notifier<Map<String, Set<int>>> {
     state = marcas;
     unawaited(ref
         .read(almacenLocalProvider)
-        .guardarMapa('marcas', {for (final e in marcas.entries) e.key: e.value.toList()}));
+        .guardarMapa(_clave, {for (final e in marcas.entries) e.key: e.value.toList()}));
   }
 }

@@ -362,6 +362,60 @@ void main() {
       expect(relevo['extra_desde'], isNotNull);
     });
 
+    test('lo ya servido que pasa a una cuenta en cocina no se vuelve a preparar', () async {
+      final ana = await cuenta('Ana', [(1, 1)]);
+      final beto = await cuenta('Beto', [(2, 1)]);
+      await central.cambiarEstado(ana['id'] as int, 'listo', usuario: cocina);
+
+      await central.moverProducto(ana['id'] as int, {
+        'detalle_id': items(ana['id'] as int).single['id'],
+        'destino': beto['id'],
+      });
+      final pizza = items(beto['id'] as int).firstWhere((i) => i['producto_id'] == 1);
+      expect(pizza['servido'], isTrue);
+      expect(PedidoItem.fromJson(pizza).paraCocina, isFalse, reason: 'cocina no la vuelve a ver');
+      expect(total(beto['id'] as int), 122.0, reason: 'se sigue cobrando');
+    });
+
+    test('si se cancela una cuenta lista con la parte 1, el relevo queda como servido', () async {
+      final ana = await cuenta('Ana', [(1, 1)]);
+      final beto = await cuenta('Beto', [(2, 1)]);
+      await central.dividirProducto(ana['id'] as int, {
+        'detalle_id': items(ana['id'] as int).single['id'],
+        'destinos': [beto['id']],
+      });
+      await central.cambiarEstado(ana['id'] as int, 'listo', usuario: cocina);
+      await central.cambiarEstado(ana['id'] as int, 'cancelado', usuario: mesero);
+      final relevo = items(beto['id'] as int).last;
+      expect(relevo['compartido']['parte'], 1);
+      expect(relevo['servido'], isTrue);
+      expect(relevo['extra_desde'], isNull);
+    });
+
+    test('mover, dividir y cobrar con el mismo id de operación no se repiten', () async {
+      final ana = await cuenta('Ana', [(2, 3)]);
+      final beto = await cuenta('Beto', [(1, 1)]);
+      final refrescos = items(ana['id'] as int).single['id'];
+      final datos = {'detalle_id': refrescos, 'cantidad': 1, 'destino': beto['id']};
+
+      await central.moverProducto(ana['id'] as int, datos, operacion: 'op-mover');
+      final repetido = await central.moverProducto(ana['id'] as int, datos, operacion: 'op-mover');
+      expect(items(ana['id'] as int).single['cantidad'], 2, reason: 'solo se movió una pieza');
+      expect((repetido['pedidos'] as List), hasLength(2));
+
+      final pago = {'pedidos': [beto['id']], 'efectivo': total(beto['id'] as int), 'tarjeta': 0};
+      await central.cobrar(pago, operacion: 'op-cobro');
+      final otraVez = await central.cobrar(pago, operacion: 'op-cobro');
+      expect(otraVez.single['id'], beto['id']);
+      expect((central.resumen()['dia'] as Map)['total_ventas'], 122.0, reason: 'una sola venta');
+    });
+
+    test('la lista de pedidos se puede pedir desde una fecha', () async {
+      await cuenta('Ana', [(1, 1)]);
+      expect(central.listarPedidos(desde: DateTime.now().subtract(const Duration(hours: 1))), hasLength(1));
+      expect(central.listarPedidos(desde: DateTime.now().add(const Duration(hours: 1))), isEmpty);
+    });
+
     test('no divide un precio que no alcanza un centavo por parte', () async {
       final ana = await cuenta('Ana', [(3, 1)]);
       final beto = await cuenta('Beto', [(2, 1)]);

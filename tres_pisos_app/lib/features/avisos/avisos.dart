@@ -62,7 +62,10 @@ class ReglasAviso {
       case PedidoCambiado(:final pedido, nuevo: false, :final accion) when !cocina && _esMio(pedido):
         // Con un extra en cocina aún no se puede servir; cuando lo terminan cambian
         // las piezas y se vuelve a avisar.
-        if (pedido.paraServir && _primeraVez('listo-${pedido.id}-${pedido.piezas}')) {
+        // Mover, dividir, editar o cobrar una cuenta ya lista cambia sus piezas,
+        // pero no es que cocina haya terminado algo: no se vuelve a avisar.
+        const sinAviso = {'producto_movido', 'producto_dividido', 'pedido_editado', 'parte_relevada', 'cobrado'};
+        if (pedido.paraServir && !sinAviso.contains(accion) && _primeraVez('listo-${pedido.id}-${pedido.piezas}')) {
           return (aviso: Aviso('${pedido.titulo} está lista para servir', pedidoId: pedido.id), sonido: 'listo');
         }
         // Cobrado por adelantado: al terminarlo cocina se cierra solo, pero hay que entregarlo.

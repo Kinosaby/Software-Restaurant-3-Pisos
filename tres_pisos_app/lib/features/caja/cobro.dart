@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../central/seguridad.dart' show idAleatorio;
 import '../../core/formato.dart';
 import '../../core/tema.dart';
 import '../../core/widgets.dart';
@@ -135,6 +136,7 @@ class _HojaCobro extends ConsumerStatefulWidget {
 class _HojaCobroState extends ConsumerState<_HojaCobro> {
   final _recibido = TextEditingController();
   final _tarjeta = TextEditingController();
+  final _operacion = idAleatorio(8);
   final _focoRecibido = FocusNode();
   final _focoTarjeta = FocusNode();
   FormaPago _forma = FormaPago.efectivo;
@@ -184,7 +186,9 @@ class _HojaCobroState extends ConsumerState<_HojaCobro> {
       final pago = calculo.pago;
       final cobrados = await ref
           .read(pedidosActivosProvider.notifier)
-          .cobrar([for (final p in widget.pedidos) p.id], pago);
+          .cobrar([for (final p in widget.pedidos) p.id], pago,
+              // Reintentar el mismo cobro tras un error de red no lo repite.
+              operacion: '$_operacion-${pago.efectivo.toStringAsFixed(2)}-${pago.tarjeta.toStringAsFixed(2)}');
       if (!mounted) return;
       Navigator.pop(context, (pago: pago, cobrados: cobrados));
     } on Object catch (e) {
@@ -271,7 +275,12 @@ class _HojaCobroState extends ConsumerState<_HojaCobro> {
                 campoDinero(_tarjeta, _focoTarjeta, 'Con tarjeta o transferencia', enfocar: true),
                 const SizedBox(height: 8),
                 if (!calculo.tarjetaValida && _tarjeta.text.isNotEmpty)
-                  const Text('La parte con tarjeta no puede pasar del total.', style: TextStyle(color: Colores.peligro))
+                  Text(
+                    _leer(_tarjeta) == null
+                        ? 'Escribe un monto válido, p. ej. 150 o 150.50.'
+                        : 'La parte con tarjeta no puede pasar del total.',
+                    style: const TextStyle(color: Colores.peligro),
+                  )
                 else if (calculo.tarjeta >= 0)
                   renglon('En efectivo', calculo.efectivo),
                 const SizedBox(height: 12),

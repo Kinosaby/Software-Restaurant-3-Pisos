@@ -200,6 +200,27 @@ void main() {
       expect(aviso?.aviso.mensaje, contains('ya pagada'));
       expect(reglas.evaluar(PedidoCambiado(cerrada, nuevo: false, accion: 'listo_pagado')), isNull);
     });
+
+    test('mover o editar una cuenta ya lista no repite "lista para servir"', () {
+      const mesero = Usuario(id: 5, username: 'luis', rol: Rol.mesero);
+      final reglas = ReglasAviso(mesero);
+      final lista = pedido(id: 9, estado: 'listo', usuarioId: 5);
+      expect(reglas.evaluar(PedidoCambiado(lista, nuevo: false))?.sonido, 'listo');
+      for (final accion in ['producto_movido', 'producto_dividido', 'pedido_editado', 'cobrado']) {
+        expect(reglas.evaluar(PedidoCambiado(lista, nuevo: false, accion: accion)), isNull, reason: accion);
+      }
+    });
+
+    test('el total de la mesa es lo que falta cobrar', () {
+      final pagada = pedido(id: 1, estado: 'pendiente', mesa: 3);
+      final abierta = pedido(id: 2, estado: 'pendiente', mesa: 3);
+      final conPago = Pedido.fromJson({
+        ...pagada.toJson(),
+        'pago': {'efectivo': pagada.total, 'tarjeta': 0, 'fecha': DateTime.now().toIso8601String()},
+      });
+      final mesa = estadoMesas([conPago, abierta]).firstWhere((m) => m.numero == 3);
+      expect(mesa.total, abierta.total);
+    });
   });
 
   test('estado de las mesas: manda la cuenta más urgente', () {

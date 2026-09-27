@@ -322,13 +322,22 @@ class ServidorCentral {
       // Pedidos
       case ('GET', ['pedidos']):
         _usuario(peticion, todos);
-        return (200, {'pedidos': central.listarPedidos(estado: peticion.uri.queryParameters['estado'])});
+        final consulta = peticion.uri.queryParameters;
+        return (
+          200,
+          {
+            'pedidos': central.listarPedidos(
+              estado: consulta['estado'],
+              desde: DateTime.tryParse(consulta['desde'] ?? ''),
+            ),
+          },
+        );
       case ('GET', ['pedidos', final id]):
         _usuario(peticion, todos);
         return (200, {'pedido': central.obtenerPedido(_id(id))});
       case ('POST', ['pedidos', 'cobrar']):
         _usuario(peticion, salon);
-        return (200, {'mensaje': 'Cobro registrado', 'pedidos': await central.cobrar(cuerpo)});
+        return (200, {'mensaje': 'Cobro registrado', 'pedidos': await central.cobrar(cuerpo, operacion: operacion)});
       case ('POST', ['pedidos']):
         final usuario = _usuario(peticion, salon);
         final pedido = await central.crearPedido(cuerpo, usuario: usuario, operacion: operacion);
@@ -349,10 +358,10 @@ class ServidorCentral {
         return (200, {'mensaje': 'Pedido editado', 'pedido': await central.editarPedido(_id(id), cuerpo)});
       case ('PATCH', ['pedidos', final id, 'mover']):
         _usuario(peticion, salon);
-        return (200, {'mensaje': 'Producto movido', ...await central.moverProducto(_id(id), cuerpo)});
+        return (200, {'mensaje': 'Producto movido', ...await central.moverProducto(_id(id), cuerpo, operacion: operacion)});
       case ('PATCH', ['pedidos', final id, 'dividir']):
         _usuario(peticion, salon);
-        return (200, {'mensaje': 'Producto dividido', ...await central.dividirProducto(_id(id), cuerpo)});
+        return (200, {'mensaje': 'Producto dividido', ...await central.dividirProducto(_id(id), cuerpo, operacion: operacion)});
       case ('DELETE', ['pedidos', final id]):
         _usuario(peticion, admin);
         return (200, {'mensaje': 'Pedido eliminado', 'pedido': await central.eliminarPedido(_id(id))});

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../central/central.dart' show repartirCentavos;
+import '../../central/seguridad.dart' show idAleatorio;
 import '../../core/formato.dart';
 import '../../core/tema.dart';
 import '../pedidos/modelos.dart';
@@ -46,6 +47,10 @@ class _HojaRepartoState extends ConsumerState<_HojaReparto> {
   bool _enviando = false;
   String? _error;
 
+  /// Base del id de operación de esta hoja: reintentar lo mismo tras un error
+  /// de red no mueve ni divide dos veces; si se cambia la elección, es otra operación.
+  final _base = idAleatorio(8);
+
   Future<void> _confirmar(List<Pedido> cuentas) async {
     setState(() {
       _enviando = true;
@@ -53,10 +58,12 @@ class _HojaRepartoState extends ConsumerState<_HojaReparto> {
     });
     try {
       final destinos = [for (final c in cuentas) if (_elegidas.contains(c.id)) c];
+      final operacion = '$_base-${widget.item.detalleId}-$_cantidad-${[for (final d in destinos) d.id].join('.')}';
       final notifier = ref.read(pedidosActivosProvider.notifier);
       final reparto = widget.dividir
-          ? await notifier.dividirProducto(widget.pedido, widget.item, destinos)
-          : await notifier.moverProducto(widget.pedido, widget.item, cantidad: _cantidad, destino: destinos.single);
+          ? await notifier.dividirProducto(widget.pedido, widget.item, destinos, operacion: operacion)
+          : await notifier.moverProducto(widget.pedido, widget.item,
+              cantidad: _cantidad, destino: destinos.single, operacion: operacion);
       if (mounted) Navigator.pop(context, reparto);
     } on Object catch (e) {
       if (mounted) setState(() => _error = '$e');
