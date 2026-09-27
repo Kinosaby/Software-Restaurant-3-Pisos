@@ -38,6 +38,11 @@ class _ConexionPageState extends ConsumerState<ConexionPage> {
   @override
   Widget build(BuildContext context) {
     final actual = ref.watch(conexionProvider);
+    // Iniciar la central deja la sesión del administrador abierta; el router no saca a nadie
+    // de /conexion por sí solo. Se escucha aquí y no en el formulario, que puede reconstruirse.
+    ref.listen(authControllerProvider, (antes, ahora) {
+      if (antes == null && ahora != null) context.go('/');
+    });
     return Scaffold(
       appBar: AppBar(
         title: const Text('Conexión de esta tablet'),
@@ -49,7 +54,11 @@ class _ConexionPageState extends ConsumerState<ConexionPage> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              if (actual != null)
+              // Siempre ocupa el primer lugar: si apareciera al conectar, la lista recolocaría
+              // los formularios, perderían su estado y no navegarían al terminar.
+              if (actual == null)
+                const SizedBox.shrink()
+              else
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Text(
@@ -173,7 +182,7 @@ class _FormularioCentralState extends ConsumerState<_FormularioCentral> {
             password: _password.text,
             nombreRestaurante: _nombre.text,
           );
-      // Con la sesión de administrador iniciada, el router pasa a la pantalla principal.
+      // ConexionPage pasa al inicio en cuanto la sesión de administrador queda iniciada.
     } on Object catch (e) {
       if (mounted) mostrarMensaje(context, 'No se pudo iniciar la central: $e', error: true);
     } finally {
@@ -285,6 +294,11 @@ class _FormularioCentralState extends ConsumerState<_FormularioCentral> {
   }
 }
 
+/// Muchos módems separan su red de 2.4 GHz y la de 5 GHz: la central se "ve" en la lista
+/// pero no responde si cada tablet está en una.
+const _sinCentral = 'No se pudo conectar con la central. Las dos tablets deben estar en la misma red Wi-Fi '
+    '(con el mismo nombre, no una en la de 2.4 GHz y otra en la de 5 GHz) y la app de cocina debe estar abierta.';
+
 class _FormularioEnlace extends ConsumerStatefulWidget {
   const _FormularioEnlace();
 
@@ -390,8 +404,7 @@ class _FormularioEnlaceState extends ConsumerState<_FormularioEnlace> {
         mostrarMensaje(
           context,
           ultimoError == null || ultimoError.sinConexion
-              ? 'No se encontró la central. Comprueba que las dos tablets estén en el mismo Wi-Fi '
-                  'y que la app de cocina esté abierta.'
+              ? _sinCentral
               : ultimoError.mensaje,
           error: true,
         );
@@ -433,7 +446,7 @@ class _FormularioEnlaceState extends ConsumerState<_FormularioEnlace> {
       await ref.read(conexionProvider.notifier).usar(Conexion(modo: ModoConexion.enlazada, url: url, enlace: codigo));
       if (mounted) context.go('/login');
     } on ApiException catch (e) {
-      if (mounted) mostrarMensaje(context, e.mensaje, error: true);
+      if (mounted) mostrarMensaje(context, e.sinConexion ? _sinCentral : e.mensaje, error: true);
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }

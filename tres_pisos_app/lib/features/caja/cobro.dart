@@ -38,6 +38,7 @@ Future<void> mostrarCobro(BuildContext context, WidgetRef ref, List<Pedido> pedi
     ..showSnackBar(SnackBar(
       content: Text(pedidos.length == 1 ? '${pedidos.single.titulo} cobrada' : '${pedidos.length} cuentas cobradas'),
       duration: const Duration(seconds: 6),
+      persist: false, // con botón, Flutter lo deja fijo por defecto
       action: SnackBarAction(
         label: 'Ticket',
         onPressed: () =>

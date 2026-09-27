@@ -33,6 +33,8 @@ class InicioPage extends ConsumerWidget {
           content: Text(aviso.mensaje, style: const TextStyle(fontWeight: FontWeight.w600)),
           backgroundColor: aviso.urgente ? Colores.acento : Colores.exito,
           duration: Duration(seconds: aviso.urgente ? 6 : 5),
+          // Con botón, Flutter lo deja fijo por defecto y tapa la pantalla (incluso tras cerrar sesión).
+          persist: false,
           action: aviso.pedidoId == null || rol == Rol.cocina
               ? null
               : SnackBarAction(

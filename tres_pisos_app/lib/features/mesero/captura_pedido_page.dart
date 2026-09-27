@@ -67,7 +67,7 @@ class _CapturaPedidoPageState extends ConsumerState<CapturaPedidoPage> {
     final estado = ref.read(carritoProvider);
     if (estado.vacio) return;
 
-    final mesa = _mesa;
+    final mesa = _tipo == TipoPedido.llevar ? mesaParaLlevar : _mesa;
     if (_esNuevo && mesa == null) {
       mostrarMensaje(context, 'Elige la mesa.', error: true);
       await _elegirMesa();
@@ -209,16 +209,19 @@ class _CapturaPedidoPageState extends ConsumerState<CapturaPedidoPage> {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Row(
         children: [
-          OutlinedButton.icon(
-            onPressed: _elegirMesa,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: _mesa == null ? Colores.acento : Colores.crema,
-              side: BorderSide(color: _mesa == null ? Colores.acento : Colores.apagado),
+          // Para llevar no hace falta mesa: se envía con [mesaParaLlevar], como la web.
+          if (_tipo == TipoPedido.aqui) ...[
+            OutlinedButton.icon(
+              onPressed: _elegirMesa,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _mesa == null ? Colores.acento : Colores.crema,
+                side: BorderSide(color: _mesa == null ? Colores.acento : Colores.apagado),
+              ),
+              icon: const Icon(Icons.table_restaurant),
+              label: Text(_mesa == null ? 'Mesa' : 'Mesa $_mesa'),
             ),
-            icon: const Icon(Icons.table_restaurant),
-            label: Text(_mesa == null ? 'Mesa' : 'Mesa $_mesa'),
-          ),
-          const SizedBox(width: 10),
+            const SizedBox(width: 10),
+          ],
           Expanded(
             child: SegmentedButton<TipoPedido>(
               segments: [

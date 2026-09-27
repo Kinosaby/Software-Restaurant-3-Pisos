@@ -139,7 +139,9 @@ class _CentralInfoPageState extends ConsumerState<CentralInfoPage> {
                 Card(
                   child: ListTile(
                     leading: const Icon(Icons.devices, color: Colores.acento),
-                    title: Text('${local.servidor.clientesConectados} conexiones en tiempo real'),
+                    title: Text(local.servidor.clientesConectados == 1
+                        ? '1 conexión en tiempo real'
+                        : '${local.servidor.clientesConectados} conexiones en tiempo real'),
                     subtitle: const Text('Incluye esta misma tablet', style: TextStyle(color: Colores.apagado)),
                   ),
                 ),

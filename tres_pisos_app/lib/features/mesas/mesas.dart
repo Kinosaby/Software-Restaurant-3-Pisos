@@ -16,6 +16,9 @@ import '../pedidos/widgets_pedido.dart';
 /// Mesas del restaurante (igual que `TOTAL_MESAS` en la web).
 const totalMesas = 13;
 
+/// Mesa que la web asigna a los pedidos para llevar (el servidor exige un número).
+const mesaParaLlevar = 99;
+
 /// Situación de una mesa según sus cuentas activas (la más urgente manda).
 enum SituacionMesa {
   libre('Libre', Colores.apagado, Icons.event_seat_outlined),
