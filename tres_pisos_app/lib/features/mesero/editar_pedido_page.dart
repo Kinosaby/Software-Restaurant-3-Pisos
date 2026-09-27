@@ -20,6 +20,17 @@ List<CambioItem> calcularCambios(Pedido original, Map<int, RenglonEditado> edita
           CambioItem(detalleId: item.detalleId, cantidad: e.cantidad, nota: e.nota),
     ];
 
+/// Mesa que se guarda al editar, o null si falta una mesa válida.
+/// Para llevar no se pide mesa: conserva la del pedido si ya era para llevar
+/// (puede estar ligado a una mesa real) y si no usa [mesaParaLlevar], como la captura.
+int? mesaAlGuardar(Pedido original, TipoPedido tipo, String texto) {
+  if (tipo == TipoPedido.llevar) {
+    return original.tipo == TipoPedido.llevar ? original.mesa : mesaParaLlevar;
+  }
+  final mesa = int.tryParse(texto.trim());
+  return mesa == null || mesa < 1 || mesa == mesaParaLlevar ? null : mesa;
+}
+
 /// Cambia cantidades, notas, mesa, tipo o comensal de un pedido que cocina aún no termina.
 class EditarPedidoPage extends ConsumerStatefulWidget {
   const EditarPedidoPage({super.key, required this.pedidoId});
@@ -48,7 +59,8 @@ class _EditarPedidoPageState extends ConsumerState<EditarPedidoPage> {
         .firstOrNull;
     if (pedido != null) {
       _original = pedido;
-      _mesa.text = '${pedido.mesa}';
+      // La mesa interna para llevar (99) no es una mesa real: el campo queda vacío.
+      _mesa.text = pedido.mesa == mesaParaLlevar ? '' : '${pedido.mesa}';
       _comensal.text = pedido.comensal ?? '';
       _tipo = pedido.tipo;
       for (final item in pedido.items) {
@@ -107,8 +119,8 @@ class _EditarPedidoPageState extends ConsumerState<EditarPedidoPage> {
 
   Future<void> _guardar() async {
     final original = _original!;
-    final mesa = int.tryParse(_mesa.text.trim());
-    if (mesa == null || mesa < 1) {
+    final mesa = mesaAlGuardar(original, _tipo, _mesa.text);
+    if (mesa == null) {
       mostrarMensaje(context, 'Indica un número de mesa válido.', error: true);
       return;
     }
@@ -170,16 +182,19 @@ class _EditarPedidoPageState extends ConsumerState<EditarPedidoPage> {
           const SizedBox(height: 12),
           Row(
             children: [
-              SizedBox(
-                width: 110,
-                child: TextField(
-                  controller: _mesa,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(4)],
-                  decoration: const InputDecoration(labelText: 'Mesa', isDense: true),
+              // Para llevar no lleva mesa (se guarda con la interna [mesaParaLlevar]).
+              if (_tipo == TipoPedido.aqui) ...[
+                SizedBox(
+                  width: 110,
+                  child: TextField(
+                    controller: _mesa,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(4)],
+                    decoration: const InputDecoration(labelText: 'Mesa', isDense: true),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 10),
+                const SizedBox(width: 10),
+              ],
               Expanded(
                 child: TextField(
                   controller: _comensal,

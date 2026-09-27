@@ -147,7 +147,7 @@ class PedidosActivos extends AsyncNotifier<List<Pedido>> {
     required List<LineaCarrito> lineas,
   }) {
     final cuerpo = PedidosRepository.cuerpoCrear(mesa: mesa, tipo: tipo, comensal: comensal, lineas: lineas);
-    final base = tipo == TipoPedido.llevar ? 'Para llevar (mesa $mesa)' : 'Mesa $mesa';
+    final base = etiquetaMesa(mesa, llevar: tipo == TipoPedido.llevar);
     return _enviar(
       tipo: 'crear',
       cuerpo: cuerpo,

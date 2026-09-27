@@ -13,11 +13,11 @@ import '../pedidos/modelos.dart';
 import '../pedidos/pedidos_controller.dart';
 import '../pedidos/widgets_pedido.dart';
 
+// [mesaParaLlevar] vive en core/formato.dart; se reexporta para quien la importaba de aquí.
+export '../../core/formato.dart' show mesaParaLlevar;
+
 /// Mesas del restaurante (igual que `TOTAL_MESAS` en la web).
 const totalMesas = 13;
-
-/// Mesa que la web asigna a los pedidos para llevar (el servidor exige un número).
-const mesaParaLlevar = 99;
 
 /// Situación de una mesa según sus cuentas activas (la más urgente manda).
 enum SituacionMesa {

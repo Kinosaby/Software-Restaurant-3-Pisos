@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/almacen_local.dart';
+import '../../core/formato.dart';
 import '../../core/plataforma.dart';
 import '../auth/auth_controller.dart';
 import '../auth/sesion.dart';
@@ -57,7 +58,7 @@ class ReglasAviso {
         );
       case ExtraRecibido(:final extra) when cocina:
         final piezas = extra.items.fold(0, (s, i) => s + i.cantidad);
-        return (aviso: Aviso('Extra para mesa ${extra.mesa}: $piezas productos', urgente: true), sonido: 'pedido');
+        return (aviso: Aviso('Extra · ${etiquetaMesa(extra.mesa, llevar: extra.tipo == TipoPedido.llevar)}: $piezas productos', urgente: true), sonido: 'pedido');
       case PedidoCambiado(:final pedido, nuevo: false) when !cocina && _esMio(pedido):
         // Con un extra en cocina aún no se puede servir; cuando lo terminan cambian
         // las piezas y se vuelve a avisar.

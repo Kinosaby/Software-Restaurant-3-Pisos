@@ -367,7 +367,7 @@ class _TarjetaExtra extends ConsumerWidget {
     final items = pedido.extrasPendientes;
     final recibido = items.map((i) => i.extraDesde!).reduce((a, b) => a.isBefore(b) ? a : b);
     final marcas = ref.watch(marcasCocinaProvider)['x${pedido.id}'] ?? const <int>{};
-    final titulo = pedido.tipo == TipoPedido.llevar ? 'Para llevar (mesa ${pedido.mesa})' : 'Mesa ${pedido.mesa}';
+    final titulo = etiquetaMesa(pedido.mesa, llevar: pedido.tipo == TipoPedido.llevar);
     return Card(
       color: Colores.dorado.withValues(alpha: 0.10),
       shape: RoundedRectangleBorder(
