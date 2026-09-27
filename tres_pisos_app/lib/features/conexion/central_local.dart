@@ -31,6 +31,8 @@ class CentralLocal {
     final servidor = ServidorCentral(central);
     await servidor.iniciar();
     await Plataforma.pantallaEncendida(true);
+    // Sin esto Android congela o mata la app al pulsar Inicio o apagarse la pantalla.
+    await Plataforma.servicioCentral(true);
     return CentralLocal(central, servidor);
   }
 }
@@ -70,6 +72,7 @@ class CentralLocalController extends Notifier<CentralLocal?> {
     await local.servidor.detener();
     await local.central.cerrar();
     await Plataforma.pantallaEncendida(false);
+    await Plataforma.servicioCentral(false);
   }
 
   /// Nuevo código de enlace: las demás tablets deben volver a enlazarse y todas las sesiones se cierran.

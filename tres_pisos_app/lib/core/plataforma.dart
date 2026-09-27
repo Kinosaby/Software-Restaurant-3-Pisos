@@ -41,6 +41,27 @@ abstract final class Plataforma {
 
   static Future<void> multicast(bool activo) => _llamar('multicast', {'activo': activo});
 
+  /// Solo en la tablet central: servicio en primer plano (aviso fijo "Central de cocina
+  /// activa") que evita que Android congele o mate la app al salir de primer plano y
+  /// mantiene despiertos la CPU y el Wi-Fi. Con él activo, Atrás en la pantalla raíz
+  /// manda la app a segundo plano en lugar de cerrarla.
+  static Future<void> servicioCentral(bool activo) => _llamar('servicioCentral', {'activo': activo});
+
+  /// `true` si la app ya está fuera del ahorro de batería (o no se puede saber).
+  static Future<bool> bateriaSinRestriccion() async {
+    try {
+      return await _canal.invokeMethod<bool>('bateriaSinRestriccion') ?? true;
+    } on MissingPluginException {
+      return true;
+    } on PlatformException catch (e) {
+      debugPrint('Plataforma.bateriaSinRestriccion: ${e.message}');
+      return true;
+    }
+  }
+
+  /// Abre el diálogo del sistema para excluir la app del ahorro de batería.
+  static Future<void> pedirSinRestriccionBateria() => _llamar('pedirSinRestriccionBateria');
+
   /// Escanea un QR con el escáner de Google Play Services. `null` si se cancela;
   /// lanza [PlatformException] si el escáner no está disponible en la tablet.
   static Future<String?> escanearQr() => _canal.invokeMethod<String>('escanearQr');

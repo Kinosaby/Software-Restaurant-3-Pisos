@@ -1,15 +1,22 @@
 package com.trespisos.tres_pisos_app
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.media.ToneGenerator
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.provider.Settings
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.core.content.FileProvider
 import com.google.mlkit.common.MlKitException
 import com.google.mlkit.vision.barcode.common.Barcode
@@ -35,6 +42,7 @@ class MainActivity : FlutterActivity() {
     companion object {
         private const val PEDIR_GUARDAR = 41
         private const val PEDIR_ABRIR = 42
+        private const val PEDIR_NOTIFICACIONES = 43
         private const val LIMITE_ARCHIVO = 64 * 1024 * 1024
     }
 
@@ -211,6 +219,17 @@ class MainActivity : FlutterActivity() {
                             multicast(llamada.argument<Boolean>("activo") ?: false)
                             resultado.success(null)
                         }
+                        // Solo la tablet central: mantiene vivo el proceso fuera de primer plano.
+                        "servicioCentral" -> {
+                            servicioCentral(llamada.argument<Boolean>("activo") ?: false)
+                            resultado.success(null)
+                        }
+                        "bateriaSinRestriccion" -> resultado.success(bateriaSinRestriccion())
+                        // Diálogo del sistema para excluir la app del ahorro de batería.
+                        "pedirSinRestriccionBateria" -> {
+                            pedirSinRestriccionBateria()
+                            resultado.success(null)
+                        }
                         else -> resultado.notImplemented()
                     }
                 } catch (e: Exception) {
@@ -287,9 +306,77 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private var centralActiva = false
+
+    private fun servicioCentral(activo: Boolean) {
+        centralActiva = activo
+        if (activo) {
+            pedirPermisoNotificaciones()
+            try {
+                ServicioCentral.iniciar(this)
+            } catch (e: Exception) {
+                // Android 12+ no deja iniciarlo si la app no está al frente; se reintenta al volver.
+                android.util.Log.w("TresPisos", "No se pudo iniciar el servicio de la central: ${e.message}")
+            }
+        } else {
+            ServicioCentral.detener(this)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (centralActiva && !ServicioCentral.activo) {
+            try {
+                ServicioCentral.iniciar(this)
+            } catch (e: Exception) {
+                android.util.Log.w("TresPisos", "No se pudo reiniciar el servicio de la central: ${e.message}")
+            }
+        }
+    }
+
+    /** Android 13+: sin este permiso el servicio funciona, pero su aviso fijo no se ve. */
+    private fun pedirPermisoNotificaciones() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), PEDIR_NOTIFICACIONES)
+    }
+
+    private fun bateriaSinRestriccion(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
+        val energia = getSystemService(Context.POWER_SERVICE) as PowerManager
+        return energia.isIgnoringBatteryOptimizations(packageName)
+    }
+
+    @SuppressLint("BatteryLife")
+    private fun pedirSinRestriccionBateria() {
+        if (bateriaSinRestriccion()) return
+        try {
+            startActivity(
+                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")),
+            )
+        } catch (e: Exception) {
+            // Algunas marcas no traen ese diálogo: se abre la lista general de optimización.
+            startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        }
+    }
+
+    /**
+     * Flutter llama aquí cuando se pulsa Atrás sin pantallas que cerrar. En la central
+     * no se cierra la actividad (eso destruiría el motor de Flutter y el servidor):
+     * la app solo pasa a segundo plano, como con el botón Inicio.
+     */
+    override fun popSystemNavigator(): Boolean {
+        if (!centralActiva) return false
+        moveTaskToBack(true)
+        Toast.makeText(this, "La central sigue activa en segundo plano", Toast.LENGTH_SHORT).show()
+        return true
+    }
+
     override fun onDestroy() {
         tonos?.release()
         bloqueoMulticast?.release()
+        // Si la actividad se cierra de verdad, el motor de Flutter (y el servidor) se va con ella.
+        if (isFinishing) ServicioCentral.detener(this)
         super.onDestroy()
     }
 }
