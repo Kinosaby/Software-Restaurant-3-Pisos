@@ -175,6 +175,7 @@ class ItemCentral {
     bool borrarNota = false,
     DateTime? extraDesde,
     bool terminarExtra = false,
+    ParteCompartida? compartido,
   }) =>
       ItemCentral(
         id: id ?? this.id,
@@ -184,7 +185,7 @@ class ItemCentral {
         cantidad: cantidad ?? this.cantidad,
         nota: borrarNota ? null : (nota ?? this.nota),
         extraDesde: terminarExtra ? null : (extraDesde ?? this.extraDesde),
-        compartido: compartido,
+        compartido: compartido ?? this.compartido,
       );
 
   /// Se puede sumar a [otro] en un solo renglón (mismo producto, nota, precio y
@@ -1055,11 +1056,16 @@ class Central {
           borrarComensal: comensal == null,
           items: items,
         );
+        final relevos = _relevarPartes(pedido, items);
         await _confirmar([
           {'t': 'pedido', 'v': actualizado.toJson()},
+          for (final r in relevos) {'t': 'pedido', 'v': r.toJson()},
         ]);
         final json = actualizado.toJson();
         emitir?.call('pedido_actualizado', {...json, '_accion': 'pedido_editado'});
+        for (final r in relevos) {
+          emitir?.call('pedido_actualizado', {...r.toJson(), '_accion': 'parte_relevada'});
+        }
         return json;
       });
 
@@ -1089,6 +1095,47 @@ class Central {
     if (destinos.any((d) => d.mesa != origen.mesa)) {
       throw ErrorCentral(400, 'DIFFERENT_TABLE', 'Solo se pueden repartir productos entre cuentas de la misma mesa.');
     }
+  }
+
+  /// Cocina solo ve la parte 1 de un platillo dividido. Si esa parte sale de
+  /// [antes] (cuenta cancelada, borrada o editada) y en [quedan] ya no está, la
+  /// parte de menor número en otra cuenta abierta pasa a ser la 1 para que cocina
+  /// no pierda el platillo. Si cocina aún no lo había hecho y esa cuenta ya está
+  /// lista, le llega como extra. Devuelve las cuentas que cambian.
+  List<PedidoCentral> _relevarPartes(PedidoCentral antes, List<ItemCentral> quedan) {
+    final grupos = {
+      for (final i in antes.items)
+        if (i.compartido?.parte == 1 && !quedan.any((q) => q.id == i.id)) i.compartido!.grupo,
+    };
+    final cambios = <int, PedidoCentral>{};
+    for (final grupo in grupos) {
+      PedidoCentral? cuenta;
+      ItemCentral? relevo;
+      for (final p in _pedidos.values) {
+        if (p.id == antes.id || p.estado == 'cancelado' || p.estado == 'pagado') continue;
+        final actual = cambios[p.id] ?? p;
+        for (final i in actual.items) {
+          if (i.compartido?.grupo == grupo && (relevo == null || i.compartido!.parte < relevo.compartido!.parte)) {
+            cuenta = actual;
+            relevo = i;
+          }
+        }
+      }
+      if (cuenta == null || relevo == null) continue;
+      final sinHacer = antes.estado != 'listo' && cuenta.estado == 'listo';
+      final elegido = relevo;
+      cambios[cuenta.id] = cuenta.copyWith(items: [
+        for (final i in cuenta.items)
+          if (i.id == elegido.id)
+            i.copyWith(
+              compartido: ParteCompartida(grupo: grupo, parte: 1, partes: elegido.compartido!.partes),
+              extraDesde: sinHacer ? _reloj() : null,
+            )
+          else
+            i,
+      ]);
+    }
+    return cambios.values.toList();
   }
 
   ItemCentral _renglon(PedidoCentral pedido, Object? detalleId) {
@@ -1259,8 +1306,10 @@ class Central {
               ? [for (final i in pedido.items) i.copyWith(terminarExtra: true)]
               : null,
         );
+        final relevos = estado == 'cancelado' ? _relevarPartes(pedido, const []) : const <PedidoCentral>[];
         await _confirmar([
           {'t': 'pedido', 'v': actualizado.toJson()},
+          for (final r in relevos) {'t': 'pedido', 'v': r.toJson()},
           // Cobro sin desglose (clientes anteriores al pago mixto). Si ya se cobró por adelantado, no se repite.
           if (estado == 'pagado' && pedido.pago == null)
             {
@@ -1271,6 +1320,9 @@ class Central {
         ]);
         final json = actualizado.toJson();
         emitir?.call('pedido_actualizado', cerrarPagado ? {...json, '_accion': 'listo_pagado'} : json);
+        for (final r in relevos) {
+          emitir?.call('pedido_actualizado', {...r.toJson(), '_accion': 'parte_relevada'});
+        }
         return json;
       });
 
@@ -1348,10 +1400,15 @@ class Central {
   /// Eliminar no es un reembolso: la venta registrada se conserva.
   Future<Map<String, dynamic>> eliminarPedido(int id) => _enSerie(() async {
         final pedido = _pedido(id);
+        final relevos = _relevarPartes(pedido, const []);
         await _confirmar([
           {'t': 'borrar', 'tabla': 'pedido', 'id': id},
+          for (final r in relevos) {'t': 'pedido', 'v': r.toJson()},
         ]);
         emitir?.call('pedido_eliminado', {'id': id});
+        for (final r in relevos) {
+          emitir?.call('pedido_actualizado', {...r.toJson(), '_accion': 'parte_relevada'});
+        }
         return pedido.toJson();
       });
 

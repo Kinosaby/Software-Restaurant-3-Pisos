@@ -318,6 +318,50 @@ void main() {
       );
     });
 
+    test('si se cancela la cuenta con la parte 1, cocina sigue viendo el platillo', () async {
+      final ana = await cuenta('Ana', [(1, 1)]);
+      final beto = await cuenta('Beto', [(2, 1)]);
+      final caro = await cuenta('Caro', [(2, 1)]);
+      await central.dividirProducto(ana['id'] as int, {
+        'detalle_id': items(ana['id'] as int).single['id'],
+        'destinos': [beto['id'], caro['id']],
+      });
+      Iterable<PedidoItem> paraCocina() => [
+            for (final p in central.listarPedidos())
+              if (p['estado'] != 'cancelado') ...Pedido.fromJson(p).items,
+          ].where((i) => i.compartido != null && i.paraCocina);
+
+      await central.cambiarEstado(ana['id'] as int, 'cancelado', usuario: mesero);
+      expect(paraCocina(), hasLength(1), reason: 'la parte de Beto pasa a ser la que ve cocina');
+      expect(items(beto['id'] as int).last['compartido']['parte'], 1);
+      expect(items(caro['id'] as int).last['compartido']['parte'], 3);
+
+      // Igual al borrar la cuenta o quitar la parte al editarla.
+      await central.eliminarPedido(beto['id'] as int);
+      expect(paraCocina(), hasLength(1));
+      expect(items(caro['id'] as int).last['compartido']['parte'], 1);
+    });
+
+    test('si la parte relevada está en una cuenta lista, cocina la recibe como extra', () async {
+      final ana = await cuenta('Ana', [(1, 1), (2, 1)]);
+      final beto = await cuenta('Beto', [(2, 1)]);
+      await central.dividirProducto(ana['id'] as int, {
+        'detalle_id': items(ana['id'] as int).first['id'],
+        'destinos': [beto['id']],
+      });
+      await central.cambiarEstado(beto['id'] as int, 'listo', usuario: cocina);
+
+      // Ana (aún pendiente) quita su parte: la pizza no se ha hecho.
+      await central.editarPedido(ana['id'] as int, {
+        'items': [
+          {'detalle_id': items(ana['id'] as int).firstWhere((i) => i['compartido'] != null)['id'], 'cantidad': 0},
+        ],
+      });
+      final relevo = items(beto['id'] as int).last;
+      expect(relevo['compartido']['parte'], 1);
+      expect(relevo['extra_desde'], isNotNull);
+    });
+
     test('no divide un precio que no alcanza un centavo por parte', () async {
       final ana = await cuenta('Ana', [(3, 1)]);
       final beto = await cuenta('Beto', [(2, 1)]);
