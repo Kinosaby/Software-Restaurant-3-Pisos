@@ -75,6 +75,8 @@ class ServicioCentral : Service() {
     override fun onDestroy() {
         activo = false
         liberarBloqueos()
+        // Sin central, su red propia ya no sirve.
+        RedLocal.apagar()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }

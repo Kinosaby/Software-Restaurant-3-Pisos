@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -10,6 +12,7 @@ import 'features/auth/sesion.dart';
 import 'core/plataforma.dart';
 import 'features/conexion/central_local.dart';
 import 'features/conexion/enlace_qr.dart';
+import 'features/conexion/red_propia.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -38,6 +41,14 @@ Future<void> main() async {
       // Sin central las demás tablets no pueden trabajar: se avisa en pantalla.
       errorCentral = '$e';
     }
+    // Trabajaba sin router: vuelve a crear su red (con nombre y clave nuevos).
+    if (central != null) {
+      final errorRed = await reanudarRedPropia(almacen.prefs);
+      if (errorRed != null) errorCentral = 'La red propia de la central no se pudo crear: $errorRed';
+    }
+  } else if (arranque.conexion?.modo == ModoConexion.enlazada) {
+    // Mesero de una central sin router: se vuelve a unir a su red sin esperar.
+    unawaited(unirseARedGuardada(arranque.conexion?.red));
   }
 
   // ¿Se abrió la app escaneando el QR de la central con la cámara del sistema?

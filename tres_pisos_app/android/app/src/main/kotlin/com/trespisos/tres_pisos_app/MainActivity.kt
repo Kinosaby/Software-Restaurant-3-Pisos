@@ -43,6 +43,7 @@ class MainActivity : FlutterActivity() {
         private const val PEDIR_GUARDAR = 41
         private const val PEDIR_ABRIR = 42
         private const val PEDIR_NOTIFICACIONES = 43
+        private const val PEDIR_RED = 44
         private const val LIMITE_ARCHIVO = 64 * 1024 * 1024
     }
 
@@ -224,6 +225,36 @@ class MainActivity : FlutterActivity() {
                             servicioCentral(llamada.argument<Boolean>("activo") ?: false)
                             resultado.success(null)
                         }
+                        // Red Wi-Fi propia de la central (sin router, internet ni datos).
+                        "redPropia" -> {
+                            if (llamada.argument<Boolean>("activa") == true) {
+                                conPermisoDeRed(resultado) {
+                                    RedLocal.crear(this) { datos, error ->
+                                        if (datos != null) resultado.success(datos) else resultado.error("RED", error, null)
+                                    }
+                                }
+                            } else {
+                                RedLocal.apagar()
+                                resultado.success(null)
+                            }
+                        }
+                        "redPropiaActual" -> resultado.success(RedLocal.actual())
+                        // Tablet del mesero: unirse a la red propia de la central.
+                        "conectarRed" -> {
+                            val ssid = llamada.argument<String>("ssid")
+                            val clave = llamada.argument<String>("clave")
+                            if (ssid == null || clave == null) {
+                                resultado.error("RED", "Faltan los datos de la red", null)
+                            } else {
+                                RedLocal.conectar(this, ssid, clave, llamada.argument<String>("seguridad") ?: "wpa2") { ok, error ->
+                                    if (ok) resultado.success(true) else resultado.error("RED", error, null)
+                                }
+                            }
+                        }
+                        "desconectarRed" -> {
+                            RedLocal.desconectar(this)
+                            resultado.success(null)
+                        }
                         "bateriaSinRestriccion" -> resultado.success(bateriaSinRestriccion())
                         // Diálogo del sistema para excluir la app del ahorro de batería.
                         "pedirSinRestriccionBateria" -> {
@@ -331,6 +362,35 @@ class MainActivity : FlutterActivity() {
             } catch (e: Exception) {
                 android.util.Log.w("TresPisos", "No se pudo reiniciar el servicio de la central: ${e.message}")
             }
+        }
+    }
+
+    // Acción que espera el permiso de dispositivos cercanos / ubicación para la red propia.
+    private var trasPermisoRed: (() -> Unit)? = null
+    private var resultadoPermisoRed: MethodChannel.Result? = null
+
+    private fun conPermisoDeRed(resultado: MethodChannel.Result, accion: () -> Unit) {
+        val faltan = RedLocal.permisos().filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (faltan.isEmpty()) {
+            accion()
+            return
+        }
+        trasPermisoRed = accion
+        resultadoPermisoRed = resultado
+        requestPermissions(faltan.toTypedArray(), PEDIR_RED)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != PEDIR_RED) return
+        val accion = trasPermisoRed
+        val resultado = resultadoPermisoRed
+        trasPermisoRed = null
+        resultadoPermisoRed = null
+        if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+            accion?.invoke()
+        } else {
+            resultado?.error("RED", "Sin el permiso de dispositivos cercanos la central no puede crear su red.", null)
         }
     }
 

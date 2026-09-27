@@ -35,6 +35,28 @@ void main() {
     expect(QrCode(payload: QrPayload.fromString(texto)).moduleCount, lessThanOrEqualTo(49));
   });
 
+  test('con red propia el QR lleva nombre y clave del Wi-Fi, y la conexión los recuerda', () {
+    const conRed = DatosEnlace(
+      ips: ['192.168.49.1'],
+      puerto: 8787,
+      codigo: 'K7P2-9QXM',
+      red: (ssid: 'AndroidShare_1234', clave: 'x7k2m9p4q1', seguridad: 'wpa2'),
+    );
+    final texto = conRed.uri.toString();
+    final leido = DatosEnlace.leer(texto)!;
+    expect(leido.red, (ssid: 'AndroidShare_1234', clave: 'x7k2m9p4q1', seguridad: 'wpa2'));
+    expect(QrCode(payload: QrPayload.fromString(texto)).moduleCount, lessThanOrEqualTo(57));
+    // Sin red o con una clave inválida (menos de 8) no hay red.
+    expect(datos.uri.queryParameters.containsKey('w'), isFalse);
+    expect(DatosEnlace.leer('trespisos://enlace?ip=192.168.1.20&c=K7P2-9QXM&w=Red&k=corta')!.red, isNull);
+
+    final conexion = Conexion(modo: ModoConexion.enlazada, url: 'http://192.168.49.1:8787', enlace: 'K7P2-9QXM', red: leido.red);
+    final guardada = Conexion.fromJson(conexion.toJson());
+    expect(guardada.red, leido.red);
+    expect(guardada.copyWith(enlace: 'AAAA-BBBB').red, leido.red);
+    expect(Conexion.fromJson({'modo': 'enlazada', 'url': 'http://x'}).red, isNull, reason: 'datos de antes');
+  });
+
   test('rechaza QR ajenos o manipulados', () {
     expect(DatosEnlace.leer('https://ejemplo.com'), isNull);
     expect(DatosEnlace.leer('trespisos://enlace?ip=192.168.1.20&c=corto'), isNull);

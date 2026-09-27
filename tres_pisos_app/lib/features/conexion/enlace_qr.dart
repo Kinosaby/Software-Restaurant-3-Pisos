@@ -11,13 +11,16 @@ import '../../core/plataforma.dart';
 /// Es un enlace `trespisos://enlace?ip=…&p=…&c=…&n=…`, así que también lo abre
 /// la cámara normal de la tablet (o Google Lens) directamente en la app.
 class DatosEnlace {
-  const DatosEnlace({required this.ips, required this.puerto, required this.codigo, this.nombre});
+  const DatosEnlace({required this.ips, required this.puerto, required this.codigo, this.nombre, this.red});
 
   /// Todas las IP de la central (si tiene varias redes, se prueba cada una).
   final List<String> ips;
   final int puerto;
   final String codigo;
   final String? nombre;
+
+  /// Red Wi-Fi propia de la central (sin router): el mesero se une a ella antes de conectar.
+  final RedWifi? red;
 
   /// Solo lleva IP de la red local: la central no atiende las de datos móviles.
   Uri get uri => Uri(
@@ -28,6 +31,7 @@ class DatosEnlace {
           'p': '$puerto',
           'c': codigo,
           'n': ?nombre,
+          if (red case final r?) ...{'w': r.ssid, 'k': r.clave, 's': r.seguridad},
         },
       );
 
@@ -52,11 +56,15 @@ class DatosEnlace {
       return null;
     }
     final nombre = uri.queryParameters['n']?.trim();
+    final ssid = uri.queryParameters['w'], clave = uri.queryParameters['k'];
     return DatosEnlace(
       ips: ips,
       puerto: puerto,
       codigo: codigo,
       nombre: (nombre == null || nombre.isEmpty) ? null : nombre,
+      red: (ssid == null || ssid.isEmpty || clave == null || clave.length < 8)
+          ? null
+          : (ssid: ssid, clave: clave, seguridad: uri.queryParameters['s'] == 'wpa3' ? 'wpa3' : 'wpa2'),
     );
   }
 }

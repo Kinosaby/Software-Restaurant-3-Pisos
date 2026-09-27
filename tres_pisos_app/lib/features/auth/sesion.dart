@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../../core/plataforma.dart' show RedWifi;
+
 enum Rol {
   admin('Administrador'),
   mesero('Mesero'),
@@ -56,14 +58,20 @@ enum ModoConexion {
 /// Todo funciona en la red local del restaurante, sin internet: la tablet de
 /// cocina es la central y las demás se conectan a ella.
 class Conexion {
-  const Conexion({required this.modo, required this.url, this.enlace});
+  const Conexion({required this.modo, required this.url, this.enlace, this.red});
 
   /// Lanza si el modo guardado ya no existe (p. ej. el antiguo modo "servidor").
-  factory Conexion.fromJson(Map<String, dynamic> json) => Conexion(
-        modo: ModoConexion.values.firstWhere((m) => m.name == json['modo']),
-        url: json['url'] as String,
-        enlace: json['enlace'] as String?,
-      );
+  factory Conexion.fromJson(Map<String, dynamic> json) {
+    final red = json['red'];
+    return Conexion(
+      modo: ModoConexion.values.firstWhere((m) => m.name == json['modo']),
+      url: json['url'] as String,
+      enlace: json['enlace'] as String?,
+      red: red is Map && red['ssid'] is String && red['clave'] is String
+          ? (ssid: red['ssid'] as String, clave: red['clave'] as String, seguridad: red['seguridad'] == 'wpa3' ? 'wpa3' : 'wpa2')
+          : null,
+    );
+  }
 
   final ModoConexion modo;
   final String url;
@@ -71,9 +79,17 @@ class Conexion {
   /// Código de enlace de la central (se manda en `X-Enlace`).
   final String? enlace;
 
-  Map<String, dynamic> toJson() => {'modo': modo.name, 'url': url, 'enlace': ?enlace};
+  /// Red Wi-Fi propia de la central (sin router): al abrir la app el mesero se vuelve a unir.
+  final RedWifi? red;
 
-  Conexion copyWith({String? enlace}) => Conexion(modo: modo, url: url, enlace: enlace ?? this.enlace);
+  Map<String, dynamic> toJson() => {
+        'modo': modo.name,
+        'url': url,
+        'enlace': ?enlace,
+        if (red case final r?) 'red': {'ssid': r.ssid, 'clave': r.clave, 'seguridad': r.seguridad},
+      };
+
+  Conexion copyWith({String? enlace}) => Conexion(modo: modo, url: url, enlace: enlace ?? this.enlace, red: red);
 }
 
 class Sesion {

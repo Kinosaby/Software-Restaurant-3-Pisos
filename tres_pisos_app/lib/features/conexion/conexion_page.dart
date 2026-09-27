@@ -384,6 +384,20 @@ class _FormularioEnlaceState extends ConsumerState<_FormularioEnlace> {
 
     setState(() => _ocupado = true);
     try {
+      // Central sin router: primero hay que unirse a su red Wi-Fi.
+      if (datos.red case final red?) {
+        mostrarMensaje(context, 'Conectando a la red "${red.ssid}" de la central…');
+        try {
+          await Plataforma.conectarRed(red);
+        } on PlatformException catch (e) {
+          if (mounted) mostrarMensaje(context, e.message ?? 'No se pudo unir a la red de la central.', error: true);
+          return;
+        }
+      } else {
+        // Por si antes estaba unida a la red propia de otra central.
+        await Plataforma.desconectarRed();
+      }
+      if (!mounted) return;
       ApiException? ultimoError;
       for (final url in datos.urls) {
         try {
@@ -391,7 +405,7 @@ class _FormularioEnlaceState extends ConsumerState<_FormularioEnlace> {
           if (!mounted) return;
           await ref
               .read(conexionProvider.notifier)
-              .usar(Conexion(modo: ModoConexion.enlazada, url: url, enlace: datos.codigo));
+              .usar(Conexion(modo: ModoConexion.enlazada, url: url, enlace: datos.codigo, red: datos.red));
           if (mounted) context.go('/login');
           return;
         } on ApiException catch (e) {
@@ -438,6 +452,8 @@ class _FormularioEnlaceState extends ConsumerState<_FormularioEnlace> {
     final url = host.contains(':') ? normalizarServidor(host) : 'http://$host:$puertoCentral';
     setState(() => _ocupado = true);
     try {
+      // Sin QR no hay datos de red propia: se usa la red a la que esté conectada la tablet.
+      await Plataforma.desconectarRed();
       await ApiClient(servidor: url, enlace: codigo).get('/api/central/info');
       if (!mounted) return;
       if (!await _salirDeCentral(context, ref)) return;

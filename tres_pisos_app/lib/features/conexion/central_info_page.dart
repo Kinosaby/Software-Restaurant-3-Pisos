@@ -9,6 +9,7 @@ import '../../core/tema.dart';
 import '../../core/widgets.dart';
 import 'central_local.dart';
 import 'enlace_qr.dart';
+import 'red_propia.dart';
 
 final _ipsProvider = FutureProvider.autoDispose<List<String>>((ref) => ipsLocales());
 
@@ -57,10 +58,33 @@ class _CentralInfoPageState extends ConsumerState<CentralInfoPage> {
     }
   }
 
+  Future<void> _redPropia(bool encender) async {
+    final notifier = ref.read(redPropiaProvider.notifier);
+    if (!encender) {
+      final ok = await confirmar(
+        context,
+        titulo: 'Apagar la red propia',
+        mensaje: 'Las tablets de los meseros conectadas a esta red perderán la conexión. '
+            'Úsalo solo si ya tienen un router.',
+        accion: 'Apagar',
+        destructiva: true,
+      );
+      if (ok) await notifier.apagar();
+      return;
+    }
+    await notifier.encender();
+    final estado = ref.read(redPropiaProvider);
+    if (estado.hasError && mounted) {
+      final e = estado.error;
+      mostrarMensaje(context, e is PlatformException ? (e.message ?? '$e') : '$e', error: true);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final local = ref.watch(centralLocalProvider);
     final ips = ref.watch(_ipsProvider);
+    final red = ref.watch(redPropiaProvider);
     final texto = Theme.of(context).textTheme;
 
     return Scaffold(
@@ -92,6 +116,7 @@ class _CentralInfoPageState extends ConsumerState<CentralInfoPage> {
                                 puerto: local.servidor.puertoEnUso,
                                 codigo: local.central.codigoEnlace,
                                 nombre: local.central.nombre,
+                                red: red.value,
                               ).uri.toString(),
                             ),
                           ),
@@ -103,7 +128,8 @@ class _CentralInfoPageState extends ConsumerState<CentralInfoPage> {
                           loading: () => const LinearProgressIndicator(),
                           error: (_, _) => const Text('No se pudo leer la IP'),
                           data: (lista) => lista.isEmpty
-                              ? const Text('Sin Wi-Fi. Conecta la tablet a la red del restaurante.',
+                              ? const Text(
+                                  'Sin Wi-Fi. Conecta la tablet a la red del restaurante o activa "Trabajar sin router".',
                                   style: TextStyle(color: Colores.peligro))
                               : Wrap(
                                   spacing: 12,
@@ -135,6 +161,47 @@ class _CentralInfoPageState extends ConsumerState<CentralInfoPage> {
                             ),
                           ],
                         ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SwitchListTile(
+                          secondary: const Icon(Icons.wifi_tethering, color: Colores.acento),
+                          title: const Text('Trabajar sin router'),
+                          subtitle: const Text(
+                            'Esta tablet crea su propia red Wi-Fi: sin router, sin internet y sin datos. '
+                            'Los meseros se unen escaneando el QR.',
+                            style: TextStyle(color: Colores.apagado),
+                          ),
+                          value: red.value != null,
+                          onChanged: red.isLoading ? null : _redPropia,
+                        ),
+                        if (red.isLoading) const LinearProgressIndicator(),
+                        if (red.value case final r?)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Red: ${r.ssid}', style: texto.titleMedium),
+                                SelectableText('Contraseña: ${r.clave}'),
+                                const SizedBox(height: 6),
+                                const Text(
+                                  'Android cambia el nombre y la contraseña cada vez que se crea la red '
+                                  '(por ejemplo, si se reinicia esta tablet o la app). Entonces cada mesero '
+                                  'vuelve a escanear el QR; sus pedidos pendientes no se pierden.',
+                                  style: TextStyle(color: Colores.apagado),
+                                ),
+                              ],
+                            ),
+                          ),
                       ],
                     ),
                   ),

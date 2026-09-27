@@ -3,6 +3,15 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+/// Red Wi-Fi propia de la central (sin router): nombre, contraseña y seguridad ("wpa2"/"wpa3").
+typedef RedWifi = ({String ssid, String clave, String seguridad});
+
+RedWifi? _redDe(Map<Object?, Object?>? datos) {
+  final ssid = datos?['ssid'], clave = datos?['clave'];
+  if (ssid is! String || clave is! String) return null;
+  return (ssid: ssid, clave: clave, seguridad: datos?['seguridad'] == 'wpa3' ? 'wpa3' : 'wpa2');
+}
+
 /// Funciones de Android expuestas por `MainActivity` (canal "tres_pisos/plataforma").
 /// Todas fallan en silencio: un aviso que no suena no debe romper el flujo del pedido.
 abstract final class Plataforma {
@@ -61,6 +70,32 @@ abstract final class Plataforma {
 
   /// Abre el diálogo del sistema para excluir la app del ahorro de batería.
   static Future<void> pedirSinRestriccionBateria() => _llamar('pedirSinRestriccionBateria');
+
+  /// Central: crea su propia red Wi-Fi (sin router, internet ni datos). Android elige
+  /// nombre y contraseña. Lanza [PlatformException] con el motivo en español si no puede.
+  static Future<RedWifi> crearRedPropia() async {
+    final red = _redDe(await _canal.invokeMapMethod<Object?, Object?>('redPropia', {'activa': true}));
+    if (red == null) throw PlatformException(code: 'RED', message: 'Android no devolvió los datos de la red.');
+    return red;
+  }
+
+  static Future<void> apagarRedPropia() => _llamar('redPropia', {'activa': false});
+
+  /// Red propia que ya está encendida, o `null`.
+  static Future<RedWifi?> redPropiaActual() async {
+    try {
+      return _redDe(await _canal.invokeMapMethod<Object?, Object?>('redPropiaActual'));
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  /// Mesero: se une a la red propia de la central y la app la usa para hablar con ella.
+  /// Lanza [PlatformException] con el motivo si no lo logra.
+  static Future<void> conectarRed(RedWifi red) =>
+      _canal.invokeMethod<bool>('conectarRed', {'ssid': red.ssid, 'clave': red.clave, 'seguridad': red.seguridad});
+
+  static Future<void> desconectarRed() => _llamar('desconectarRed');
 
   /// Escanea un QR con el escáner de Google Play Services. `null` si se cancela;
   /// lanza [PlatformException] si el escáner no está disponible en la tablet.
