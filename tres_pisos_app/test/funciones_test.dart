@@ -40,12 +40,35 @@ Pedido pedido({
 void main() {
   group('para llevar dentro de la nota', () {
     test('se lee y se compone igual que en la web', () {
-      expect(leerNota('[LLEVAR] sin cebolla'), (llevar: true, nota: 'sin cebolla'));
-      expect(leerNota('[LLEVAR]'), (llevar: true, nota: null));
-      expect(leerNota('sin cebolla'), (llevar: false, nota: 'sin cebolla'));
+      (bool, String?) leer(String? nota) => (leerNota(nota).llevar, leerNota(nota).nota);
+      expect(leer('[LLEVAR] sin cebolla'), (true, 'sin cebolla'));
+      expect(leer('[LLEVAR]'), (true, null));
+      expect(leer('sin cebolla'), (false, 'sin cebolla'));
       expect(componerNota(llevar: true, nota: ' dorados '), '[LLEVAR] dorados');
       expect(componerNota(llevar: true), '[LLEVAR]');
       expect(componerNota(llevar: false, nota: '  '), isNull);
+    });
+
+    test('salsa y verdura aparte viajan al inicio de la nota como texto', () {
+      expect(componerNota(llevar: false, apartes: {Aparte.verdura, Aparte.salsa}, nota: 'sin cebolla'),
+          'Salsa aparte · Verdura aparte · sin cebolla');
+      expect(componerNota(llevar: true, apartes: {Aparte.salsa}), '[LLEVAR] Salsa aparte');
+
+      final leida = leerNota('[LLEVAR] Salsa aparte · Verdura aparte · sin cebolla');
+      expect(leida.llevar, isTrue);
+      expect(leida.apartes, {Aparte.salsa, Aparte.verdura});
+      expect(leida.nota, 'sin cebolla');
+      // Una nota que solo menciona la salsa en medio del texto no se toma como opción.
+      expect(leerNota('bien dorado · Salsa aparte').apartes, isEmpty);
+      expect(leerNota('Salsa aparte').nota, isNull);
+    });
+
+    test('las opciones aparte solo se mandan en lo que va para llevar', () {
+      const producto = Producto(id: 4, nombre: 'Tacos', precio: 18, categoria: 'Tacos', activo: true);
+      const linea = LineaCarrito(producto: producto, apartes: {Aparte.salsa}, nota: 'sin cebolla');
+      expect(linea.toJson()['nota'], 'sin cebolla', reason: 'pedido para aquí');
+      expect(linea.toJson(pedidoParaLlevar: true)['nota'], 'Salsa aparte · sin cebolla');
+      expect(linea.copyWith(llevar: true).toJson()['nota'], '[LLEVAR] Salsa aparte · sin cebolla');
     });
 
     test('la línea del carrito manda la marca en la nota', () {

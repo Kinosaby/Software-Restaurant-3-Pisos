@@ -132,6 +132,10 @@ class _CapturaPedidoPageState extends ConsumerState<CapturaPedidoPage> {
       showDragHandle: true,
       builder: (_) => _HojaCarrito(
         textoBoton: _esNuevo ? 'Enviar a cocina' : 'Agregar al pedido',
+        paraLlevar: _esNuevo
+            ? _tipo == TipoPedido.llevar
+            : ref.read(pedidosActivosProvider).value?.where((p) => p.id == widget.pedidoId).firstOrNull?.tipo ==
+                TipoPedido.llevar,
         onEnviar: () {
           Navigator.pop(context);
           _enviar();
@@ -465,10 +469,13 @@ class _TarjetaProducto extends ConsumerWidget {
 
 /// Resumen antes de enviar, agrupado por comensal cuando hay varios.
 class _HojaCarrito extends ConsumerWidget {
-  const _HojaCarrito({required this.textoBoton, required this.onEnviar});
+  const _HojaCarrito({required this.textoBoton, required this.onEnviar, required this.paraLlevar});
 
   final String textoBoton;
   final VoidCallback onEnviar;
+
+  /// En pedidos para llevar cada producto ofrece salsa y verdura aparte.
+  final bool paraLlevar;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -511,34 +518,54 @@ class _HojaCarrito extends ConsumerWidget {
                         ListTile(
                           contentPadding: EdgeInsets.zero,
                           title: Text(linea.producto.nombre),
-                          subtitle: GestureDetector(
-                            onTap: () async {
-                              final nota = await _pedirTexto(
-                                context,
-                                titulo: 'Nota para ${linea.producto.nombre}',
-                                inicial: linea.nota,
-                                pista: 'Ej. sin cebolla, bien dorado',
-                              );
-                              if (nota != null) carrito.fijarNota(linea.producto.id, nota, en: i);
-                            },
-                            child: Text(
-                              [if (linea.llevar) 'Para llevar', linea.nota ?? '+ Agregar nota'].join(' · '),
-                              style: TextStyle(
-                                color: linea.nota == null && !linea.llevar ? Colores.apagado : Colores.dorado,
-                                fontStyle: linea.nota == null ? null : FontStyle.italic,
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              GestureDetector(
+                                onTap: () async {
+                                  final nota = await _pedirTexto(
+                                    context,
+                                    titulo: 'Nota para ${linea.producto.nombre}',
+                                    inicial: linea.nota,
+                                    pista: 'Ej. sin cebolla, bien dorado',
+                                  );
+                                  if (nota != null) carrito.fijarNota(linea.producto.id, nota, en: i);
+                                },
+                                child: Text(
+                                  [if (linea.llevar) 'Para llevar', linea.nota ?? '+ Agregar nota'].join(' · '),
+                                  style: TextStyle(
+                                    color: linea.nota == null && !linea.llevar ? Colores.apagado : Colores.dorado,
+                                    fontStyle: linea.nota == null ? null : FontStyle.italic,
+                                  ),
+                                ),
                               ),
-                            ),
+                              if (paraLlevar || linea.llevar)
+                                Wrap(
+                                  spacing: 6,
+                                  children: [
+                                    for (final aparte in Aparte.values)
+                                      FilterChip(
+                                        label: Text(aparte.etiqueta),
+                                        visualDensity: VisualDensity.compact,
+                                        selected: linea.apartes.contains(aparte),
+                                        onSelected: (_) => carrito.alternarAparte(linea.producto.id, aparte, en: i),
+                                      ),
+                                  ],
+                                ),
+                            ],
                           ),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              IconButton(
-                                tooltip: linea.llevar ? 'Quitar "para llevar"' : 'Empacar para llevar',
-                                isSelected: linea.llevar,
-                                icon: const Icon(Icons.takeout_dining_outlined),
-                                selectedIcon: const Icon(Icons.takeout_dining, color: Colores.dorado),
-                                onPressed: () => carrito.alternarLlevar(linea.producto.id, en: i),
-                              ),
+                              // En un pedido para llevar todo se empaca: el botón sobra.
+                              if (!paraLlevar || linea.llevar)
+                                IconButton(
+                                  tooltip: linea.llevar ? 'Quitar "para llevar"' : 'Empacar para llevar',
+                                  isSelected: linea.llevar,
+                                  icon: const Icon(Icons.takeout_dining_outlined),
+                                  selectedIcon: const Icon(Icons.takeout_dining, color: Colores.dorado),
+                                  onPressed: () => carrito.alternarLlevar(linea.producto.id, en: i),
+                                ),
                               IconButton(
                                 tooltip: 'Quitar uno',
                                 icon: Icon(linea.cantidad == 1 ? Icons.delete_outline : Icons.remove),

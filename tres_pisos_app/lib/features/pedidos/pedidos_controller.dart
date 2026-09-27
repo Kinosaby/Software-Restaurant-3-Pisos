@@ -159,7 +159,7 @@ class PedidosActivos extends AsyncNotifier<List<Pedido>> {
   Future<ResultadoEnvio> agregar(Pedido pedido, List<LineaCarrito> lineas) => _enviar(
         tipo: 'agregar',
         pedidoId: pedido.id,
-        cuerpo: PedidosRepository.cuerpoAgregar(lineas),
+        cuerpo: PedidosRepository.cuerpoAgregar(lineas, paraLlevar: pedido.tipo == TipoPedido.llevar),
         lineas: lineas,
         resumen: 'Agregar a ${pedido.titulo} (#${pedido.id})',
       );

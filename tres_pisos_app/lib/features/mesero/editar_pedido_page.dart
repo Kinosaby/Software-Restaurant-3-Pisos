@@ -110,10 +110,20 @@ class _EditarPedidoPageState extends ConsumerState<EditarPedidoPage> {
     );
     controller.dispose();
     if (nota == null) return;
-    // Se conserva la marca de "para llevar", que viaja dentro de la nota.
+    // Se conservan la marca de "para llevar" y lo que va aparte, que viajan dentro de la nota.
     setState(() => _renglones[item.detalleId] = (
           cantidad: _renglones[item.detalleId]!.cantidad,
-          nota: componerNota(llevar: actual.llevar, nota: nota),
+          nota: componerNota(llevar: actual.llevar, apartes: actual.apartes, nota: nota),
+        ));
+  }
+
+  void _alternarAparte(PedidoItem item, Aparte aparte) {
+    final renglon = _renglones[item.detalleId]!;
+    final actual = leerNota(renglon.nota);
+    final apartes = actual.apartes.contains(aparte) ? ({...actual.apartes}..remove(aparte)) : {...actual.apartes, aparte};
+    setState(() => _renglones[item.detalleId] = (
+          cantidad: renglon.cantidad,
+          nota: componerNota(llevar: actual.llevar, apartes: apartes, nota: actual.nota),
         ));
   }
 
@@ -263,18 +273,37 @@ class _EditarPedidoPageState extends ConsumerState<EditarPedidoPage> {
             ? const TextStyle(decoration: TextDecoration.lineThrough, color: Colores.apagado)
             : null,
       ),
-      subtitle: GestureDetector(
-        onTap: quitado ? null : () => _editarNota(item),
-        child: Text(
-          [
-            if (leerNota(editado.nota).llevar) 'Para llevar',
-            leerNota(editado.nota).nota ?? (quitado ? 'Se quitará del pedido' : '+ Agregar nota'),
-          ].join(' · '),
-          style: TextStyle(
-            color: editado.nota == null ? Colores.apagado : Colores.dorado,
-            fontStyle: editado.nota == null ? null : FontStyle.italic,
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          GestureDetector(
+            onTap: quitado ? null : () => _editarNota(item),
+            child: Text(
+              [
+                if (leerNota(editado.nota).llevar) 'Para llevar',
+                leerNota(editado.nota).nota ?? (quitado ? 'Se quitará del pedido' : '+ Agregar nota'),
+              ].join(' · '),
+              style: TextStyle(
+                color: editado.nota == null ? Colores.apagado : Colores.dorado,
+                fontStyle: editado.nota == null ? null : FontStyle.italic,
+              ),
+            ),
           ),
-        ),
+          // Salsa y verdura aparte, solo en lo que se empaca para llevar.
+          if (!quitado && (_tipo == TipoPedido.llevar || leerNota(editado.nota).llevar))
+            Wrap(
+              spacing: 6,
+              children: [
+                for (final aparte in Aparte.values)
+                  FilterChip(
+                    label: Text(aparte.etiqueta),
+                    visualDensity: VisualDensity.compact,
+                    selected: leerNota(editado.nota).apartes.contains(aparte),
+                    onSelected: (_) => _alternarAparte(item, aparte),
+                  ),
+              ],
+            ),
+        ],
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,

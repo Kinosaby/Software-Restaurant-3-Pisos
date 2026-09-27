@@ -256,17 +256,14 @@ class _FormularioCentralState extends ConsumerState<_FormularioCentral> {
             validator: (v) => (v?.trim().length ?? 0) < 3 ? 'Mínimo 3 caracteres' : null,
           ),
           const SizedBox(height: 10),
-          TextFormField(
+          CampoPassword(
             controller: _password,
-            obscureText: true,
-            decoration: const InputDecoration(labelText: 'Contraseña'),
             validator: (v) => (v?.length ?? 0) < 6 ? 'Mínimo 6 caracteres' : null,
           ),
           const SizedBox(height: 10),
-          TextFormField(
+          CampoPassword(
             controller: _confirmacion,
-            obscureText: true,
-            decoration: const InputDecoration(labelText: 'Repite la contraseña'),
+            etiqueta: 'Repite la contraseña',
             validator: (v) => v != _password.text ? 'No coincide' : null,
           ),
           const SizedBox(height: 16),

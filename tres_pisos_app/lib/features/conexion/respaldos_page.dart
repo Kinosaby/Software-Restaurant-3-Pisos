@@ -49,19 +49,16 @@ Future<String?> pedirPasswordRespaldo(BuildContext context, {required bool nueva
                   style: TextStyle(color: Colores.apagado),
                 ),
               ),
-            TextFormField(
+            CampoPassword(
               controller: password,
-              obscureText: true,
               autofocus: true,
-              decoration: const InputDecoration(labelText: 'Contraseña'),
               validator: (v) => nueva && (v?.length ?? 0) < 8 ? 'Mínimo 8 caracteres' : null,
             ),
             if (nueva) ...[
               const SizedBox(height: 10),
-              TextFormField(
+              CampoPassword(
                 controller: confirmacion,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: 'Repite la contraseña'),
+                etiqueta: 'Repite la contraseña',
                 validator: (v) => v != password.text ? 'No coincide' : null,
               ),
             ],

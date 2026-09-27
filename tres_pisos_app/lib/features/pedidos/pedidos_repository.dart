@@ -48,11 +48,11 @@ class PedidosRepository {
         'mesa': mesa,
         'tipo': tipo.name,
         if (comensal != null && comensal.trim().isNotEmpty) 'comensal': comensal.trim(),
-        'productos': [for (final l in lineas) l.toJson()],
+        'productos': [for (final l in lineas) l.toJson(pedidoParaLlevar: tipo == TipoPedido.llevar)],
       };
 
-  static Map<String, dynamic> cuerpoAgregar(List<LineaCarrito> lineas) => {
-        'productos': [for (final l in lineas) l.toJson()],
+  static Map<String, dynamic> cuerpoAgregar(List<LineaCarrito> lineas, {bool paraLlevar = false}) => {
+        'productos': [for (final l in lineas) l.toJson(pedidoParaLlevar: paraLlevar)],
       };
 
   /// [operacion] permite reintentar sin duplicar (la central la reconoce).

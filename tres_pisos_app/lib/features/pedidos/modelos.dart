@@ -17,15 +17,41 @@ String? leerTextoOpcional(Object? valor) {
 /// Prefijo con el que la web marca un producto para llevar dentro de un pedido para aquí.
 const prefijoLlevar = '[LLEVAR]';
 
-/// Separa la marca de "para llevar" del texto de la nota.
-({bool llevar, String? nota}) leerNota(String? nota) {
-  if (nota == null || !nota.startsWith(prefijoLlevar)) return (llevar: false, nota: nota);
-  return (llevar: true, nota: leerTextoOpcional(nota.substring(prefijoLlevar.length)));
+/// Lo que se empaca por separado en un pedido para llevar. Viaja al inicio de la
+/// nota como texto legible ("Salsa aparte · Verdura aparte · sin cebolla"), así
+/// que cocina, el ticket y la web lo ven sin cambios en el servidor.
+enum Aparte {
+  salsa('Salsa aparte'),
+  verdura('Verdura aparte');
+
+  const Aparte(this.etiqueta);
+  final String etiqueta;
+}
+
+const _separadorNota = ' · ';
+
+/// Separa la marca de "para llevar" y las opciones [Aparte] del texto de la nota.
+({bool llevar, Set<Aparte> apartes, String? nota}) leerNota(String? nota) {
+  final llevar = nota != null && nota.startsWith(prefijoLlevar);
+  final resto = llevar ? nota.substring(prefijoLlevar.length) : nota;
+  final partes = (leerTextoOpcional(resto) ?? '').split(_separadorNota);
+  final apartes = <Aparte>{};
+  var i = 0;
+  for (; i < partes.length; i++) {
+    final aparte = Aparte.values.where((a) => a.etiqueta == partes[i].trim()).firstOrNull;
+    if (aparte == null) break;
+    apartes.add(aparte);
+  }
+  return (llevar: llevar, apartes: apartes, nota: leerTextoOpcional(partes.skip(i).join(_separadorNota)));
 }
 
 /// Inverso de [leerNota]: la nota tal como la guarda el servidor.
-String? componerNota({required bool llevar, String? nota}) {
-  final texto = leerTextoOpcional(nota);
+String? componerNota({required bool llevar, Set<Aparte> apartes = const {}, String? nota}) {
+  final texto = leerTextoOpcional([
+    for (final a in Aparte.values)
+      if (apartes.contains(a)) a.etiqueta,
+    ?leerTextoOpcional(nota),
+  ].join(_separadorNota));
   if (!llevar) return texto;
   return texto == null ? prefijoLlevar : '$prefijoLlevar $texto';
 }
@@ -137,6 +163,7 @@ class PedidoItem {
 
   double get subtotal => precio * cantidad;
   bool get llevar => leerNota(nota).llevar;
+  Set<Aparte> get apartes => leerNota(nota).apartes;
   String? get notaVisible => leerNota(nota).nota;
   bool get extraPendiente => extraDesde != null;
 
@@ -369,7 +396,13 @@ class Opcional<T> {
 
 /// Línea del pedido que el mesero está armando, antes de enviarlo.
 class LineaCarrito {
-  const LineaCarrito({required this.producto, this.cantidad = 1, this.nota, this.llevar = false});
+  const LineaCarrito({
+    required this.producto,
+    this.cantidad = 1,
+    this.nota,
+    this.llevar = false,
+    this.apartes = const {},
+  });
 
   final Producto producto;
   final int cantidad;
@@ -380,17 +413,28 @@ class LineaCarrito {
   /// Este producto se empaca para llevar aunque el pedido sea para aquí.
   final bool llevar;
 
+  /// Salsa o verdura aparte (solo para lo que se empaca para llevar).
+  final Set<Aparte> apartes;
+
   double get subtotal => producto.precio * cantidad;
 
-  LineaCarrito copyWith({int? cantidad, String? nota, bool borrarNota = false, bool? llevar}) => LineaCarrito(
+  LineaCarrito copyWith({int? cantidad, String? nota, bool borrarNota = false, bool? llevar, Set<Aparte>? apartes}) =>
+      LineaCarrito(
         producto: producto,
         cantidad: cantidad ?? this.cantidad,
         nota: borrarNota ? null : (nota ?? this.nota),
         llevar: llevar ?? this.llevar,
+        apartes: apartes ?? this.apartes,
       );
 
-  Map<String, dynamic> toJson() {
-    final nota = componerNota(llevar: llevar, nota: this.nota);
+  /// [pedidoParaLlevar]: las opciones "aparte" solo se mandan si el producto
+  /// se empaca (pedido para llevar o producto marcado para llevar).
+  Map<String, dynamic> toJson({bool pedidoParaLlevar = false}) {
+    final nota = componerNota(
+      llevar: llevar,
+      apartes: pedidoParaLlevar || llevar ? apartes : const {},
+      nota: this.nota,
+    );
     return {'producto_id': producto.id, 'cantidad': cantidad, 'nota': ?nota};
   }
 }

@@ -97,6 +97,18 @@ class Carrito extends Notifier<EstadoCarrito> {
         ]);
   }
 
+  void alternarAparte(int productoId, Aparte aparte, {int? en}) {
+    _editar(en, (lineas) => [
+          for (final linea in lineas)
+            if (linea.producto.id == productoId)
+              linea.copyWith(
+                apartes: linea.apartes.contains(aparte) ? ({...linea.apartes}..remove(aparte)) : {...linea.apartes, aparte},
+              )
+            else
+              linea,
+        ]);
+  }
+
   /// Carga una plantilla (p. ej. "repetir pedido"): reemplaza al comensal activo.
   void cargar(List<LineaCarrito> lineas) => _editar(null, (_) => [...lineas]);
 
@@ -152,7 +164,13 @@ class PlantillaPedido {
       lineas: [
         for (final i in pedido.items)
           if (porId[i.productoId] case final producto?)
-            LineaCarrito(producto: producto, cantidad: i.cantidad, nota: i.notaVisible, llevar: i.llevar),
+            LineaCarrito(
+              producto: producto,
+              cantidad: i.cantidad,
+              nota: i.notaVisible,
+              llevar: i.llevar,
+              apartes: i.apartes,
+            ),
       ],
     );
   }

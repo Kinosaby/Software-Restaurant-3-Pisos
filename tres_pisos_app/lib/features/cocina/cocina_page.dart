@@ -265,6 +265,9 @@ class _TarjetaGrupo extends ConsumerWidget {
             const Divider(height: 16),
             Expanded(
               child: ListView(
+                // Sin esto la lista de cada tarjeta atrapaba el dedo aunque todo
+                // cupiera, y la pantalla de cocina no se podía desplazar.
+                primary: false,
                 children: [
                   for (final p in grupo.pedidos) ...[
                     Row(

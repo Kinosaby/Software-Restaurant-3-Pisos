@@ -64,6 +64,20 @@ class RenglonItem extends StatelessWidget {
                       Text('Para llevar', style: TextStyle(color: Colores.acento, fontWeight: FontWeight.w600)),
                     ],
                   ),
+                if (item.apartes.isNotEmpty)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.inventory_2_outlined, size: 16, color: Colores.acento),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          item.apartes.map((a) => a.etiqueta).join(' · '),
+                          style: const TextStyle(color: Colores.acento, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
                 // En cocina ya van en su tarjeta de extra; al mesero le avisa qué falta.
                 if (item.extraPendiente && !grande)
                   const Row(

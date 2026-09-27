@@ -7,6 +7,48 @@ import '../features/pedidos/pedidos_controller.dart';
 import '../features/pedidos/tiempo_real.dart';
 import 'tema.dart';
 
+/// Campo de contraseña con el botón del ojo para revisar lo que se escribió.
+class CampoPassword extends StatefulWidget {
+  const CampoPassword({
+    super.key,
+    required this.controller,
+    this.etiqueta = 'Contraseña',
+    this.ayuda,
+    this.autofocus = false,
+    this.validator,
+  });
+
+  final TextEditingController controller;
+  final String etiqueta;
+  final String? ayuda;
+  final bool autofocus;
+  final FormFieldValidator<String>? validator;
+
+  @override
+  State<CampoPassword> createState() => _CampoPasswordState();
+}
+
+class _CampoPasswordState extends State<CampoPassword> {
+  bool _ver = false;
+
+  @override
+  Widget build(BuildContext context) => TextFormField(
+        controller: widget.controller,
+        obscureText: !_ver,
+        autofocus: widget.autofocus,
+        decoration: InputDecoration(
+          labelText: widget.etiqueta,
+          helperText: widget.ayuda,
+          suffixIcon: IconButton(
+            tooltip: _ver ? 'Ocultar' : 'Mostrar',
+            icon: Icon(_ver ? Icons.visibility_off : Icons.visibility),
+            onPressed: () => setState(() => _ver = !_ver),
+          ),
+        ),
+        validator: widget.validator,
+      );
+}
+
 void mostrarMensaje(BuildContext context, String mensaje, {bool error = false}) {
   final messenger = ScaffoldMessenger.of(context);
   messenger

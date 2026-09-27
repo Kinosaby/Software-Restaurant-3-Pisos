@@ -168,13 +168,9 @@ class _FormularioUsuarioState extends ConsumerState<_FormularioUsuario> {
                 },
               ),
               const SizedBox(height: 8),
-              TextFormField(
+              CampoPassword(
                 controller: _password,
-                obscureText: true,
-                decoration: InputDecoration(
-                  labelText: 'Contraseña',
-                  helperText: _editando ? 'Déjala vacía para no cambiarla' : null,
-                ),
+                ayuda: _editando ? 'Déjala vacía para no cambiarla' : null,
                 validator: (v) {
                   final t = v ?? '';
                   if (_editando && t.isEmpty) return null;

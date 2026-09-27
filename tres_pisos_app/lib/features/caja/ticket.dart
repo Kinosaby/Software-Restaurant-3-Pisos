@@ -104,8 +104,11 @@ class TicketVista extends StatelessWidget {
                   '${i.compartido == null ? '' : ' (${i.compartido!.parte}/${i.compartido!.partes})'}',
                   dinero(i.subtotal),
                 ),
-                if (i.notaVisible != null)
-                  Text('   ${i.notaVisible}', style: base.copyWith(color: gris, fontSize: 12)),
+                if (i.apartes.isNotEmpty || i.notaVisible != null)
+                  Text(
+                    '   ${[for (final a in i.apartes) a.etiqueta, ?i.notaVisible].join(' · ')}',
+                    style: base.copyWith(color: gris, fontSize: 12),
+                  ),
               ],
               if (pedidos.length > 1) linea('Subtotal', dinero(p.total), estilo: base.copyWith(color: gris)),
             ],
