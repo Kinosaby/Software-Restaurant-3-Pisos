@@ -24,6 +24,15 @@ class CapturaPedidoPage extends ConsumerStatefulWidget {
   ConsumerState<CapturaPedidoPage> createState() => _CapturaPedidoPageState();
 }
 
+/// Pregunta antes de salir de la captura con productos sin enviar.
+Future<bool> confirmarDescartePedido(BuildContext context) => confirmar(
+      context,
+      titulo: '¿Descartar el pedido?',
+      mensaje: 'Los productos que agregaste no se han enviado a cocina y se perderán.',
+      accion: 'Descartar',
+      destructiva: true,
+    );
+
 /// Categoría especial con lo más pedido desde esta tablet.
 const _frecuentes = '★ Frecuentes';
 
@@ -136,6 +145,19 @@ class _CapturaPedidoPageState extends ConsumerState<CapturaPedidoPage> {
     final productos = ref.watch(productosProvider);
     final todas = ref.watch(carritoProvider.select((e) => e.todasLasLineas));
 
+    // "Atrás" (AppBar, botón o gesto del sistema) con productos pide confirmación.
+    // Tras enviar con éxito se sale con context.pop(), que no pasa por aquí.
+    return PopScope(
+      canPop: todas.isEmpty,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        if (await confirmarDescartePedido(context) && context.mounted) Navigator.of(context).pop();
+      },
+      child: _pantalla(context, productos, todas),
+    );
+  }
+
+  Widget _pantalla(BuildContext context, AsyncValue<List<Producto>> productos, List<LineaCarrito> todas) {
     return Scaffold(
       appBar: AppBar(
         title: Text(_esNuevo ? 'Nuevo pedido' : 'Agregar al pedido #${widget.pedidoId}'),
