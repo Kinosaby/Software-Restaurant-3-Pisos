@@ -137,9 +137,21 @@ class _FormularioUsuarioState extends ConsumerState<_FormularioUsuario> {
   Widget build(BuildContext context) {
     final esYo = widget.usuario?.id == ref.watch(authControllerProvider)?.usuario.id;
 
+    // En horizontal con el teclado abierto queda muy poco alto: se recortan los márgenes
+    // y título + campos se desplazan juntos para que el campo activo siempre se vea.
+    final bajo = MediaQuery.sizeOf(context).height - MediaQuery.viewInsetsOf(context).bottom < 420;
+
     return AlertDialog(
+      scrollable: true,
+      insetPadding: bajo
+          ? const EdgeInsets.symmetric(horizontal: 40, vertical: 8)
+          : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+      titlePadding: bajo ? const EdgeInsets.fromLTRB(24, 12, 24, 0) : null,
+      contentPadding: bajo ? const EdgeInsets.fromLTRB(24, 8, 24, 0) : null,
+      actionsPadding: bajo ? const EdgeInsets.fromLTRB(24, 4, 24, 8) : null,
       title: Text(_editando ? 'Editar usuario' : 'Nuevo usuario'),
-      content: SingleChildScrollView(
+      content: SizedBox(
+        width: 400,
         child: Form(
           key: _form,
           child: Column(
