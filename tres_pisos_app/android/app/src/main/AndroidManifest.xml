@@ -3,6 +3,14 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Recibir los anuncios UDP con los que la central se da a conocer en el Wi-Fi. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- Tablet central: servicio en primer plano que mantiene vivo el servidor con la app
+         en segundo plano, CPU y Wi-Fi despiertos y exención del ahorro de batería. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- usesCleartextTraffic: la central de cocina y el servidor pueden estar en la red local por HTTP -->
     <application
         android:label="Tres Pisos"
@@ -42,6 +50,15 @@
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"
             android:value="barcode_ui" />
+        <!-- Central de cocina: servidor de la red local para las tablets de los meseros. -->
+        <service
+            android:name=".ServicioCentral"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Servidor de la red local del restaurante: las tablets de los meseros envían los pedidos a esta tablet (cocina) durante todo el turno." />
+        </service>
         <!-- Tickets compartidos desde la caché de la app. -->
         <provider
             android:name="androidx.core.content.FileProvider"

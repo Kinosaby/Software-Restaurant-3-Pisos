@@ -9,6 +9,7 @@ import '../auth/sesion.dart';
 import '../avisos/avisos.dart';
 import '../caja/caja_page.dart';
 import '../cocina/cocina_page.dart';
+import '../conexion/bateria_central.dart';
 import '../mesero/pedidos_page.dart';
 import '../pedidos/pedidos_controller.dart';
 
@@ -45,13 +46,16 @@ class InicioPage extends ConsumerWidget {
         ));
     });
 
-    return switch (rol) {
-      Rol.mesero => const PedidosPage(),
-      Rol.cocina => const CocinaPage(),
-      Rol.admin => const _InicioAdmin(),
-      // Sin sesión el router redirige al login; esto solo se ve durante la transición.
-      null => const Scaffold(),
-    };
+    // Solo en la central: pide una vez quitar la app del ahorro de batería.
+    return AvisoBateriaCentral(
+      child: switch (rol) {
+        Rol.mesero => const PedidosPage(),
+        Rol.cocina => const CocinaPage(),
+        Rol.admin => const _InicioAdmin(),
+        // Sin sesión el router redirige al login; esto solo se ve durante la transición.
+        null => const Scaffold(),
+      },
+    );
   }
 }
 
