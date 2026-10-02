@@ -186,6 +186,145 @@ void main() {
       expect(central.obtenerPedido(id)['total'], 42.0, reason: 'la venta cobrada no cambia');
     });
 
+    test('agregar a una cuenta que cocina ya empezó no se funde con lo que pudo tachar: va como extra', () async {
+      final mesero = await usuario('luis', 'mesero');
+      final cocina = await usuario('chef', 'cocina');
+      final id = (await central.crearPedido(pedidoDe(1), usuario: mesero))['id'] as int;
+      await central.cambiarEstado(id, 'preparando', usuario: cocina);
+
+      eventos.clear();
+      await central.agregarProductos(id, pedidoDe(1), usuario: mesero);
+      expect(eventos.map((e) => e.$1), ['extra_pedido', 'pedido_actualizado'], reason: 'cocina oye el aviso');
+      expect((eventos.first.$2['items'] as List).single, containsPair('cantidad', 1));
+      var items = central.obtenerPedido(id)['productos'] as List;
+      expect(items.map((i) => (i['cantidad'], i.containsKey('extra_desde'))), [(1, false), (1, true)]);
+      expect(items.map((i) => i['id']).toSet(), hasLength(2));
+
+      // Lo siguiente sí se suma al extra que cocina aún tiene pendiente, y vuelve a avisar.
+      eventos.clear();
+      await central.agregarProductos(id, pedidoDe(1, cantidad: 2), usuario: mesero);
+      expect(eventos.first.$1, 'extra_pedido');
+      expect(eventos.first.$2['total_extra'], 84.0);
+      items = central.obtenerPedido(id)['productos'] as List;
+      expect(items.map((i) => (i['cantidad'], i.containsKey('extra_desde'))), [(1, false), (3, true)]);
+
+      // Con el mismo producto en dos renglones, mover, el diario y el cobro siguen cuadrando.
+      final otra = (await central.crearPedido(pedidoDe(2), usuario: mesero))['id'] as int;
+      await central.moverProducto(id, {'detalle_id': items.last['id'], 'destino': otra, 'cantidad': 1});
+      expect(central.obtenerPedido(id)['total'], 126.0);
+      expect(central.obtenerPedido(otra)['total'], 64.0);
+
+      await central.cerrar();
+      central = await abrir();
+      items = central.obtenerPedido(id)['productos'] as List;
+      expect(items.map((i) => (i['cantidad'], i.containsKey('extra_desde'))), [(1, false), (2, true)]);
+      expect(central.obtenerPedido(id)['total'], 126.0);
+
+      await central.cambiarEstado(id, 'listo', usuario: cocina);
+      expect((central.obtenerPedido(id)['productos'] as List).any((i) => i.containsKey('extra_desde')), isFalse);
+      final cobrado = (await central.cobrar({'pedidos': [id], 'efectivo': 126})).single;
+      expect(cobrado['estado'], 'pagado');
+      expect(central.ventasPorDia(7).single['total'], 126.0);
+    });
+
+    test('agregar no se funde con un renglón ya servido: cocina lo ve aparte y se le avisa', () async {
+      final mesero = await usuario('luis', 'mesero');
+      final cocina = await usuario('chef', 'cocina');
+      final servida = await central.crearPedido(pedidoDe(1), usuario: mesero);
+      await central.cambiarEstado(servida['id'] as int, 'listo', usuario: cocina);
+      final id = (await central.crearPedido(pedidoDe(2), usuario: mesero))['id'] as int;
+      // El taco ya servido pasa a una cuenta que cocina aún no empieza.
+      await central.moverProducto(servida['id'] as int, {
+        'detalle_id': (servida['productos'] as List).single['id'],
+        'destino': id,
+      });
+      expect((central.obtenerPedido(id)['productos'] as List).last['servido'], isTrue);
+
+      eventos.clear();
+      await central.agregarProductos(id, pedidoDe(1), usuario: mesero);
+      expect(eventos.map((e) => e.$1), ['extra_pedido', 'pedido_actualizado']);
+      var items = central.obtenerPedido(id)['productos'] as List;
+      expect(
+        items.map((i) => (i['nombre'], i['cantidad'], i['servido'] == true, i.containsKey('extra_desde'))),
+        [('Refresco', 1, false, false), ('Tacos de Pastor', 1, true, false), ('Tacos de Pastor', 1, false, true)],
+      );
+
+      // Lo que cocina aún no empieza se sigue sumando en su renglón, sin aviso de extra.
+      eventos.clear();
+      await central.agregarProductos(id, pedidoDe(2), usuario: mesero);
+      expect(eventos.map((e) => e.$1), ['pedido_actualizado']);
+      items = central.obtenerPedido(id)['productos'] as List;
+      expect(items.first['cantidad'], 2);
+      expect(items, hasLength(3));
+      expect(central.obtenerPedido(id)['total'], 128.0);
+    });
+
+    test('una cuenta lista y sin cobrar se puede editar y cancelar', () async {
+      final mesero = await usuario('luis', 'mesero');
+      final cocina = await usuario('chef', 'cocina');
+      final pedido = await central.crearPedido({
+        'mesa': 2,
+        'productos': [
+          {'producto_id': 1, 'cantidad': 2},
+          {'producto_id': 2, 'cantidad': 1},
+        ],
+      }, usuario: mesero);
+      final id = pedido['id'] as int;
+      final items = pedido['productos'] as List;
+      await central.cambiarEstado(id, 'listo', usuario: cocina);
+
+      // Quitar algo o corregir la mesa no molesta a cocina.
+      eventos.clear();
+      var editado = await central.editarPedido(id, {
+        'mesa': 5,
+        'items': [
+          {'detalle_id': items[1]['id'], 'cantidad': 0},
+        ],
+      });
+      expect((editado['estado'], editado['mesa'], editado['total']), ('listo', 5, 84.0));
+      expect(eventos.map((e) => e.$1), ['pedido_actualizado']);
+
+      // Pedir más de algo ya servido: lo servido no cambia y la diferencia va a cocina como extra.
+      eventos.clear();
+      editado = await central.editarPedido(id, {
+        'items': [
+          {'detalle_id': items[0]['id'], 'cantidad': 3},
+        ],
+      });
+      expect(eventos.map((e) => e.$1), ['extra_pedido', 'pedido_actualizado']);
+      expect((eventos.first.$2['items'] as List).single, containsPair('cantidad', 1));
+      expect(
+        (editado['productos'] as List).map((i) => (i['cantidad'], i.containsKey('extra_desde'))),
+        [(2, false), (1, true)],
+      );
+      expect(editado['total'], 126.0);
+
+      // Cocina ya no la cancela, pero el mesero sí mientras no se cobre; no queda venta.
+      await expectLater(
+        central.cambiarEstado(id, 'cancelado', usuario: cocina),
+        throwsA(isA<ErrorCentral>().having((e) => e.status, 'status', 403)),
+      );
+      final cancelado = await central.cambiarEstado(id, 'cancelado', usuario: mesero);
+      expect(cancelado['estado'], 'cancelado');
+      expect(central.ventasPorDia(7), isEmpty);
+      await expectLater(
+        central.editarPedido(id, {'mesa': 9}),
+        throwsA(isA<ErrorCentral>().having((e) => e.codigo, 'codigo', 'INVALID_STATUS')),
+      );
+    });
+
+    test('una cuenta ya cobrada no se edita', () async {
+      final mesero = await usuario('luis', 'mesero');
+      final id = (await central.crearPedido(pedidoDe(1), usuario: mesero))['id'] as int;
+      await central.cobrar({'pedidos': [id], 'efectivo': 42});
+      await central.cambiarEstado(id, 'listo', usuario: mesero);
+      expect(central.obtenerPedido(id)['estado'], 'pagado');
+      await expectLater(
+        central.editarPedido(id, {'mesa': 9}),
+        throwsA(isA<ErrorCentral>().having((e) => e.codigo, 'codigo', 'INVALID_STATUS')),
+      );
+    });
+
     test('editar: quita renglones, cambia mesa y no deja el pedido vacío', () async {
       final mesero = await usuario('luis', 'mesero');
       final pedido = await central.crearPedido({

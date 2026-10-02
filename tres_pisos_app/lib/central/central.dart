@@ -163,8 +163,8 @@ class ItemCentral {
   final int cantidad;
   final String? nota;
 
-  /// Extra que se agregó cuando el pedido ya estaba listo y que cocina aún no
-  /// termina. Se borra cuando cocina vuelve a marcar el pedido como listo.
+  /// Extra que se agregó cuando cocina ya había empezado o terminado el pedido
+  /// y que aún no termina. Se borra cuando cocina marca el pedido como listo.
   final DateTime? extraDesde;
 
   /// Solo en los renglones que son parte de un platillo dividido entre cuentas.
@@ -994,8 +994,32 @@ class Central {
         return json;
       });
 
+  /// Un renglón sigue pendiente en cocina, así que se le puede sumar cantidad
+  /// sin que cocina la pierda de vista: no viene servido de otra cuenta y, si
+  /// cocina ya empezó o terminó la cuenta, es un extra que aún no termina. Los
+  /// demás renglones de una cuenta empezada pueden estar ya hechos o tachados
+  /// (las casillas viven en la tablet de cocina; la central no las conoce).
+  bool _pendienteEnCocina(PedidoCentral pedido, ItemCentral item) =>
+      !item.servido && (pedido.estado == 'pendiente' || item.extraDesde != null);
+
+  /// Aviso a cocina (`extra_pedido`) solo con lo nuevo de una cuenta que ya tenía.
+  void _avisarExtra(PedidoCentral pedido, List<ItemCentral> extras) {
+    if (extras.isEmpty) return;
+    emitir?.call('extra_pedido', {
+      'pedido_id': pedido.id,
+      'mesa': pedido.mesa,
+      'tipo': pedido.tipo,
+      'comensal': pedido.comensal,
+      'items': [
+        for (final n in extras) {'nombre': n.nombre, 'cantidad': n.cantidad, 'nota': n.nota, 'precio': n.precio},
+      ],
+      'total_extra': extras.fold<double>(0, (s, n) => s + n.precio * n.cantidad),
+    });
+  }
+
   /// Agrega productos. Sobre una cuenta ya cobrada (aunque siga en cocina) abre
-  /// una cuenta nueva; sobre una lista, avisa a cocina solo con lo nuevo (`extra_pedido`).
+  /// una cuenta nueva; sobre una que cocina ya empezó o terminó, lo nuevo va
+  /// como extra y se avisa a cocina solo con eso (`extra_pedido`).
   Future<Map<String, dynamic>> agregarProductos(
     int id,
     Map<String, dynamic> datos, {
@@ -1010,10 +1034,9 @@ class Central {
         if (pedido.estado == 'cancelado') {
           throw ErrorCentral(400, 'INVALID_STATUS', 'No se puede modificar un pedido cancelado.');
         }
-        // Sobre una cuenta cobrada se abre una nueva: ahí no son extras.
-        final esExtra = pedido.estado == 'listo' && !pedido.cobrado;
-        final nuevos = _numerar(_itemsNuevos(datos['productos']), extraDesde: esExtra ? _reloj() : null);
+        final nuevos = _numerar(_itemsNuevos(datos['productos']));
 
+        // Sobre una cuenta cobrada se abre una nueva: ahí no son extras.
         if (pedido.cobrado) {
           final cuenta = PedidoCentral(
             id: _siguiente('pedido'),
@@ -1035,19 +1058,29 @@ class Central {
           return json;
         }
 
-        // Mismo producto y misma nota se suman; con otra nota va en renglón aparte.
-        // Un extra no se mezcla con lo que cocina ya terminó: va en su propio
-        // renglón (marcado) hasta que cocina lo termine.
+        // Mismo producto, nota y precio se suman, pero solo a un renglón que
+        // cocina aún tiene pendiente; con otra nota va en renglón aparte.
+        // Lo nuevo no se mezcla con lo ya servido ni con lo que cocina ya empezó
+        // o terminó (ahí no lo vería): va en su propio renglón, marcado como
+        // extra hasta que cocina lo termine.
+        final empezada = pedido.estado != 'pendiente';
+        final ahora = _reloj();
         final items = [...pedido.items];
+        final extras = <ItemCentral>[];
         for (final nuevo in nuevos) {
           // Una parte de un platillo dividido tampoco se mezcla.
-          final i = items.indexWhere((x) =>
+          bool igual(ItemCentral x) =>
               x.compartido == null &&
               x.productoId == nuevo.productoId &&
               x.nota == nuevo.nota &&
-              (x.extraDesde != null) == esExtra);
+              x.precio == nuevo.precio;
+          final i = items.indexWhere((x) => igual(x) && _pendienteEnCocina(pedido, x));
           if (i >= 0) {
             items[i] = items[i].copyWith(cantidad: items[i].cantidad + nuevo.cantidad);
+            if (items[i].extraDesde != null) extras.add(nuevo);
+          } else if (empezada || items.any((x) => igual(x) && x.servido)) {
+            items.add(nuevo.copyWith(extraDesde: ahora));
+            extras.add(nuevo);
           } else {
             items.add(nuevo);
           }
@@ -1059,26 +1092,19 @@ class Central {
         ]);
 
         final json = actualizado.toJson();
-        if (esExtra) {
-          emitir?.call('extra_pedido', {
-            'pedido_id': id,
-            'mesa': pedido.mesa,
-            'tipo': pedido.tipo,
-            'comensal': pedido.comensal,
-            'items': [
-              for (final n in nuevos) {'nombre': n.nombre, 'cantidad': n.cantidad, 'nota': n.nota, 'precio': n.precio},
-            ],
-            'total_extra': nuevos.fold<double>(0, (s, n) => s + n.precio * n.cantidad),
-          });
-        }
+        _avisarExtra(pedido, extras);
         emitir?.call('pedido_actualizado', {...json, '_accion': 'productos_agregados'});
         return json;
       });
 
+  /// Edita una cuenta abierta, también cuando cocina ya la terminó (el cliente
+  /// se arrepiente o pide más después): mientras no se cobre se puede corregir.
+  /// Subir la cantidad de un renglón que cocina ya no tiene pendiente no lo
+  /// toca: la diferencia va en un renglón extra y se avisa a cocina.
   Future<Map<String, dynamic>> editarPedido(int id, Map<String, dynamic> datos) => _enSerie(() async {
         final pedido = _pedido(id);
-        if (pedido.estado != 'pendiente' && pedido.estado != 'preparando') {
-          throw ErrorCentral(400, 'INVALID_STATUS', 'Solo se pueden editar pedidos pendientes o en preparación.');
+        if (pedido.estado == 'pagado' || pedido.estado == 'cancelado') {
+          throw ErrorCentral(400, 'INVALID_STATUS', 'Solo se pueden editar cuentas que no se han cobrado ni cancelado.');
         }
         final cambios = datos['items'];
         if (pedido.pago != null && cambios is List && cambios.isNotEmpty) {
@@ -1090,6 +1116,7 @@ class Central {
         }
 
         var items = [...pedido.items];
+        final extras = <ItemCentral>[];
         if (cambios is List) {
           for (final c in cambios.cast<Map<String, dynamic>>()) {
             final detalleId = int.tryParse(c['detalle_id'].toString());
@@ -1103,10 +1130,29 @@ class Central {
                 throw ErrorCentral(400, 'SHARED_ITEM', 'Un producto dividido entre cuentas no puede cambiar de cantidad.');
               }
               final nota = _nota(c['nota']);
+              // Lo que se pide de más sobre algo que cocina ya hizo (o pudo
+              // tachar) va aparte como extra; si no, cocina no se enteraría.
+              final previo = items.where((i) => i.id == detalleId).firstOrNull;
+              final deMas = previo == null || _pendienteEnCocina(pedido, previo) ? 0 : cantidad - previo.cantidad;
               items = [
                 for (final i in items)
-                  if (i.id == detalleId) i.copyWith(cantidad: cantidad, nota: nota, borrarNota: nota == null) else i,
+                  if (i.id == detalleId)
+                    i.copyWith(cantidad: deMas > 0 ? i.cantidad : cantidad, nota: nota, borrarNota: nota == null)
+                  else
+                    i,
               ];
+              if (previo != null && deMas > 0) {
+                final extra = previo.copyWith(
+                  id: _siguiente('item'),
+                  cantidad: deMas,
+                  nota: nota,
+                  borrarNota: nota == null,
+                  extraDesde: _reloj(),
+                  servido: false,
+                );
+                items.add(extra);
+                extras.add(extra);
+              }
             }
           }
         }
@@ -1126,6 +1172,8 @@ class Central {
           for (final r in relevos) {'t': 'pedido', 'v': r.toJson()},
         ]);
         final json = actualizado.toJson();
+        // Solo lo que sigue en la cuenta: un extra quitado en el mismo cambio no se avisa.
+        _avisarExtra(actualizado, [for (final e in extras) if (items.any((i) => i.id == e.id)) e]);
         emitir?.call('pedido_actualizado', {...json, '_accion': 'pedido_editado'});
         for (final r in relevos) {
           emitir?.call('pedido_actualizado', {...r.toJson(), '_accion': 'parte_relevada'});

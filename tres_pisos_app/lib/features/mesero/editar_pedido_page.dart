@@ -31,7 +31,11 @@ int? mesaAlGuardar(Pedido original, TipoPedido tipo, String texto) {
   return mesa == null || mesa < 1 || mesa == mesaParaLlevar ? null : mesa;
 }
 
-/// Cambia cantidades, notas, mesa, tipo o comensal de un pedido que cocina aún no termina.
+/// La cuenta sigue abierta (en cocina o ya lista) y sin cobrar: aún se puede corregir.
+bool puedeEditarse(Pedido pedido) => pedido.estado.activo && !pedido.cobrado;
+
+/// Cambia cantidades, notas, mesa, tipo o comensal de una cuenta que aún no se cobra.
+/// Si cocina ya la empezó, lo que se pida de más le llega como extra.
 class EditarPedidoPage extends ConsumerStatefulWidget {
   const EditarPedidoPage({super.key, required this.pedidoId});
 
@@ -167,12 +171,12 @@ class _EditarPedidoPageState extends ConsumerState<EditarPedidoPage> {
   @override
   Widget build(BuildContext context) {
     final original = _original;
-    if (original == null || !original.estado.modificable) {
+    if (original == null || !puedeEditarse(original)) {
       return Scaffold(
         appBar: AppBar(title: Text('Editar pedido #${widget.pedidoId}')),
         body: const Vacio(
           icono: Icons.lock_outline,
-          mensaje: 'Solo se editan pedidos pendientes o en preparación',
+          mensaje: 'Solo se editan cuentas que no se han cobrado ni cancelado',
         ),
       );
     }

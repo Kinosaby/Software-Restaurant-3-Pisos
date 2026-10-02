@@ -15,6 +15,15 @@ import '../pedidos/widgets_pedido.dart';
 import 'pedidos_page.dart';
 import 'repartir_producto.dart';
 
+/// Una cuenta se puede editar mientras no se cobre, aunque cocina ya la haya
+/// terminado: el cliente puede pedir más o arrepentirse después.
+bool puedeEditarPedido(Pedido pedido, Rol? rol) =>
+    (rol?.tomaPedidos ?? false) && pedido.estado.activo && !pedido.cobrado;
+
+/// Igual que editar; ya cobrada solo la cancela el administrador, y eso devuelve el dinero.
+bool puedeCancelarPedido(Pedido pedido, Rol? rol) =>
+    (rol?.tomaPedidos ?? false) && pedido.estado.activo && (!pedido.cobrado || rol == Rol.admin);
+
 class PedidoDetallePage extends ConsumerStatefulWidget {
   const PedidoDetallePage({super.key, required this.pedidoId});
 
@@ -70,7 +79,9 @@ class _PedidoDetallePageState extends ConsumerState<PedidoDetallePage> {
       titulo: 'Cancelar pedido #${pedido.id}',
       mensaje: pedido.cobrado
           ? mensajeReembolso(pedido)
-          : 'Cocina dejará de verlo. Esta acción no se puede deshacer.',
+          : pedido.estado == EstadoPedido.listo
+              ? 'Cocina ya lo preparó. La cuenta se cierra sin cobrar y no se puede deshacer.'
+              : 'Cocina dejará de verlo. Esta acción no se puede deshacer.',
       accion: pedido.cobrado ? 'Cancelar y devolver' : 'Cancelar pedido',
       destructiva: true,
     );
@@ -170,7 +181,7 @@ class _PedidoDetallePageState extends ConsumerState<PedidoDetallePage> {
                   label: const Text('Agregar productos'),
                 ),
               // Ya cobrado: sus productos no cambian ni se cancela.
-              if ((rol?.tomaPedidos ?? false) && pedido.estado.modificable && !pedido.cobrado) ...[
+              if (puedeEditarPedido(pedido, rol)) ...[
                 const SizedBox(height: 10),
                 OutlinedButton.icon(
                   onPressed: _ocupado ? null : () => context.push('/pedido/${pedido.id}/editar'),
@@ -203,7 +214,7 @@ class _PedidoDetallePageState extends ConsumerState<PedidoDetallePage> {
                 ],
               ),
               // Ya cobrado solo lo cancela el administrador, y eso devuelve el dinero.
-              if ((rol?.tomaPedidos ?? false) && pedido.estado.modificable && (!pedido.cobrado || rol == Rol.admin)) ...[
+              if (puedeCancelarPedido(pedido, rol)) ...[
                 const SizedBox(height: 10),
                 TextButton.icon(
                   onPressed: _ocupado ? null : () => _cancelar(pedido),
