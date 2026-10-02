@@ -43,6 +43,9 @@ class _CapturaPedidoPageState extends ConsumerState<CapturaPedidoPage> {
   String? _categoria;
   bool _enviando = false;
 
+  /// Identifica el carrito de esta pantalla: cada captura abierta tiene el suyo.
+  final _captura = Object();
+
   bool get _esNuevo => widget.pedidoId == null;
 
   @override
@@ -53,7 +56,7 @@ class _CapturaPedidoPageState extends ConsumerState<CapturaPedidoPage> {
       // Después del primer frame: el carrito es un provider y no se modifica durante el build.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        final carrito = ref.read(carritoProvider.notifier)..cargar(plantilla.lineas);
+        final carrito = ref.read(carritoProvider(_captura).notifier)..cargar(plantilla.lineas);
         if (plantilla.comensal != null) carrito.renombrarComensal(0, plantilla.comensal!);
       });
     }
@@ -72,8 +75,8 @@ class _CapturaPedidoPageState extends ConsumerState<CapturaPedidoPage> {
   }
 
   Future<void> _enviar() async {
-    final carrito = ref.read(carritoProvider.notifier);
-    final estado = ref.read(carritoProvider);
+    final carrito = ref.read(carritoProvider(_captura).notifier);
+    final estado = ref.read(carritoProvider(_captura));
     if (estado.vacio) return;
 
     final mesa = _tipo == TipoPedido.llevar ? mesaParaLlevar : _mesa;
@@ -131,6 +134,7 @@ class _CapturaPedidoPageState extends ConsumerState<CapturaPedidoPage> {
       isScrollControlled: true,
       showDragHandle: true,
       builder: (_) => _HojaCarrito(
+        captura: _captura,
         textoBoton: _esNuevo ? 'Enviar a cocina' : 'Agregar al pedido',
         paraLlevar: _esNuevo
             ? _tipo == TipoPedido.llevar
@@ -147,7 +151,7 @@ class _CapturaPedidoPageState extends ConsumerState<CapturaPedidoPage> {
   @override
   Widget build(BuildContext context) {
     final productos = ref.watch(productosProvider);
-    final todas = ref.watch(carritoProvider.select((e) => e.todasLasLineas));
+    final todas = ref.watch(carritoProvider(_captura).select((e) => e.todasLasLineas));
 
     // "Atrás" (AppBar, botón o gesto del sistema) con productos pide confirmación.
     // Tras enviar con éxito se sale con context.pop(), que no pasa por aquí.
@@ -170,7 +174,7 @@ class _CapturaPedidoPageState extends ConsumerState<CapturaPedidoPage> {
         children: [
           const AvisoSinConexion(),
           if (_esNuevo) _datosPedido(),
-          if (_esNuevo) const _PestanasComensales(),
+          if (_esNuevo) _PestanasComensales(captura: _captura),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: TextField(
@@ -316,7 +320,7 @@ class _CapturaPedidoPageState extends ConsumerState<CapturaPedidoPage> {
                     mainAxisSpacing: 10,
                   ),
                   itemCount: visibles.length,
-                  itemBuilder: (context, i) => _TarjetaProducto(producto: visibles[i]),
+                  itemBuilder: (context, i) => _TarjetaProducto(captura: _captura, producto: visibles[i]),
                 ),
         ),
       ],
@@ -356,12 +360,14 @@ Future<String?> _pedirTexto(
 
 /// Pestañas C1, C2... Tocar la activa permite ponerle nombre (p. ej. el cliente para llevar).
 class _PestanasComensales extends ConsumerWidget {
-  const _PestanasComensales();
+  const _PestanasComensales({required this.captura});
+
+  final Object captura;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final estado = ref.watch(carritoProvider);
-    final carrito = ref.read(carritoProvider.notifier);
+    final estado = ref.watch(carritoProvider(captura));
+    final carrito = ref.read(carritoProvider(captura).notifier);
 
     return SizedBox(
       height: 52,
@@ -410,13 +416,14 @@ class _PestanasComensales extends ConsumerWidget {
 }
 
 class _TarjetaProducto extends ConsumerWidget {
-  const _TarjetaProducto({required this.producto});
+  const _TarjetaProducto({required this.captura, required this.producto});
 
+  final Object captura;
   final Producto producto;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final cantidad = ref.watch(carritoProvider.select(
+    final cantidad = ref.watch(carritoProvider(captura).select(
       (e) => e.lineasActivas.where((l) => l.producto.id == producto.id).fold(0, (s, l) => s + l.cantidad),
     ));
     final seleccionado = cantidad > 0;
@@ -430,7 +437,7 @@ class _TarjetaProducto extends ConsumerWidget {
             )
           : null,
       child: InkWell(
-        onTap: () => ref.read(carritoProvider.notifier).agregar(producto),
+        onTap: () => ref.read(carritoProvider(captura).notifier).agregar(producto),
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Column(
@@ -469,8 +476,14 @@ class _TarjetaProducto extends ConsumerWidget {
 
 /// Resumen antes de enviar, agrupado por comensal cuando hay varios.
 class _HojaCarrito extends ConsumerWidget {
-  const _HojaCarrito({required this.textoBoton, required this.onEnviar, required this.paraLlevar});
+  const _HojaCarrito({
+    required this.captura,
+    required this.textoBoton,
+    required this.onEnviar,
+    required this.paraLlevar,
+  });
 
+  final Object captura;
   final String textoBoton;
   final VoidCallback onEnviar;
 
@@ -479,8 +492,8 @@ class _HojaCarrito extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final estado = ref.watch(carritoProvider);
-    final carrito = ref.read(carritoProvider.notifier);
+    final estado = ref.watch(carritoProvider(captura));
+    final carrito = ref.read(carritoProvider(captura).notifier);
     final varios = estado.comensales.length > 1;
 
     if (estado.vacio) {

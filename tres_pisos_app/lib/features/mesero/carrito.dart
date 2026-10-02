@@ -41,10 +41,19 @@ class EstadoCarrito {
       EstadoCarrito(comensales: comensales ?? this.comensales, activo: activo ?? this.activo);
 }
 
-/// Productos elegidos en la pantalla de captura. Se descarta al salir de la pantalla.
-final carritoProvider = NotifierProvider.autoDispose<Carrito, EstadoCarrito>(Carrito.new);
+/// Productos elegidos en una pantalla de captura. Se descarta al salir de la pantalla.
+///
+/// Hay un carrito por captura abierta (la clave la crea cada pantalla): así la
+/// mesa 3, un pedido para llevar y los extras de una cuenta nunca comparten
+/// productos, aunque una captura se abra encima de otra o justo al cerrar la anterior.
+final carritoProvider = NotifierProvider.autoDispose.family<Carrito, EstadoCarrito, Object>(Carrito.new);
 
 class Carrito extends Notifier<EstadoCarrito> {
+  Carrito(this.captura);
+
+  /// Captura a la que pertenece este carrito.
+  final Object captura;
+
   @override
   EstadoCarrito build() => EstadoCarrito.inicial;
 
