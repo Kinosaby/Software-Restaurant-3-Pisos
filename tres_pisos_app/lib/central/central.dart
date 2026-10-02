@@ -1,0 +1,1666 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:isolate';
+
+import 'diario.dart';
+import 'seguridad.dart';
+
+/// Error de negocio; se responde como `{success: false, code, error}`.
+class ErrorCentral implements Exception {
+  ErrorCentral(this.status, this.codigo, this.mensaje);
+
+  final int status;
+  final String codigo;
+  final String mensaje;
+
+  Map<String, dynamic> toJson() => {'success': false, 'code': codigo, 'error': mensaje};
+
+  @override
+  String toString() => mensaje;
+}
+
+typedef Emisor = void Function(String evento, Map<String, dynamic> datos);
+
+const rolesValidos = ['admin', 'mesero', 'cocina'];
+const estadosValidos = ['pendiente', 'preparando', 'listo', 'pagado', 'cancelado'];
+
+class UsuarioCentral {
+  UsuarioCentral({
+    required this.id,
+    required this.username,
+    required this.passwordHash,
+    required this.rol,
+    required this.creadoEn,
+    this.versionToken = 0,
+  });
+
+  factory UsuarioCentral.fromJson(Map<String, dynamic> j) => UsuarioCentral(
+        id: j['id'] as int,
+        username: j['username'] as String,
+        passwordHash: j['password'] as String,
+        rol: j['role'] as String,
+        creadoEn: DateTime.parse(j['created_at'] as String),
+        versionToken: j['ver'] as int? ?? 0,
+      );
+
+  final int id;
+  final String username;
+  final String passwordHash;
+  final String rol;
+  final DateTime creadoEn;
+
+  /// Sube al cambiar contraseña o rol: invalida los tokens emitidos antes.
+  final int versionToken;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'username': username,
+        'password': passwordHash,
+        'role': rol,
+        'created_at': creadoEn.toUtc().toIso8601String(),
+        'ver': versionToken,
+      };
+
+  Map<String, dynamic> publico() => {
+        'id': id,
+        'username': username,
+        'role': rol,
+        'created_at': creadoEn.toUtc().toIso8601String(),
+      };
+}
+
+class ProductoCentral {
+  ProductoCentral({
+    required this.id,
+    required this.nombre,
+    required this.precio,
+    required this.categoria,
+    required this.activo,
+    required this.creadoEn,
+  });
+
+  factory ProductoCentral.fromJson(Map<String, dynamic> j) => ProductoCentral(
+        id: j['id'] as int,
+        nombre: j['nombre'] as String,
+        precio: (j['precio'] as num).toDouble(),
+        categoria: j['categoria'] as String? ?? 'General',
+        activo: j['activo'] as bool? ?? true,
+        creadoEn: DateTime.parse(j['created_at'] as String),
+      );
+
+  final int id;
+  final String nombre;
+  final double precio;
+  final String categoria;
+  final bool activo;
+  final DateTime creadoEn;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'nombre': nombre,
+        'precio': precio,
+        'categoria': categoria,
+        'activo': activo,
+        'created_at': creadoEn.toUtc().toIso8601String(),
+      };
+}
+
+/// Reparte [monto] en [partes] importes de centavos exactos cuya suma es [monto]:
+/// los centavos que sobran van a las primeras partes (100 / 3 → 33.34, 33.33, 33.33).
+List<double> repartirCentavos(double monto, int partes) {
+  if (partes < 1) throw ArgumentError.value(partes, 'partes', 'debe ser al menos 1');
+  final centavos = (monto * 100).round();
+  final base = centavos ~/ partes;
+  final resto = centavos % partes;
+  return [for (var i = 0; i < partes; i++) (base + (i < resto ? 1 : 0)) / 100];
+}
+
+/// Parte de un platillo dividido entre varias cuentas. Todas las partes de un
+/// mismo platillo comparten [grupo]; cocina solo ve la parte 1 (es un solo platillo).
+class ParteCompartida {
+  const ParteCompartida({required this.grupo, required this.parte, required this.partes});
+
+  factory ParteCompartida.fromJson(Map<String, dynamic> j) =>
+      ParteCompartida(grupo: j['grupo'] as int, parte: j['parte'] as int, partes: j['partes'] as int);
+
+  final int grupo;
+  final int parte;
+  final int partes;
+
+  Map<String, dynamic> toJson() => {'grupo': grupo, 'parte': parte, 'partes': partes};
+}
+
+/// Renglón de un pedido. Guarda nombre y precio del momento en que se pidió.
+class ItemCentral {
+  ItemCentral({
+    required this.id,
+    required this.productoId,
+    required this.nombre,
+    required this.precio,
+    required this.cantidad,
+    this.nota,
+    this.extraDesde,
+    this.compartido,
+    this.servido = false,
+  });
+
+  factory ItemCentral.fromJson(Map<String, dynamic> j) => ItemCentral(
+        id: j['id'] as int,
+        productoId: j['producto_id'] as int,
+        nombre: j['nombre'] as String,
+        precio: (j['precio'] as num).toDouble(),
+        cantidad: j['cantidad'] as int,
+        nota: j['nota'] as String?,
+        extraDesde: j['extra_desde'] == null ? null : DateTime.parse(j['extra_desde'] as String),
+        compartido: j['compartido'] == null ? null : ParteCompartida.fromJson(j['compartido'] as Map<String, dynamic>),
+        servido: j['servido'] == true,
+      );
+
+  final int id;
+  final int productoId;
+  final String nombre;
+  final double precio;
+  final int cantidad;
+  final String? nota;
+
+  /// Extra que se agregó cuando cocina ya había empezado o terminado el pedido
+  /// y que aún no termina. Se borra cuando cocina marca el pedido como listo.
+  final DateTime? extraDesde;
+
+  /// Solo en los renglones que son parte de un platillo dividido entre cuentas.
+  final ParteCompartida? compartido;
+
+  /// Ya se cocinó y se sirvió en otra cuenta (se pasó aquí después): cocina no
+  /// lo vuelve a preparar.
+  final bool servido;
+
+  ItemCentral copyWith({
+    int? id,
+    int? cantidad,
+    String? nota,
+    bool borrarNota = false,
+    DateTime? extraDesde,
+    bool terminarExtra = false,
+    ParteCompartida? compartido,
+    bool? servido,
+  }) =>
+      ItemCentral(
+        id: id ?? this.id,
+        productoId: productoId,
+        nombre: nombre,
+        precio: precio,
+        cantidad: cantidad ?? this.cantidad,
+        nota: borrarNota ? null : (nota ?? this.nota),
+        extraDesde: terminarExtra ? null : (extraDesde ?? this.extraDesde),
+        compartido: compartido ?? this.compartido,
+        servido: servido ?? this.servido,
+      );
+
+  /// Se puede sumar a [otro] en un solo renglón (mismo producto, nota, precio y
+  /// estado de extra, sin dividir).
+  bool combinableCon(ItemCentral otro) =>
+      compartido == null &&
+      otro.compartido == null &&
+      productoId == otro.productoId &&
+      nota == otro.nota &&
+      precio == otro.precio &&
+      extraDesde == otro.extraDesde &&
+      servido == otro.servido;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'producto_id': productoId,
+        'nombre': nombre,
+        'cantidad': cantidad,
+        'nota': nota,
+        'precio': precio,
+        if (extraDesde != null) 'extra_desde': extraDesde!.toUtc().toIso8601String(),
+        if (compartido != null) 'compartido': compartido!.toJson(),
+        if (servido) 'servido': true,
+      };
+}
+
+/// Desglose de lo cobrado a un pedido. Los pedidos cobrados antes del pago
+/// mixto no lo tienen (sus ventas quedan "sin desglose").
+class PagoCentral {
+  PagoCentral({required this.efectivo, required this.tarjeta, required this.fecha});
+
+  factory PagoCentral.fromJson(Map<String, dynamic> j) => PagoCentral(
+        efectivo: (j['efectivo'] as num? ?? 0).toDouble(),
+        tarjeta: (j['tarjeta'] as num? ?? 0).toDouble(),
+        fecha: DateTime.parse(j['fecha'] as String),
+      );
+
+  final double efectivo;
+  final double tarjeta;
+  final DateTime fecha;
+
+  Map<String, dynamic> toJson() =>
+      {'efectivo': efectivo, 'tarjeta': tarjeta, 'fecha': fecha.toUtc().toIso8601String()};
+}
+
+int _centavos(double valor) => (valor * 100).round();
+
+/// Reparte un cobro de varias cuentas: el efectivo cubre las cuentas en orden y
+/// el resto de cada una va con tarjeta. Cada parte suma exactamente su total.
+List<({double efectivo, double tarjeta})> repartirPago(List<double> totales, double efectivo) {
+  var restante = _centavos(efectivo);
+  return [
+    for (final total in totales)
+      () {
+        final cuenta = _centavos(total);
+        final enEfectivo = restante < cuenta ? restante : cuenta;
+        restante -= enEfectivo;
+        return (efectivo: enEfectivo / 100, tarjeta: (cuenta - enEfectivo) / 100);
+      }(),
+  ];
+}
+
+class PedidoCentral {
+  PedidoCentral({
+    required this.id,
+    required this.mesa,
+    required this.estado,
+    required this.tipo,
+    required this.creadoEn,
+    required this.items,
+    this.comensal,
+    this.usuarioId,
+    this.mesero,
+    this.pago,
+  });
+
+  factory PedidoCentral.fromJson(Map<String, dynamic> j) => PedidoCentral(
+        id: j['id'] as int,
+        mesa: j['mesa'] as int,
+        estado: j['estado'] as String,
+        tipo: j['tipo'] as String,
+        comensal: j['comensal'] as String?,
+        usuarioId: j['usuario_id'] as int?,
+        mesero: j['mesero'] as String?,
+        creadoEn: DateTime.parse(j['creado_en'] as String),
+        items: [for (final i in j['productos'] as List) ItemCentral.fromJson(i as Map<String, dynamic>)],
+        pago: j['pago'] == null ? null : PagoCentral.fromJson(j['pago'] as Map<String, dynamic>),
+      );
+
+  final int id;
+  final int mesa;
+  final String estado;
+  final String tipo;
+  final String? comensal;
+  final int? usuarioId;
+  final String? mesero;
+  final DateTime creadoEn;
+  final List<ItemCentral> items;
+
+  /// Cobrado por adelantado (sigue en cocina) o al cerrarse la cuenta.
+  final PagoCentral? pago;
+
+  double get total => items.fold(0, (s, i) => s + i.precio * i.cantidad);
+
+  /// Ya hay una venta registrada para este pedido.
+  /// Cancelado después de cobrar = reembolsado: ya no cuenta como cobrado.
+  bool get cobrado => estado == 'pagado' || (pago != null && estado != 'cancelado');
+
+  PedidoCentral copyWith({
+    int? mesa,
+    String? estado,
+    String? tipo,
+    String? comensal,
+    bool borrarComensal = false,
+    List<ItemCentral>? items,
+    PagoCentral? pago,
+  }) =>
+      PedidoCentral(
+        id: id,
+        mesa: mesa ?? this.mesa,
+        estado: estado ?? this.estado,
+        tipo: tipo ?? this.tipo,
+        comensal: borrarComensal ? null : (comensal ?? this.comensal),
+        usuarioId: usuarioId,
+        mesero: mesero,
+        creadoEn: creadoEn,
+        items: items ?? this.items,
+        pago: pago ?? this.pago,
+      );
+
+  /// Forma con la que viaja el pedido a las tablets.
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'mesa': mesa,
+        'estado': estado,
+        'total': double.parse(total.toStringAsFixed(2)),
+        'tipo': tipo,
+        'comensal': comensal,
+        'usuario_id': usuarioId,
+        'mesero': mesero,
+        'creado_en': creadoEn.toUtc().toIso8601String(),
+        'productos': [for (final i in items) i.toJson()],
+        if (pago != null) 'pago': pago!.toJson(),
+      };
+}
+
+/// Venta registrada al cobrar. [efectivo] y [tarjeta] son `null` en las ventas
+/// anteriores al pago mixto (y en los cobros por `PUT /estado`): "sin desglose".
+class VentaCentral {
+  VentaCentral({
+    required this.id,
+    required this.pedidoId,
+    required this.total,
+    required this.fecha,
+    this.efectivo,
+    this.tarjeta,
+  });
+
+  factory VentaCentral.fromJson(Map<String, dynamic> j) => VentaCentral(
+        id: j['id'] as int,
+        pedidoId: j['pedido_id'] as int,
+        total: (j['total'] as num).toDouble(),
+        fecha: DateTime.parse(j['fecha'] as String),
+        efectivo: (j['efectivo'] as num?)?.toDouble(),
+        tarjeta: (j['tarjeta'] as num?)?.toDouble(),
+      );
+
+  final int id;
+  final int pedidoId;
+  final double total;
+  final DateTime fecha;
+  final double? efectivo;
+  final double? tarjeta;
+
+  bool get conDesglose => efectivo != null || tarjeta != null;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'pedido_id': pedidoId,
+        'total': total,
+        'fecha': fecha.toUtc().toIso8601String(),
+        'efectivo': ?efectivo,
+        'tarjeta': ?tarjeta,
+      };
+}
+
+/// Suma de ventas con su desglose por forma de pago.
+class _Totales {
+  double total = 0;
+  double efectivo = 0;
+  double tarjeta = 0;
+  double sinDesglose = 0;
+  int pedidos = 0;
+
+  void sumar(VentaCentral v) {
+    total += v.total;
+    // Un reembolso (venta negativa) deshace el pedido que se había contado.
+    pedidos += v.total < 0 ? -1 : 1;
+    if (v.conDesglose) {
+      efectivo += v.efectivo ?? 0;
+      tarjeta += v.tarjeta ?? 0;
+    } else {
+      sinDesglose += v.total;
+    }
+  }
+
+  static double _dosDecimales(double x) => double.parse(x.toStringAsFixed(2));
+
+  Map<String, dynamic> desglose() => {
+        'efectivo': _dosDecimales(efectivo),
+        'tarjeta': _dosDecimales(tarjeta),
+        'sin_desglose': _dosDecimales(sinDesglose),
+      };
+}
+
+/// La central del restaurante: guarda usuarios, menú, pedidos y ventas en la
+/// tablet de cocina y aplica las reglas del negocio. Funciona sin internet.
+///
+/// Todas las escrituras pasan por [_confirmar]: se escriben primero en el
+/// [Diario] y solo después se aplican en memoria, en serie, para que dos
+/// peticiones simultáneas no se pisen.
+class Central {
+  Central._(this._diario, this._iteraciones, this._reloj, [this._lineasParaCompactar = 3000]);
+
+  final Diario _diario;
+  final int _iteraciones;
+  final DateTime Function() _reloj;
+
+  /// Líneas del diario a partir de las cuales se compacta.
+  final int _lineasParaCompactar;
+
+  /// Avisos en tiempo real (`nuevo_pedido`, `pedido_actualizado`, `extra_pedido`, `pedido_eliminado`).
+  Emisor? emitir;
+
+  /// Se llama cuando pueden haber dejado de valer sesiones abiertas (enlace
+  /// renovado, contraseña o rol cambiados, usuario borrado): el servidor cierra
+  /// los WebSockets afectados.
+  void Function()? alRevocarSesiones;
+
+  /// Hash con el que se compara la contraseña cuando el usuario no existe, para
+  /// que el tiempo de respuesta no revele qué usuarios hay.
+  Future<String>? _hashFalso;
+
+  final _usuarios = <int, UsuarioCentral>{};
+  final _productos = <int, ProductoCentral>{};
+  final _pedidos = <int, PedidoCentral>{};
+  final _ventas = <int, VentaCentral>{};
+
+  /// Identificador de operación del cliente → pedido resultante (evita duplicados en reintentos).
+  final _operaciones = <String, ({int pedidoId, DateTime fecha})>{};
+  final _secuencias = <String, int>{};
+  Map<String, dynamic> _config = {};
+  Future<void> _cola = Future.value();
+
+  /// [lineasParaCompactar] solo se cambia en las pruebas.
+  static Future<Central> abrir(
+    Directory carpeta, {
+    int iteraciones = 60000,
+    DateTime Function()? reloj,
+    int lineasParaCompactar = 3000,
+  }) async {
+    final central = Central._(Diario(carpeta), iteraciones, reloj ?? DateTime.now, lineasParaCompactar);
+    final lotes = await central._diario.cargar();
+    for (final lote in lotes) {
+      central._aplicar(lote);
+    }
+    if (central._diario.lineas > central._lineasParaCompactar) await central._compactarSinFallar();
+    return central;
+  }
+
+  bool get inicializada => _usuarios.values.any((u) => u.rol == 'admin');
+  String get codigoEnlace => _config['enlace'] as String? ?? '';
+  String get nombre => _config['nombre'] as String? ?? 'Restaurante 3 Pisos';
+  String get _secreto => _config['secreto'] as String;
+
+  Future<void> cerrar() => _diario.cerrar();
+
+  // ── Persistencia ─────────────────────────────────────────
+
+  void _aplicar(List<Map<String, dynamic>> lote) {
+    for (final r in lote) {
+      final v = r['v'] as Map<String, dynamic>?;
+      switch (r['t']) {
+        case 'config':
+          _config = {..._config, ...v!};
+        case 'usuario':
+          final u = UsuarioCentral.fromJson(v!);
+          _usuarios[u.id] = u;
+          _verId('usuario', u.id);
+        case 'producto':
+          final p = ProductoCentral.fromJson(v!);
+          _productos[p.id] = p;
+          _verId('producto', p.id);
+        case 'pedido':
+          final p = PedidoCentral.fromJson(v!);
+          _pedidos[p.id] = p;
+          _verId('pedido', p.id);
+          for (final i in p.items) {
+            _verId('item', i.id);
+          }
+        case 'venta':
+          final venta = VentaCentral.fromJson(v!);
+          _ventas[venta.id] = venta;
+          _verId('venta', venta.id);
+        case 'borrar':
+          final id = r['id'] as int;
+          switch (r['tabla']) {
+            case 'usuario':
+              _usuarios.remove(id);
+            case 'producto':
+              _productos.remove(id);
+            case 'pedido':
+              _pedidos.remove(id);
+          }
+        case 'op':
+          _operaciones[r['id'] as String] = (
+            pedidoId: r['pedido'] as int,
+            fecha: DateTime.parse(r['fecha'] as String),
+          );
+        case 'seq':
+          for (final MapEntry(:key, :value) in v!.entries) {
+            _verId(key, value as int);
+          }
+      }
+    }
+  }
+
+  void _verId(String tabla, int id) {
+    if (id > (_secuencias[tabla] ?? 0)) _secuencias[tabla] = id;
+  }
+
+  int _siguiente(String tabla) => _secuencias[tabla] = (_secuencias[tabla] ?? 0) + 1;
+
+  /// Serializa las operaciones que modifican datos.
+  Future<T> _enSerie<T>(Future<T> Function() operacion) {
+    final resultado = _cola.then((_) => operacion());
+    _cola = resultado.then((_) {}, onError: (_) {});
+    return resultado;
+  }
+
+  Future<void> _confirmar(List<Map<String, dynamic>> lote) async {
+    await _diario.escribir(lote);
+    _aplicar(lote);
+    // La operación ya quedó guardada: un fallo al compactar no la convierte en error.
+    if (_diario.lineas > _lineasParaCompactar) await _compactarSinFallar();
+  }
+
+  List<Map<String, dynamic>> _estadoCompleto() => [
+        {'t': 'config', 'v': _config},
+        {'t': 'seq', 'v': _secuencias},
+        for (final u in _usuarios.values) {'t': 'usuario', 'v': u.toJson()},
+        for (final p in _productos.values) {'t': 'producto', 'v': p.toJson()},
+        for (final p in _pedidos.values) {'t': 'pedido', 'v': p.toJson()},
+        for (final v in _ventas.values) {'t': 'venta', 'v': v.toJson()},
+        for (final MapEntry(:key, :value) in _operaciones.entries)
+          {'t': 'op', 'id': key, 'pedido': value.pedidoId, 'fecha': value.fecha.toUtc().toIso8601String()},
+      ];
+
+  Future<void> _compactar() async {
+    final limite = _reloj().subtract(const Duration(days: 7));
+    _operaciones.removeWhere((_, op) => op.fecha.isBefore(limite));
+    await _diario.compactar(_estadoCompleto());
+  }
+
+  /// Compacta sin propagar errores (disco lleno, E/S): el diario sigue abierto
+  /// y se vuelve a intentar en la siguiente escritura.
+  Future<void> _compactarSinFallar() async {
+    try {
+      await _compactar();
+    } on Object catch (e) {
+      Zone.current.print('No se pudo compactar el diario de la central: $e');
+    }
+  }
+
+  // ── Respaldo ─────────────────────────────────────────────
+
+  /// Copia de todo lo que guarda la central, para cifrarla en un archivo de respaldo.
+  Future<List<Map<String, dynamic>>> exportar() => _enSerie(() async => _estadoCompleto());
+
+  /// Carga un respaldo en una central **vacía** (tablet nueva). Nunca sobrescribe
+  /// datos existentes. Conserva el código de enlace, así las tablets de los
+  /// meseros solo tienen que buscar la nueva IP; las sesiones se cierran porque
+  /// se genera un secreto nuevo.
+  Future<void> restaurar(List<Map<String, dynamic>> registros) => _enSerie(() async {
+        if (_usuarios.isNotEmpty || _pedidos.isNotEmpty) {
+          throw ErrorCentral(409, 'CENTRAL_CON_DATOS', 'Esta tablet ya tiene datos de una central; no se sobrescriben.');
+        }
+        final validado = _validarRespaldo(registros);
+        final lote = [
+          for (final r in validado)
+            if (r['t'] == 'config') {'t': 'config', 'v': {...r['v'] as Map<String, dynamic>, 'secreto': idAleatorio(32)}} else r,
+        ];
+        await _diario.compactar(lote);
+        _aplicar(lote);
+      });
+
+  /// Comprueba que el respaldo se pueda cargar entero antes de tocar nada.
+  static List<Map<String, dynamic>> _validarRespaldo(List<Map<String, dynamic>> registros) {
+    try {
+      final prueba = Central._(Diario(Directory.systemTemp), 1, DateTime.now).._aplicar(registros);
+      if (!prueba.inicializada || prueba.codigoEnlace.isEmpty) {
+        throw ErrorCentral(400, 'RESPALDO_INVALIDO', 'El respaldo no tiene administrador ni configuración.');
+      }
+      return registros;
+    } on ErrorCentral {
+      rethrow;
+    } on Object {
+      throw ErrorCentral(400, 'RESPALDO_INVALIDO', 'El respaldo tiene datos inválidos.');
+    }
+  }
+
+  // ── Instalación y enlace ─────────────────────────────────
+
+  /// Primera puesta en marcha: crea el administrador y carga el menú del restaurante.
+  Future<void> inicializar({
+    required String admin,
+    required String password,
+    String? nombreRestaurante,
+    List<Map<String, dynamic>> menu = const [],
+  }) =>
+      _enSerie(() async {
+        if (inicializada) throw ErrorCentral(409, 'YA_INICIADA', 'La central ya está configurada.');
+        final usuario = _validarUsuario(admin);
+        _validarPassword(password);
+        final ahora = _reloj();
+        await _confirmar([
+          {
+            't': 'config',
+            'v': {
+              'secreto': idAleatorio(32),
+              'enlace': nuevoCodigoEnlace(),
+              'nombre': (nombreRestaurante?.trim().isNotEmpty ?? false) ? nombreRestaurante!.trim() : 'Restaurante 3 Pisos',
+            },
+          },
+          {
+            't': 'usuario',
+            'v': UsuarioCentral(
+              id: _siguiente('usuario'),
+              username: usuario,
+              passwordHash: await _hash(password),
+              rol: 'admin',
+              creadoEn: ahora,
+            ).toJson(),
+          },
+          for (final p in menu)
+            {
+              't': 'producto',
+              'v': ProductoCentral(
+                id: _siguiente('producto'),
+                nombre: p['nombre'].toString(),
+                precio: double.parse(p['precio'].toString()),
+                categoria: p['categoria']?.toString() ?? 'General',
+                activo: p['activo'] != false,
+                creadoEn: ahora,
+              ).toJson(),
+            },
+        ]);
+      });
+
+  /// Cambia el código de enlace y cierra todas las sesiones (tablet perdida o código filtrado).
+  Future<String> renovarEnlace() => _enSerie(() async {
+        final nuevo = nuevoCodigoEnlace();
+        await _confirmar([
+          {
+            't': 'config',
+            'v': {'enlace': nuevo, 'secreto': idAleatorio(32)},
+          },
+        ]);
+        alRevocarSesiones?.call();
+        return nuevo;
+      });
+
+  bool enlaceValido(String? codigo) =>
+      codigo != null && codigoEnlace.isNotEmpty && normalizarCodigo(codigo) == codigoEnlace;
+
+  // ── Sesiones y usuarios ──────────────────────────────────
+
+  /// PBKDF2 va en otro isolate para no congelar la central (y su pantalla) durante el cálculo.
+  Future<Map<String, dynamic>> login(String username, String password) async {
+    final usuario = _usuarios.values.where((u) => u.username.toLowerCase() == username.trim().toLowerCase()).firstOrNull;
+    // Con un usuario inexistente se calcula igual un PBKDF2 completo.
+    final hash = usuario?.passwordHash ?? await (_hashFalso ??= _hash(idAleatorio()));
+    final valida = await Isolate.run(() => verificarPassword(password, hash));
+    if (usuario == null || !valida) {
+      throw ErrorCentral(401, 'INVALID_CREDENTIALS', 'Usuario o contraseña incorrectos.');
+    }
+    return _sesion(usuario);
+  }
+
+  /// Token nuevo (con otras 12 h) para quien ya tiene una sesión vigente; la
+  /// tablet lo pide al pasar la mitad de la vigencia para no quedarse fuera a
+  /// mitad del servicio. Conserva la versión (`ver`): cambiar contraseña o rol
+  /// sigue invalidando también los tokens renovados.
+  Map<String, dynamic> renovarSesion(UsuarioCentral usuario) => _sesion(usuario);
+
+  Map<String, dynamic> _sesion(UsuarioCentral usuario) {
+    final token = firmarToken(
+      {'id': usuario.id, 'username': usuario.username, 'role': usuario.rol, 'ver': usuario.versionToken},
+      _secreto,
+      ahora: _reloj(),
+    );
+    return {'token': token, 'user': usuario.publico()};
+  }
+
+  /// Usuario vigente del token, o `null` si caducó, se revocó o el usuario ya no existe.
+  UsuarioCentral? autenticar(String token) {
+    final datos = verificarToken(token, _secreto, ahora: _reloj());
+    if (datos == null) return null;
+    final usuario = _usuarios[datos['id']];
+    if (usuario == null || usuario.versionToken != datos['ver']) return null;
+    return usuario;
+  }
+
+  List<Map<String, dynamic>> listarUsuarios() =>
+      [for (final u in _usuarios.values.toList()..sort((a, b) => a.id.compareTo(b.id))) u.publico()];
+
+  String _validarUsuario(Object? valor, {int? excepto}) {
+    final username = valor?.toString().trim() ?? '';
+    if (username.length < 3 || username.length > 30) {
+      throw ErrorCentral(400, 'VALIDATION_ERROR', 'El nombre debe tener entre 3 y 30 caracteres.');
+    }
+    final repetido = _usuarios.values.any((u) => u.id != excepto && u.username.toLowerCase() == username.toLowerCase());
+    if (repetido) throw ErrorCentral(409, 'DUPLICATE_USER', 'El nombre de usuario ya existe.');
+    return username;
+  }
+
+  void _validarPassword(Object? valor) {
+    if ((valor?.toString() ?? '').length < 6) {
+      throw ErrorCentral(400, 'VALIDATION_ERROR', 'La contraseña debe tener al menos 6 caracteres.');
+    }
+  }
+
+  String _validarRol(Object? valor) {
+    final rol = valor?.toString() ?? 'mesero';
+    if (!rolesValidos.contains(rol)) {
+      throw ErrorCentral(400, 'VALIDATION_ERROR', 'Rol inválido. Valores: admin, mesero, cocina.');
+    }
+    return rol;
+  }
+
+  Future<Map<String, dynamic>> crearUsuario(Map<String, dynamic> datos) => _enSerie(() async {
+        final username = _validarUsuario(datos['username']);
+        _validarPassword(datos['password']);
+        final usuario = UsuarioCentral(
+          id: _siguiente('usuario'),
+          username: username,
+          passwordHash: await _hash(datos['password'].toString()),
+          rol: _validarRol(datos['role']),
+          creadoEn: _reloj(),
+        );
+        await _confirmar([
+          {'t': 'usuario', 'v': usuario.toJson()},
+        ]);
+        return usuario.publico();
+      });
+
+  Future<Map<String, dynamic>> actualizarUsuario(int id, Map<String, dynamic> datos) => _enSerie(() async {
+        final actual = _usuarios[id] ?? (throw ErrorCentral(404, 'USER_NOT_FOUND', 'Usuario no encontrado.'));
+        final username = _validarUsuario(datos['username'], excepto: id);
+        final rol = _validarRol(datos['role']);
+        final password = datos['password']?.toString() ?? '';
+        if (password.isNotEmpty) _validarPassword(password);
+        if (actual.rol == 'admin' && rol != 'admin' && _admins() == 1) {
+          throw ErrorCentral(400, 'LAST_ADMIN', 'Debe quedar al menos un administrador.');
+        }
+        final cambiaAcceso = password.isNotEmpty || rol != actual.rol;
+        final usuario = UsuarioCentral(
+          id: id,
+          username: username,
+          passwordHash: password.isNotEmpty ? await _hash(password) : actual.passwordHash,
+          rol: rol,
+          creadoEn: actual.creadoEn,
+          versionToken: cambiaAcceso ? actual.versionToken + 1 : actual.versionToken,
+        );
+        await _confirmar([
+          {'t': 'usuario', 'v': usuario.toJson()},
+        ]);
+        if (cambiaAcceso) alRevocarSesiones?.call();
+        return usuario.publico();
+      });
+
+  Future<Map<String, dynamic>> eliminarUsuario(int id, {required int actorId}) => _enSerie(() async {
+        final usuario = _usuarios[id] ?? (throw ErrorCentral(404, 'USER_NOT_FOUND', 'Usuario no encontrado.'));
+        if (id == actorId) throw ErrorCentral(400, 'SELF_DELETE', 'No puedes eliminar tu propia cuenta.');
+        if (usuario.rol == 'admin' && _admins() == 1) {
+          throw ErrorCentral(400, 'LAST_ADMIN', 'Debe quedar al menos un administrador.');
+        }
+        await _confirmar([
+          {'t': 'borrar', 'tabla': 'usuario', 'id': id},
+        ]);
+        alRevocarSesiones?.call();
+        return usuario.publico();
+      });
+
+  Future<String> _hash(String password) {
+    final iteraciones = _iteraciones;
+    return Isolate.run(() => hashPassword(password, iteraciones: iteraciones));
+  }
+
+  int _admins() => _usuarios.values.where((u) => u.rol == 'admin').length;
+
+  // ── Productos ────────────────────────────────────────────
+
+  List<Map<String, dynamic>> listarProductos() {
+    final lista = _productos.values.toList()
+      ..sort((a, b) {
+        final c = a.categoria.compareTo(b.categoria);
+        return c != 0 ? c : a.nombre.compareTo(b.nombre);
+      });
+    return [for (final p in lista) p.toJson()];
+  }
+
+  ProductoCentral _productoValidado(Map<String, dynamic> datos, {required int id, required DateTime creadoEn}) {
+    final nombre = datos['nombre']?.toString().trim() ?? '';
+    if (nombre.isEmpty || nombre.length > 100) {
+      throw ErrorCentral(400, 'VALIDATION_ERROR', 'El nombre del producto es requerido (máximo 100 caracteres).');
+    }
+    final precio = double.tryParse(datos['precio']?.toString() ?? '');
+    if (precio == null || precio <= 0) {
+      throw ErrorCentral(400, 'VALIDATION_ERROR', 'El precio debe ser un número positivo.');
+    }
+    final categoria = datos['categoria']?.toString().trim();
+    return ProductoCentral(
+      id: id,
+      nombre: nombre,
+      precio: double.parse(precio.toStringAsFixed(2)),
+      categoria: (categoria == null || categoria.isEmpty) ? 'General' : categoria,
+      activo: datos['activo'] != false,
+      creadoEn: creadoEn,
+    );
+  }
+
+  Future<Map<String, dynamic>> crearProducto(Map<String, dynamic> datos) => _enSerie(() async {
+        final producto = _productoValidado(datos, id: _siguiente('producto'), creadoEn: _reloj());
+        await _confirmar([
+          {'t': 'producto', 'v': producto.toJson()},
+        ]);
+        return producto.toJson();
+      });
+
+  Future<Map<String, dynamic>> actualizarProducto(int id, Map<String, dynamic> datos) => _enSerie(() async {
+        final actual = _productos[id] ?? (throw ErrorCentral(404, 'PRODUCT_NOT_FOUND', 'Producto no encontrado.'));
+        final producto = _productoValidado(datos, id: id, creadoEn: actual.creadoEn);
+        await _confirmar([
+          {'t': 'producto', 'v': producto.toJson()},
+        ]);
+        return producto.toJson();
+      });
+
+  /// Los pedidos guardan nombre y precio de cada renglón, así que borrar un
+  /// producto no altera cuentas ni historial.
+  Future<Map<String, dynamic>> eliminarProducto(int id) => _enSerie(() async {
+        final producto = _productos[id] ?? (throw ErrorCentral(404, 'PRODUCT_NOT_FOUND', 'Producto no encontrado.'));
+        await _confirmar([
+          {'t': 'borrar', 'tabla': 'producto', 'id': id},
+        ]);
+        return producto.toJson();
+      });
+
+  // ── Pedidos ──────────────────────────────────────────────
+
+  /// [desde]: solo pedidos creados a partir de esa fecha (para no mandar todo el historial).
+  List<Map<String, dynamic>> listarPedidos({String? estado, DateTime? desde}) {
+    final lista = _pedidos.values
+        .where((p) => estado == null || !estadosValidos.contains(estado) || p.estado == estado)
+        .where((p) => desde == null || !p.creadoEn.isBefore(desde))
+        .toList()
+      ..sort((a, b) {
+        final c = a.creadoEn.compareTo(b.creadoEn);
+        return c != 0 ? c : a.id.compareTo(b.id);
+      });
+    return [for (final p in lista) p.toJson()];
+  }
+
+  PedidoCentral _pedido(int id) =>
+      _pedidos[id] ?? (throw ErrorCentral(404, 'ORDER_NOT_FOUND', 'Pedido no encontrado.'));
+
+  Map<String, dynamic> obtenerPedido(int id) => _pedido(id).toJson();
+
+  String? _nota(Object? valor) {
+    final nota = valor?.toString().trim();
+    if (nota == null || nota.isEmpty) return null;
+    if (nota.length > 200) throw ErrorCentral(400, 'VALIDATION_ERROR', 'La nota no puede superar 200 caracteres.');
+    return nota;
+  }
+
+  /// Convierte `[{producto_id, cantidad, nota}]` en renglones con precio vigente.
+  List<ItemCentral> _itemsNuevos(Object? productos) {
+    if (productos is! List || productos.isEmpty) {
+      throw ErrorCentral(400, 'EMPTY_ORDER', 'Debe incluir al menos un producto.');
+    }
+    return [
+      for (final p in productos.cast<Map<String, dynamic>>())
+        () {
+          final id = int.tryParse(p['producto_id'].toString());
+          final cantidad = int.tryParse(p['cantidad'].toString()) ?? 0;
+          if (cantidad < 1) throw ErrorCentral(400, 'VALIDATION_ERROR', 'La cantidad debe ser al menos 1.');
+          final producto = _productos[id];
+          if (producto == null || !producto.activo) {
+            throw ErrorCentral(400, 'PRODUCT_NOT_FOUND', 'Producto $id no existe o está inactivo.');
+          }
+          return ItemCentral(
+            id: 0, // se asigna al confirmar
+            productoId: producto.id,
+            nombre: producto.nombre,
+            precio: producto.precio,
+            cantidad: cantidad,
+            nota: _nota(p['nota']),
+          );
+        }(),
+    ];
+  }
+
+  List<ItemCentral> _numerar(List<ItemCentral> items, {DateTime? extraDesde}) => [
+        for (final i in items)
+          ItemCentral(
+            id: _siguiente('item'),
+            productoId: i.productoId,
+            nombre: i.nombre,
+            precio: i.precio,
+            cantidad: i.cantidad,
+            nota: i.nota,
+            extraDesde: extraDesde,
+          ),
+      ];
+
+  int _mesa(Object? valor) {
+    final mesa = int.tryParse(valor?.toString() ?? '');
+    if (mesa == null || mesa < 1) {
+      throw ErrorCentral(400, 'VALIDATION_ERROR', 'La mesa debe ser un número entero positivo.');
+    }
+    return mesa;
+  }
+
+  String _tipo(Object? valor) {
+    final tipo = valor?.toString() ?? 'aqui';
+    if (tipo != 'aqui' && tipo != 'llevar') {
+      throw ErrorCentral(400, 'VALIDATION_ERROR', 'Tipo inválido. Valores: aqui, llevar.');
+    }
+    return tipo;
+  }
+
+  String? _comensal(Object? valor) {
+    final comensal = valor?.toString().trim();
+    if (comensal == null || comensal.isEmpty) return null;
+    if (comensal.length > 50) {
+      throw ErrorCentral(400, 'VALIDATION_ERROR', 'El comensal no puede superar 50 caracteres.');
+    }
+    return comensal;
+  }
+
+  /// Si la operación ya se procesó (reintento tras perder la respuesta), devuelve su pedido.
+  Map<String, dynamic>? _yaProcesada(String? operacion) {
+    if (operacion == null) return null;
+    final previa = _operaciones[operacion];
+    if (previa == null) return null;
+    return _pedidos[previa.pedidoId]?.toJson();
+  }
+
+  /// Para operaciones que tocan varias cuentas (mover, dividir, cobrar): un
+  /// reintento con el mismo identificador no se repite; responde cómo quedó.
+  bool _yaHecha(String? operacion) => operacion != null && _operaciones.containsKey(operacion);
+
+  List<Map<String, dynamic>> _comoQuedaron(Iterable<int> ids) => [
+        for (final id in ids)
+          if (_pedidos[id] case final p?) p.toJson(),
+      ];
+
+  Map<String, dynamic> _registroOperacion(String operacion, int pedidoId) =>
+      {'t': 'op', 'id': operacion, 'pedido': pedidoId, 'fecha': _reloj().toUtc().toIso8601String()};
+
+  Future<Map<String, dynamic>> crearPedido(
+    Map<String, dynamic> datos, {
+    required UsuarioCentral usuario,
+    String? operacion,
+  }) =>
+      _enSerie(() async {
+        final repetida = _yaProcesada(operacion);
+        if (repetida != null) return repetida;
+
+        final pedido = PedidoCentral(
+          id: _siguiente('pedido'),
+          mesa: _mesa(datos['mesa']),
+          estado: 'pendiente',
+          tipo: _tipo(datos['tipo']),
+          comensal: _comensal(datos['comensal']),
+          usuarioId: usuario.id,
+          mesero: usuario.username,
+          creadoEn: _reloj(),
+          items: _numerar(_itemsNuevos(datos['productos'])),
+        );
+        await _confirmar([
+          {'t': 'pedido', 'v': pedido.toJson()},
+          if (operacion != null) _registroOperacion(operacion, pedido.id),
+        ]);
+        final json = pedido.toJson();
+        emitir?.call('nuevo_pedido', json);
+        return json;
+      });
+
+  /// Un renglón sigue pendiente en cocina, así que se le puede sumar cantidad
+  /// sin que cocina la pierda de vista: no viene servido de otra cuenta y, si
+  /// cocina ya empezó o terminó la cuenta, es un extra que aún no termina. Los
+  /// demás renglones de una cuenta empezada pueden estar ya hechos o tachados
+  /// (las casillas viven en la tablet de cocina; la central no las conoce).
+  bool _pendienteEnCocina(PedidoCentral pedido, ItemCentral item) =>
+      !item.servido && (pedido.estado == 'pendiente' || item.extraDesde != null);
+
+  /// Aviso a cocina (`extra_pedido`) solo con lo nuevo de una cuenta que ya tenía.
+  void _avisarExtra(PedidoCentral pedido, List<ItemCentral> extras) {
+    if (extras.isEmpty) return;
+    emitir?.call('extra_pedido', {
+      'pedido_id': pedido.id,
+      'mesa': pedido.mesa,
+      'tipo': pedido.tipo,
+      'comensal': pedido.comensal,
+      'items': [
+        for (final n in extras) {'nombre': n.nombre, 'cantidad': n.cantidad, 'nota': n.nota, 'precio': n.precio},
+      ],
+      'total_extra': extras.fold<double>(0, (s, n) => s + n.precio * n.cantidad),
+    });
+  }
+
+  /// Agrega productos. Sobre una cuenta ya cobrada (aunque siga en cocina) abre
+  /// una cuenta nueva; sobre una que cocina ya empezó o terminó, lo nuevo va
+  /// como extra y se avisa a cocina solo con eso (`extra_pedido`).
+  Future<Map<String, dynamic>> agregarProductos(
+    int id,
+    Map<String, dynamic> datos, {
+    required UsuarioCentral usuario,
+    String? operacion,
+  }) =>
+      _enSerie(() async {
+        final repetida = _yaProcesada(operacion);
+        if (repetida != null) return repetida;
+
+        final pedido = _pedido(id);
+        if (pedido.estado == 'cancelado') {
+          throw ErrorCentral(400, 'INVALID_STATUS', 'No se puede modificar un pedido cancelado.');
+        }
+        final nuevos = _numerar(_itemsNuevos(datos['productos']));
+
+        // Sobre una cuenta cobrada se abre una nueva: ahí no son extras.
+        if (pedido.cobrado) {
+          final cuenta = PedidoCentral(
+            id: _siguiente('pedido'),
+            mesa: pedido.mesa,
+            estado: 'pendiente',
+            tipo: pedido.tipo,
+            comensal: pedido.comensal,
+            usuarioId: usuario.id,
+            mesero: usuario.username,
+            creadoEn: _reloj(),
+            items: nuevos,
+          );
+          await _confirmar([
+            {'t': 'pedido', 'v': cuenta.toJson()},
+            if (operacion != null) _registroOperacion(operacion, cuenta.id),
+          ]);
+          final json = cuenta.toJson();
+          emitir?.call('nuevo_pedido', json);
+          return json;
+        }
+
+        // Mismo producto, nota y precio se suman, pero solo a un renglón que
+        // cocina aún tiene pendiente; con otra nota va en renglón aparte.
+        // Lo nuevo no se mezcla con lo ya servido ni con lo que cocina ya empezó
+        // o terminó (ahí no lo vería): va en su propio renglón, marcado como
+        // extra hasta que cocina lo termine.
+        final empezada = pedido.estado != 'pendiente';
+        final ahora = _reloj();
+        final items = [...pedido.items];
+        final extras = <ItemCentral>[];
+        for (final nuevo in nuevos) {
+          // Una parte de un platillo dividido tampoco se mezcla.
+          bool igual(ItemCentral x) =>
+              x.compartido == null &&
+              x.productoId == nuevo.productoId &&
+              x.nota == nuevo.nota &&
+              x.precio == nuevo.precio;
+          final i = items.indexWhere((x) => igual(x) && _pendienteEnCocina(pedido, x));
+          if (i >= 0) {
+            items[i] = items[i].copyWith(cantidad: items[i].cantidad + nuevo.cantidad);
+            if (items[i].extraDesde != null) extras.add(nuevo);
+          } else if (empezada || items.any((x) => igual(x) && x.servido)) {
+            items.add(nuevo.copyWith(extraDesde: ahora));
+            extras.add(nuevo);
+          } else {
+            items.add(nuevo);
+          }
+        }
+        final actualizado = pedido.copyWith(items: items);
+        await _confirmar([
+          {'t': 'pedido', 'v': actualizado.toJson()},
+          if (operacion != null) _registroOperacion(operacion, id),
+        ]);
+
+        final json = actualizado.toJson();
+        _avisarExtra(pedido, extras);
+        emitir?.call('pedido_actualizado', {...json, '_accion': 'productos_agregados'});
+        return json;
+      });
+
+  /// Edita una cuenta abierta, también cuando cocina ya la terminó (el cliente
+  /// se arrepiente o pide más después): mientras no se cobre se puede corregir.
+  /// Subir la cantidad de un renglón que cocina ya no tiene pendiente no lo
+  /// toca: la diferencia va en un renglón extra y se avisa a cocina.
+  Future<Map<String, dynamic>> editarPedido(int id, Map<String, dynamic> datos) => _enSerie(() async {
+        final pedido = _pedido(id);
+        if (pedido.estado == 'pagado' || pedido.estado == 'cancelado') {
+          throw ErrorCentral(400, 'INVALID_STATUS', 'Solo se pueden editar cuentas que no se han cobrado ni cancelado.');
+        }
+        final cambios = datos['items'];
+        if (pedido.pago != null && cambios is List && cambios.isNotEmpty) {
+          throw ErrorCentral(400, 'ALREADY_PAID', 'El pedido ya se cobró; sus productos no se pueden cambiar.');
+        }
+        final hayMetadatos = datos.containsKey('mesa') || datos.containsKey('tipo') || datos.containsKey('comensal');
+        if ((cambios is! List || cambios.isEmpty) && !hayMetadatos) {
+          throw ErrorCentral(400, 'EMPTY_FIELDS', 'Debe enviar al menos un campo a editar.');
+        }
+
+        var items = [...pedido.items];
+        final extras = <ItemCentral>[];
+        if (cambios is List) {
+          for (final c in cambios.cast<Map<String, dynamic>>()) {
+            final detalleId = int.tryParse(c['detalle_id'].toString());
+            final cantidad = int.tryParse(c['cantidad'].toString()) ?? -1;
+            if (cantidad < 0) throw ErrorCentral(400, 'VALIDATION_ERROR', 'Cantidad debe ser 0 o mayor.');
+            if (cantidad == 0) {
+              items = [for (final i in items) if (i.id != detalleId) i];
+            } else {
+              final compartido = items.any((i) => i.id == detalleId && i.compartido != null);
+              if (compartido && cantidad > 1) {
+                throw ErrorCentral(400, 'SHARED_ITEM', 'Un producto dividido entre cuentas no puede cambiar de cantidad.');
+              }
+              final nota = _nota(c['nota']);
+              // Lo que se pide de más sobre algo que cocina ya hizo (o pudo
+              // tachar) va aparte como extra; si no, cocina no se enteraría.
+              final previo = items.where((i) => i.id == detalleId).firstOrNull;
+              final deMas = previo == null || _pendienteEnCocina(pedido, previo) ? 0 : cantidad - previo.cantidad;
+              items = [
+                for (final i in items)
+                  if (i.id == detalleId)
+                    i.copyWith(cantidad: deMas > 0 ? i.cantidad : cantidad, nota: nota, borrarNota: nota == null)
+                  else
+                    i,
+              ];
+              if (previo != null && deMas > 0) {
+                final extra = previo.copyWith(
+                  id: _siguiente('item'),
+                  cantidad: deMas,
+                  nota: nota,
+                  borrarNota: nota == null,
+                  extraDesde: _reloj(),
+                  servido: false,
+                );
+                items.add(extra);
+                extras.add(extra);
+              }
+            }
+          }
+        }
+        if (items.isEmpty) throw ErrorCentral(400, 'EMPTY_ORDER', 'El pedido no puede quedar sin productos.');
+
+        final comensal = datos.containsKey('comensal') ? _comensal(datos['comensal']) : pedido.comensal;
+        final actualizado = pedido.copyWith(
+          mesa: datos.containsKey('mesa') ? _mesa(datos['mesa']) : null,
+          tipo: datos.containsKey('tipo') ? _tipo(datos['tipo']) : null,
+          comensal: comensal,
+          borrarComensal: comensal == null,
+          items: items,
+        );
+        final relevos = _relevarPartes(pedido, items);
+        await _confirmar([
+          {'t': 'pedido', 'v': actualizado.toJson()},
+          for (final r in relevos) {'t': 'pedido', 'v': r.toJson()},
+        ]);
+        final json = actualizado.toJson();
+        // Solo lo que sigue en la cuenta: un extra quitado en el mismo cambio no se avisa.
+        _avisarExtra(actualizado, [for (final e in extras) if (items.any((i) => i.id == e.id)) e]);
+        emitir?.call('pedido_actualizado', {...json, '_accion': 'pedido_editado'});
+        for (final r in relevos) {
+          emitir?.call('pedido_actualizado', {...r.toJson(), '_accion': 'parte_relevada'});
+        }
+        return json;
+      });
+
+  // ── Repartir productos entre cuentas ─────────────────────
+
+  static const maxPartes = 20;
+
+  int _idPedido(Object? valor) => int.tryParse(valor?.toString() ?? '') ??
+      (throw ErrorCentral(400, 'VALIDATION_ERROR', 'Cuenta de destino inválida.'));
+
+  /// Origen y destinos deben seguir abiertos y ser de la misma mesa.
+  void _validarReparto(PedidoCentral origen, List<PedidoCentral> destinos) {
+    for (final p in [origen, ...destinos]) {
+      // También las cobradas por adelantado que siguen en cocina.
+      if (p.cobrado) {
+        throw ErrorCentral(400, 'ACCOUNT_PAID',
+            'La cuenta #${p.id}${p.comensal == null ? '' : ' (${p.comensal})'} ya está cobrada; no se pueden mover ni dividir sus productos.');
+      }
+      if (p.estado == 'cancelado') {
+        throw ErrorCentral(400, 'INVALID_STATUS', 'La cuenta #${p.id} está cancelada.');
+      }
+    }
+    final ids = {for (final d in destinos) d.id};
+    if (ids.length != destinos.length || ids.contains(origen.id)) {
+      throw ErrorCentral(400, 'VALIDATION_ERROR', 'Elige cuentas distintas a la de origen.');
+    }
+    if (origen.tipo == 'llevar' || destinos.any((d) => d.tipo == 'llevar')) {
+      throw ErrorCentral(400, 'DIFFERENT_TABLE', 'Los pedidos para llevar no se reparten entre cuentas.');
+    }
+    if (destinos.any((d) => d.mesa != origen.mesa)) {
+      throw ErrorCentral(400, 'DIFFERENT_TABLE', 'Solo se pueden repartir productos entre cuentas de la misma mesa.');
+    }
+  }
+
+  /// Cocina solo ve la parte 1 de un platillo dividido. Si esa parte sale de
+  /// [antes] (cuenta cancelada, borrada o editada) y en [quedan] ya no está, la
+  /// parte de menor número en otra cuenta abierta pasa a ser la 1 para que cocina
+  /// no pierda el platillo. Si cocina aún no lo había hecho y esa cuenta ya está
+  /// lista, le llega como extra. Devuelve las cuentas que cambian.
+  List<PedidoCentral> _relevarPartes(PedidoCentral antes, List<ItemCentral> quedan) {
+    // Grupo → si el platillo ya se había cocinado en la cuenta que lo deja.
+    final grupos = {
+      for (final i in antes.items)
+        if (i.compartido?.parte == 1 && !quedan.any((q) => q.id == i.id))
+          i.compartido!.grupo:
+              i.servido || ((antes.estado == 'listo' || antes.estado == 'pagado') && i.extraDesde == null),
+    };
+    final cambios = <int, PedidoCentral>{};
+    for (final MapEntry(key: grupo, value: yaHecho) in grupos.entries) {
+      PedidoCentral? cuenta;
+      ItemCentral? relevo;
+      for (final p in _pedidos.values) {
+        if (p.id == antes.id || p.estado == 'cancelado' || p.estado == 'pagado') continue;
+        final actual = cambios[p.id] ?? p;
+        for (final i in actual.items) {
+          if (i.compartido?.grupo == grupo && (relevo == null || i.compartido!.parte < relevo.compartido!.parte)) {
+            cuenta = actual;
+            relevo = i;
+          }
+        }
+      }
+      if (cuenta == null || relevo == null) continue;
+      // Ya cocinado: queda como servido. Si no, y esa cuenta ya estaba lista, a cocina le llega como extra.
+      final comoExtra = !yaHecho && cuenta.estado == 'listo';
+      final elegido = relevo;
+      cambios[cuenta.id] = cuenta.copyWith(items: [
+        for (final i in cuenta.items)
+          if (i.id == elegido.id)
+            i.copyWith(
+              compartido: ParteCompartida(grupo: grupo, parte: 1, partes: elegido.compartido!.partes),
+              extraDesde: comoExtra ? _reloj() : null,
+              servido: yaHecho ? true : null,
+            )
+          else
+            i,
+      ]);
+    }
+    return cambios.values.toList();
+  }
+
+  ItemCentral _renglon(PedidoCentral pedido, Object? detalleId) {
+    final id = int.tryParse(detalleId?.toString() ?? '');
+    return pedido.items.where((i) => i.id == id).firstOrNull ??
+        (throw ErrorCentral(404, 'ITEM_NOT_FOUND', 'El producto ya no está en la cuenta #${pedido.id}.'));
+  }
+
+  /// Mueve un renglón (o [datos]`['cantidad']` piezas de él) a otra cuenta de la
+  /// misma mesa: `{detalle_id, destino, cantidad?}`. Si la cuenta de origen se
+  /// queda sin productos, se borra (nunca se cobró, así que no hay venta).
+  Future<Map<String, dynamic>> moverProducto(int id, Map<String, dynamic> datos, {String? operacion}) =>
+      _enSerie(() async {
+        if (_yaHecha(operacion)) {
+          return {
+            'pedidos': _comoQuedaron([id, _idPedido(datos['destino'])]),
+            'eliminado': _pedidos.containsKey(id) ? null : id,
+          };
+        }
+        final origen = _pedido(id);
+        final destino = _pedido(_idPedido(datos['destino']));
+        _validarReparto(origen, [destino]);
+        final item = _renglon(origen, datos['detalle_id']);
+        final cantidad = datos['cantidad'] == null ? item.cantidad : int.tryParse(datos['cantidad'].toString()) ?? 0;
+        if (cantidad < 1 || cantidad > item.cantidad) {
+          throw ErrorCentral(400, 'VALIDATION_ERROR', 'La cantidad a mover debe estar entre 1 y ${item.cantidad}.');
+        }
+
+        final completo = cantidad == item.cantidad;
+        // Lo que cocina aún no termina y llega a una cuenta ya lista, cocina lo
+        // ve como extra (`extra_desde`); en una cuenta que sigue en cocina se
+        // prepara junto con lo demás.
+        // Lo que ya se sirvió (cuenta de origen lista, sin ser extra pendiente) no
+        // se vuelve a cocinar aunque llegue a una cuenta que sigue en cocina.
+        final loVeCocina = item.compartido == null || item.compartido!.parte == 1;
+        final yaHecho = item.servido || (origen.estado == 'listo' && item.extraDesde == null);
+        final nuevoExtra = loVeCocina && !yaHecho && destino.estado == 'listo' && item.extraDesde == null;
+        final base = destino.estado == 'listo'
+            ? (nuevoExtra ? item.copyWith(extraDesde: _reloj()) : item)
+            : item.copyWith(terminarExtra: true, servido: yaHecho);
+        final movido = completo ? base : base.copyWith(id: _siguiente('item'), cantidad: cantidad);
+        final itemsOrigen = [
+          for (final i in origen.items)
+            if (i.id != item.id) i else if (!completo) i.copyWith(cantidad: i.cantidad - cantidad),
+        ];
+        final itemsDestino = [...destino.items];
+        final igual = itemsDestino.indexWhere((x) => x.combinableCon(movido));
+        if (igual >= 0) {
+          itemsDestino[igual] = itemsDestino[igual].copyWith(cantidad: itemsDestino[igual].cantidad + cantidad);
+        } else {
+          itemsDestino.add(movido);
+        }
+
+        final nuevoDestino = destino.copyWith(items: itemsDestino);
+        final nuevoOrigen = itemsOrigen.isEmpty ? null : origen.copyWith(items: itemsOrigen);
+        await _confirmar([
+          {'t': 'pedido', 'v': nuevoDestino.toJson()},
+          if (nuevoOrigen == null) {'t': 'borrar', 'tabla': 'pedido', 'id': id} else {'t': 'pedido', 'v': nuevoOrigen.toJson()},
+          if (operacion != null) _registroOperacion(operacion, destino.id),
+        ]);
+
+        if (nuevoExtra) {
+          emitir?.call('extra_pedido', {
+            'pedido_id': destino.id,
+            'mesa': destino.mesa,
+            'tipo': destino.tipo,
+            'comensal': destino.comensal,
+            'items': [
+              {'nombre': movido.nombre, 'cantidad': cantidad, 'nota': movido.nota, 'precio': movido.precio},
+            ],
+            'total_extra': movido.precio * cantidad,
+          });
+        }
+        if (nuevoOrigen == null) {
+          emitir?.call('pedido_eliminado', {'id': id});
+        } else {
+          emitir?.call('pedido_actualizado', {...nuevoOrigen.toJson(), '_accion': 'producto_movido'});
+        }
+        final json = nuevoDestino.toJson();
+        emitir?.call('pedido_actualizado', {...json, '_accion': 'producto_movido'});
+        return {
+          'pedidos': [?nuevoOrigen?.toJson(), json],
+          'eliminado': nuevoOrigen == null ? id : null,
+        };
+      });
+
+  /// Divide una pieza de un renglón en partes iguales entre esta cuenta y
+  /// `destinos` (`{detalle_id, destinos: [ids]}`). La parte 1 se queda en esta
+  /// cuenta y es la única que ve cocina; los centavos sobrantes van a las primeras partes.
+  Future<Map<String, dynamic>> dividirProducto(int id, Map<String, dynamic> datos, {String? operacion}) =>
+      _enSerie(() async {
+        final lista = datos['destinos'];
+        if (lista is! List || lista.isEmpty) {
+          throw ErrorCentral(400, 'VALIDATION_ERROR', 'Elige al menos otra cuenta para dividir.');
+        }
+        if (_yaHecha(operacion)) {
+          return {'pedidos': _comoQuedaron([id, for (final d in lista) _idPedido(d)])};
+        }
+        final origen = _pedido(id);
+        final destinos = [for (final d in lista) _pedido(_idPedido(d))];
+        _validarReparto(origen, destinos);
+        final item = _renglon(origen, datos['detalle_id']);
+        if (item.compartido != null) {
+          throw ErrorCentral(400, 'ALREADY_SHARED', 'Este producto ya está dividido entre cuentas.');
+        }
+        final partes = destinos.length + 1;
+        if (partes > maxPartes) {
+          throw ErrorCentral(400, 'VALIDATION_ERROR', 'Se puede dividir entre $maxPartes cuentas como máximo.');
+        }
+        final montos = repartirCentavos(item.precio, partes);
+        if (montos.last <= 0) {
+          throw ErrorCentral(400, 'VALIDATION_ERROR', 'El precio es muy bajo para dividirlo entre $partes.');
+        }
+
+        // Con una sola pieza, la parte 1 conserva el renglón (y su lugar en cocina).
+        final grupo = item.cantidad == 1 ? item.id : _siguiente('item');
+        ItemCentral parte(int indice, int itemId) => ItemCentral(
+              id: itemId,
+              productoId: item.productoId,
+              nombre: item.nombre,
+              precio: montos[indice],
+              cantidad: 1,
+              nota: item.nota,
+              // Si era un extra que cocina aún prepara, lo sigue siendo en la parte que ve cocina.
+              extraDesde: indice == 0 ? item.extraDesde : null,
+              compartido: ParteCompartida(grupo: grupo, parte: indice + 1, partes: partes),
+              servido: item.servido,
+            );
+        final itemsOrigen = [
+          for (final i in origen.items)
+            if (i.id != item.id)
+              i
+            else ...[
+              if (item.cantidad > 1) i.copyWith(cantidad: i.cantidad - 1),
+              parte(0, grupo),
+            ],
+        ];
+        final actualizados = [
+          origen.copyWith(items: itemsOrigen),
+          for (var d = 0; d < destinos.length; d++)
+            destinos[d].copyWith(items: [...destinos[d].items, parte(d + 1, _siguiente('item'))]),
+        ];
+        await _confirmar([
+          for (final p in actualizados) {'t': 'pedido', 'v': p.toJson()},
+          if (operacion != null) _registroOperacion(operacion, id),
+        ]);
+        final pedidos = [for (final p in actualizados) p.toJson()];
+        for (final p in pedidos) {
+          emitir?.call('pedido_actualizado', {...p, '_accion': 'producto_dividido'});
+        }
+        return {'pedidos': pedidos};
+      });
+
+  /// Cocina solo avanza la preparación o cancela lo que aún no termina; el cobro
+  /// es de mesero y admin. Un pedido pagado o cancelado ya no cambia de estado.
+  ///
+  /// Un pedido cobrado por adelantado sigue en cocina con su estado; cuando
+  /// cocina lo marca listo se cierra solo (pasa a `pagado`) sin registrar otra
+  /// venta, y el evento lleva `_accion: 'listo_pagado'` para avisar al mesero.
+  Future<Map<String, dynamic>> cambiarEstado(int id, String estado, {required UsuarioCentral usuario}) =>
+      _enSerie(() async {
+        if (!estadosValidos.contains(estado)) {
+          throw ErrorCentral(400, 'INVALID_STATUS', 'Estado inválido. Valores: ${estadosValidos.join(', ')}.');
+        }
+        final pedido = _pedido(id);
+        // Cancelar algo ya cobrado es devolver el dinero: solo el administrador.
+        if (estado == 'cancelado' && pedido.cobrado) return _reembolsar(pedido, usuario);
+        if (pedido.estado == 'pagado' || pedido.estado == 'cancelado') {
+          throw ErrorCentral(400, 'INVALID_STATUS', 'El pedido ya está ${pedido.estado}.');
+        }
+        if (usuario.rol == 'cocina') {
+          final permitido = estado == 'preparando' ||
+              estado == 'listo' ||
+              (estado == 'cancelado' && (pedido.estado == 'pendiente' || pedido.estado == 'preparando'));
+          if (!permitido) throw ErrorCentral(403, 'FORBIDDEN', 'Cocina no puede cambiar el pedido a "$estado".');
+        }
+        // Una tablet con la versión anterior no conoce el cobro por adelantado.
+        if (pedido.pago != null && estado == 'pagado') {
+          throw ErrorCentral(400, 'ALREADY_PAID', 'Esta cuenta ya se cobró. Actualiza la app de esta tablet.');
+        }
+        final cerrarPagado = pedido.pago != null && estado == 'listo';
+        // Marcar listo también termina los extras que cocina tenía pendientes.
+        final actualizado = pedido.copyWith(
+          estado: cerrarPagado ? 'pagado' : estado,
+          items: estado == 'listo' && pedido.items.any((i) => i.extraDesde != null)
+              ? [for (final i in pedido.items) i.copyWith(terminarExtra: true)]
+              : null,
+        );
+        final relevos = estado == 'cancelado' ? _relevarPartes(pedido, const []) : const <PedidoCentral>[];
+        await _confirmar([
+          {'t': 'pedido', 'v': actualizado.toJson()},
+          for (final r in relevos) {'t': 'pedido', 'v': r.toJson()},
+          // Cobro sin desglose (clientes anteriores al pago mixto). Si ya se cobró por adelantado, no se repite.
+          if (estado == 'pagado' && pedido.pago == null)
+            {
+              't': 'venta',
+              'v': VentaCentral(id: _siguiente('venta'), pedidoId: id, total: actualizado.total, fecha: _reloj())
+                  .toJson(),
+            },
+        ]);
+        final json = actualizado.toJson();
+        emitir?.call('pedido_actualizado', cerrarPagado ? {...json, '_accion': 'listo_pagado'} : json);
+        for (final r in relevos) {
+          emitir?.call('pedido_actualizado', {...r.toJson(), '_accion': 'parte_relevada'});
+        }
+        return json;
+      });
+
+  /// Cancela una cuenta ya cobrada (por adelantado o cerrada) y devuelve el
+  /// dinero: registra una venta negativa con el mismo desglose que se cobró,
+  /// así las ventas del día y el efectivo de caja bajan. Se ejecuta dentro de
+  /// [cambiarEstado], ya en serie.
+  Future<Map<String, dynamic>> _reembolsar(PedidoCentral pedido, UsuarioCentral usuario) async {
+    if (usuario.rol != 'admin') {
+      throw ErrorCentral(403, 'ALREADY_PAID',
+          'El pedido ya se cobró. Solo el administrador puede cancelarlo, y al hacerlo se devuelve el dinero.');
+    }
+    final cobradas = _ventas.values.where((v) => v.pedidoId == pedido.id).toList();
+    final total = cobradas.fold<double>(0, (s, v) => s + v.total);
+    final conDesglose = cobradas.any((v) => v.conDesglose);
+    final actualizado = pedido.copyWith(
+      estado: 'cancelado',
+      items: [for (final i in pedido.items) i.copyWith(terminarExtra: true)],
+    );
+    final relevos = _relevarPartes(pedido, const []);
+    await _confirmar([
+      {'t': 'pedido', 'v': actualizado.toJson()},
+      for (final r in relevos) {'t': 'pedido', 'v': r.toJson()},
+      if (_centavos(total) > 0)
+        {
+          't': 'venta',
+          'v': VentaCentral(
+            id: _siguiente('venta'),
+            pedidoId: pedido.id,
+            total: -total,
+            fecha: _reloj(),
+            efectivo: conDesglose ? -cobradas.fold<double>(0, (s, v) => s + (v.efectivo ?? 0)) : null,
+            tarjeta: conDesglose ? -cobradas.fold<double>(0, (s, v) => s + (v.tarjeta ?? 0)) : null,
+          ).toJson(),
+        },
+    ]);
+    final json = actualizado.toJson();
+    emitir?.call('pedido_actualizado', {...json, '_accion': 'reembolsado'});
+    for (final r in relevos) {
+      emitir?.call('pedido_actualizado', {...r.toJson(), '_accion': 'parte_relevada'});
+    }
+    return json;
+  }
+
+  /// Cobra una o varias cuentas con su forma de pago: `efectivo` + `tarjeta`
+  /// debe sumar el total. Se puede cobrar antes de que cocina termine (el cliente
+  /// paga y se va): la venta se registra ya y el pedido sigue en cocina con su
+  /// estado hasta que lo marque listo. Los pedidos listos pasan a `pagado`
+  /// (salvo que tengan extras pendientes: se cierran cuando cocina los termine).
+  Future<List<Map<String, dynamic>>> cobrar(Map<String, dynamic> datos, {String? operacion}) => _enSerie(() async {
+        final ids = [
+          for (final id in (datos['pedidos'] is List ? datos['pedidos'] as List : const []))
+            int.tryParse(id.toString()) ?? (throw ErrorCentral(400, 'VALIDATION_ERROR', 'ID inválido.')),
+        ];
+        if (ids.isEmpty || ids.toSet().length != ids.length) {
+          throw ErrorCentral(400, 'VALIDATION_ERROR', 'Indica las cuentas a cobrar, sin repetir.');
+        }
+        // Reintento del mismo cobro (se perdió la respuesta): ya quedó registrado.
+        if (_yaHecha(operacion)) return _comoQuedaron(ids);
+        final pedidos = [for (final id in ids) _pedido(id)];
+        for (final p in pedidos) {
+          if (p.estado == 'cancelado') {
+            throw ErrorCentral(400, 'INVALID_STATUS', 'El pedido #${p.id} está cancelado.');
+          }
+          if (p.cobrado) throw ErrorCentral(400, 'ALREADY_PAID', 'El pedido #${p.id} ya se cobró.');
+        }
+        double importe(String campo) {
+          final valor = datos[campo] == null ? 0.0 : double.tryParse(datos[campo].toString());
+          if (valor == null || valor < 0 || !valor.isFinite) {
+            throw ErrorCentral(400, 'VALIDATION_ERROR', 'El importe en $campo no es válido.');
+          }
+          return valor;
+        }
+
+        final efectivo = importe('efectivo');
+        final tarjeta = importe('tarjeta');
+        final total = pedidos.fold<double>(0, (s, p) => s + p.total);
+        if (_centavos(efectivo) + _centavos(tarjeta) != _centavos(total)) {
+          // Casi siempre es porque la cuenta cambió (otra tablet agregó o quitó algo) con el cobro abierto.
+          throw ErrorCentral(400, 'PAGO_INCOMPLETO',
+              'El total de la cuenta ahora es \$${total.toStringAsFixed(2)} y el pago no coincide. '
+              'Puede que alguien la haya cambiado: cierra el cobro y vuelve a abrirlo.');
+        }
+
+        final ahora = _reloj();
+        final partes = repartirPago([for (final p in pedidos) p.total], efectivo);
+        final actualizados = [
+          for (var i = 0; i < pedidos.length; i++)
+            pedidos[i].copyWith(
+              // Un listo con extras que cocina aún prepara sigue abierto hasta que los termine.
+              estado: pedidos[i].estado == 'listo' && !pedidos[i].items.any((it) => it.extraDesde != null)
+                  ? 'pagado'
+                  : null,
+              pago: PagoCentral(efectivo: partes[i].efectivo, tarjeta: partes[i].tarjeta, fecha: ahora),
+            ),
+        ];
+        await _confirmar([
+          for (var i = 0; i < actualizados.length; i++) ...[
+            {'t': 'pedido', 'v': actualizados[i].toJson()},
+            {
+              't': 'venta',
+              'v': VentaCentral(
+                id: _siguiente('venta'),
+                pedidoId: actualizados[i].id,
+                total: actualizados[i].total,
+                fecha: ahora,
+                efectivo: partes[i].efectivo,
+                tarjeta: partes[i].tarjeta,
+              ).toJson(),
+            },
+          ],
+          if (operacion != null) _registroOperacion(operacion, ids.first),
+        ]);
+        final respuesta = [for (final p in actualizados) p.toJson()];
+        for (final json in respuesta) {
+          emitir?.call('pedido_actualizado', {...json, '_accion': 'cobrado'});
+        }
+        return respuesta;
+      });
+
+  /// Eliminar no es un reembolso: la venta registrada se conserva.
+  Future<Map<String, dynamic>> eliminarPedido(int id) => _enSerie(() async {
+        final pedido = _pedido(id);
+        final relevos = _relevarPartes(pedido, const []);
+        await _confirmar([
+          {'t': 'borrar', 'tabla': 'pedido', 'id': id},
+          for (final r in relevos) {'t': 'pedido', 'v': r.toJson()},
+        ]);
+        emitir?.call('pedido_eliminado', {'id': id});
+        for (final r in relevos) {
+          emitir?.call('pedido_actualizado', {...r.toJson(), '_accion': 'parte_relevada'});
+        }
+        return pedido.toJson();
+      });
+
+  // ── Métricas (en hora local de la tablet) ────────────────
+
+  DateTime _dia(DateTime f) {
+    final l = f.toLocal();
+    return DateTime(l.year, l.month, l.day);
+  }
+
+  Map<String, dynamic> resumen() {
+    final hoy = _dia(_reloj());
+    final lunes = hoy.subtract(Duration(days: hoy.weekday - 1));
+    final hoyTotales = _Totales();
+    for (final v in _ventas.values.where((v) => _dia(v.fecha) == hoy)) {
+      hoyTotales.sumar(v);
+    }
+    final ventasHoy = hoyTotales.total;
+    final ventasSemana =
+        _ventas.values.where((v) => !_dia(v.fecha).isBefore(lunes)).fold<double>(0, (s, v) => s + v.total);
+    final pedidosHoy = _pedidos.values.where((p) => p.estado != 'cancelado' && _dia(p.creadoEn) == hoy).length;
+
+    final estados = <String, int>{};
+    for (final p in _pedidos.values) {
+      estados[p.estado] = (estados[p.estado] ?? 0) + 1;
+    }
+    final porProducto = <String, int>{};
+    for (final p in _pedidos.values.where((p) => p.estado != 'cancelado')) {
+      // Un platillo dividido es uno solo: se cuenta en su parte 1, como lo ve cocina.
+      for (final i in p.items.where((i) => i.compartido == null || i.compartido!.parte == 1)) {
+        porProducto[i.nombre] = (porProducto[i.nombre] ?? 0) + i.cantidad;
+      }
+    }
+    final top = porProducto.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+
+    return {
+      'dia': {'total_ventas': ventasHoy, 'total_pedidos': pedidosHoy, ...hoyTotales.desglose()},
+      'semana': ventasSemana,
+      'estados': [
+        for (final e in (estados.entries.toList()..sort((a, b) => a.key.compareTo(b.key))))
+          {'estado': e.key, 'cantidad': e.value},
+      ],
+      'productosTop': [
+        for (final e in top.take(5)) {'nombre': e.key, 'total_pedido': e.value},
+      ],
+    };
+  }
+
+  /// Ventas cobradas agrupadas por día local:
+  /// `[{fecha: 'AAAA-MM-DD', pedidos, total, efectivo, tarjeta, sin_desglose}]`.
+  List<Map<String, dynamic>> ventasPorDia(int dias) {
+    final desde = _dia(_reloj()).subtract(Duration(days: dias));
+    final grupos = <DateTime, _Totales>{};
+    for (final v in _ventas.values) {
+      final dia = _dia(v.fecha);
+      if (dia.isBefore(desde)) continue;
+      grupos.putIfAbsent(dia, _Totales.new).sumar(v);
+    }
+    final dias0 = grupos.keys.toList()..sort();
+    String dosDigitos(int n) => n.toString().padLeft(2, '0');
+    return [
+      for (final d in dias0)
+        {
+          'fecha': '${d.year}-${dosDigitos(d.month)}-${dosDigitos(d.day)}',
+          'pedidos': grupos[d]!.pedidos,
+          'total': double.parse(grupos[d]!.total.toStringAsFixed(2)),
+          ...grupos[d]!.desglose(),
+        },
+    ];
+  }
+}
