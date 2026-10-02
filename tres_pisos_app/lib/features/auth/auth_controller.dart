@@ -58,6 +58,10 @@ final authControllerProvider = NotifierProvider<AuthController, Sesion?>(AuthCon
 /// El token dura 12 h: al pasar la mitad se pide uno nuevo a la central
 /// (`POST /api/auth/renovar`) para que un turno largo no deje a nadie fuera.
 /// Si la central responde 401 (sesión revocada o caducada) se cierra la sesión.
+///
+/// Las fechas del token son de la central y el reloj de esta tablet puede ir
+/// adelantado o atrasado (no hay internet): todo se calcula con la hora de la
+/// central, a partir del desfase medido al recibir cada token ([Sesion.desfase]).
 class AuthController extends Notifier<Sesion?> {
   Timer? _renovacion;
   Future<void>? _renovando;
@@ -77,10 +81,10 @@ class AuthController extends Notifier<Sesion?> {
     _renovacion?.cancel();
     _renovacion = null;
     if (sesion == null) return;
-    final mitad = mitadVigenciaToken(sesion.token);
-    if (mitad == null) return;
-    final hastaMitad = mitad.difference(DateTime.now().toUtc());
-    final retraso = espera ?? (hastaMitad.isNegative ? Duration.zero : hastaMitad);
+    // Con la hora de la central, no la de esta tablet: los relojes pueden diferir.
+    final hastaMitad = sesion.hastaRenovar();
+    if (hastaMitad == null) return;
+    final retraso = espera ?? hastaMitad;
     _renovacion = Timer(retraso, () => unawaited(renovarSiHaceFalta()));
   }
 
@@ -91,7 +95,7 @@ class AuthController extends Notifier<Sesion?> {
 
   Future<void> _renovar() async {
     final sesion = state;
-    if (sesion == null || !debeRenovarToken(sesion.token)) return;
+    if (sesion == null || !sesion.debeRenovar()) return;
     final enlace = ref.read(conexionProvider)?.enlace ?? sesion.conexion.enlace;
     try {
       final datos = await ApiClient(servidor: sesion.servidor, token: sesion.token, enlace: enlace)
@@ -103,6 +107,7 @@ class AuthController extends Notifier<Sesion?> {
         conexion: sesion.conexion,
         token: token,
         usuario: user is Map<String, dynamic> ? Usuario.fromJson(user) : sesion.usuario,
+        desfase: desfaseConCentral(token),
       );
       await ref.read(almacenSesionProvider).guardar(nueva);
       if (!identical(state, sesion)) return;
@@ -134,7 +139,13 @@ class AuthController extends Notifier<Sesion?> {
     if (token is! String || user is! Map<String, dynamic>) {
       throw ApiException('Respuesta de login inválida.');
     }
-    final sesion = Sesion(conexion: conexion, token: token, usuario: Usuario.fromJson(user));
+    final sesion = Sesion(
+      conexion: conexion,
+      token: token,
+      usuario: Usuario.fromJson(user),
+      // El token trae la hora de la central: se mide el desfase con este reloj.
+      desfase: desfaseConCentral(token),
+    );
 
     await ref.read(almacenSesionProvider).guardar(sesion);
     state = sesion;

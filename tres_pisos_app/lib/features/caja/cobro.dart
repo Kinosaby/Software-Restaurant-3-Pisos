@@ -102,7 +102,7 @@ String? avisoEnCocina(List<Pedido> pedidos) {
       'la cuenta se cerrará sola y se avisará al mesero para entregarlo.';
 }
 
-/// Cobra una o varias cuentas (p. ej. la mesa completa). Al terminar ofrece compartir el ticket.
+/// Cobra una o varias cuentas (p. ej. la mesa completa). Al terminar muestra el ticket.
 Future<void> mostrarCobro(BuildContext context, WidgetRef ref, List<Pedido> pedidos) async {
   if (pedidos.isEmpty) return;
   final aviso = avisoEnCocina(pedidos);
@@ -110,32 +110,26 @@ Future<void> mostrarCobro(BuildContext context, WidgetRef ref, List<Pedido> pedi
     final seguir = await confirmar(context, titulo: 'Aún en cocina', mensaje: aviso, accion: 'Cobrar de todos modos');
     if (!seguir || !context.mounted) return;
   }
+  // La pantalla que abrió el cobro puede cerrarse (la cuenta deja de estar activa);
+  // el ticket se abre desde el navegador, que sigue vivo.
+  final navegador = Navigator.of(context, rootNavigator: true);
   final resultado = await showModalBottomSheet<({Pago pago, List<Pedido> cobrados})>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
     builder: (_) => _HojaCobro(pedidos: pedidos),
   );
-  if (resultado == null || !context.mounted) return;
-  // La pantalla que abrió el cobro puede cerrarse (la cuenta deja de estar activa);
-  // el ticket se abre desde el navegador, que sigue vivo.
-  final contextoRaiz = Navigator.of(context, rootNavigator: true).context;
-  ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(
-      content: Text(pedidos.length == 1 ? '${pedidos.single.titulo} cobrada' : '${pedidos.length} cuentas cobradas'),
-      duration: const Duration(seconds: 6),
-      persist: false, // con botón, Flutter lo deja fijo por defecto
-      action: SnackBarAction(
-        label: 'Ticket',
-        onPressed: () => mostrarTicket(
-          contextoRaiz,
-          resultado.cobrados.isEmpty ? pedidos : resultado.cobrados,
-          pago: resultado.pago,
-          pagado: true,
-        ),
-      ),
-    ));
+  if (resultado == null || !navegador.mounted) return;
+  // Sin impresora, el ticket en pantalla es lo que ve el cliente: se abre solo
+  // al cobrar y se queda hasta que alguien lo cierra. Se espera a que lo cierren
+  // para que la pantalla que abrió el cobro no lo quite al salir ella.
+  await mostrarTicket(
+    navegador.context,
+    // Las cuentas tal como las dejó la central: traen la fecha y hora del cobro.
+    resultado.cobrados.isEmpty ? pedidos : resultado.cobrados,
+    pago: resultado.pago,
+    pagado: true,
+  );
 }
 
 class _HojaCobro extends ConsumerStatefulWidget {

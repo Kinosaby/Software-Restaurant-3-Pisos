@@ -34,7 +34,9 @@ Future<void> main() async {
       final sesion = arranque.sesion;
       arranque = DatosArranque(
         conexion: conexion,
-        sesion: sesion == null ? null : Sesion(conexion: conexion, token: sesion.token, usuario: sesion.usuario),
+        sesion: sesion == null
+            ? null
+            : Sesion(conexion: conexion, token: sesion.token, usuario: sesion.usuario, desfase: sesion.desfase),
       );
     } on Object catch (e) {
       debugPrint('No se pudo arrancar la central: $e');

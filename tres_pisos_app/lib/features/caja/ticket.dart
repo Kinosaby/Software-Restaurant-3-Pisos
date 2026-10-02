@@ -19,6 +19,19 @@ Pago? pagoDelTicket(List<Pedido> pedidos, Pago? capturado) {
   return Pago.sumar([for (final p in pedidos) p.pago!]);
 }
 
+/// Fecha y hora que muestra el ticket: la del cobro que registró la central
+/// (`pago.fecha`), también al reabrirlo días después. Los cobros antiguos sin
+/// esa fecha usan la del pedido; una cuenta aún por pagar, el momento actual.
+DateTime fechaDelTicket(List<Pedido> pedidos, {DateTime? ahora}) {
+  DateTime ultima(Iterable<DateTime> fechas) => fechas.reduce((a, b) => b.isAfter(a) ? b : a);
+  final cobros = [for (final p in pedidos) ?p.pago?.fecha];
+  if (cobros.isNotEmpty) return ultima(cobros);
+  if (pedidos.isNotEmpty && pedidos.every((p) => p.estado == EstadoPedido.pagado)) {
+    return ultima(pedidos.map((p) => p.creadoEn));
+  }
+  return ahora ?? DateTime.now();
+}
+
 /// Renglones de la forma de pago en el ticket: efectivo (con lo recibido y el cambio) y tarjeta.
 List<(String, double)> lineasPago(Pago pago) => [
       if (pago.efectivo >= 0.005) ('Efectivo', pago.efectivo),
@@ -84,7 +97,7 @@ class TicketVista extends StatelessWidget {
             const SizedBox(height: 8),
             Text(restaurante,
                 textAlign: TextAlign.center, style: base.copyWith(fontSize: 18, fontWeight: FontWeight.bold)),
-            Text(_fecha.format(DateTime.now()), textAlign: TextAlign.center, style: base.copyWith(color: gris)),
+            Text(_fecha.format(fechaDelTicket(pedidos)), textAlign: TextAlign.center, style: base.copyWith(color: gris)),
             const SizedBox(height: 6),
             Text(
               primero.tipo == TipoPedido.llevar ? 'Para llevar' : 'Mesa ${primero.mesa}',
@@ -130,9 +143,12 @@ class TicketVista extends StatelessWidget {
 }
 
 /// Vista previa del ticket con el botón para compartirlo como imagen (WhatsApp, impresora, correo...).
+/// No hay impresora: es lo que se le enseña al cliente, así que solo se cierra
+/// con "Cerrar" (o atrás), no al tocar fuera por accidente.
 Future<void> mostrarTicket(BuildContext context, List<Pedido> pedidos, {Pago? pago, bool pagado = false}) {
   return showDialog<void>(
     context: context,
+    barrierDismissible: false,
     builder: (context) => _DialogoTicket(pedidos: pedidos, pago: pago, pagado: pagado),
   );
 }
