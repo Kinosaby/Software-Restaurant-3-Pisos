@@ -5,8 +5,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../central/servidor_central.dart';
+import '../../core/plataforma.dart';
 import '../../core/tema.dart';
 import '../../core/widgets.dart';
+import 'aviso_red.dart';
 import 'central_local.dart';
 import 'enlace_qr.dart';
 import 'red_propia.dart';
@@ -61,23 +63,22 @@ class _CentralInfoPageState extends ConsumerState<CentralInfoPage> {
   Future<void> _redPropia(bool encender) async {
     final notifier = ref.read(redPropiaProvider.notifier);
     if (!encender) {
-      final ok = await confirmar(
-        context,
-        titulo: 'Apagar la red propia',
-        mensaje: 'Las tablets de los meseros conectadas a esta red perderán la conexión. '
-            'Úsalo solo si ya tienen un router.',
-        accion: 'Apagar',
-        destructiva: true,
-      );
+      // Solo se pregunta si hay una red de verdad que los meseros puedan estar usando.
+      final ok = ref.read(redPropiaProvider).fase != FaseRedPropia.activa ||
+          await confirmar(
+            context,
+            titulo: 'Apagar la red propia',
+            mensaje: 'Las tablets de los meseros conectadas a esta red perderán la conexión. '
+                'Úsalo solo si ya tienen un router.',
+            accion: 'Apagar',
+            destructiva: true,
+          );
       if (ok) await notifier.apagar();
       return;
     }
-    await notifier.encender();
-    final estado = ref.read(redPropiaProvider);
-    if (estado.hasError && mounted) {
-      final e = estado.error;
-      mostrarMensaje(context, e is PlatformException ? (e.message ?? '$e') : '$e', error: true);
-    }
+    // Si falla, el motivo queda escrito debajo del interruptor (y aquí se avisa una vez).
+    final error = await notifier.encender();
+    if (error != null && mounted) mostrarMensaje(context, error, error: true);
   }
 
   @override
@@ -85,6 +86,10 @@ class _CentralInfoPageState extends ConsumerState<CentralInfoPage> {
     final local = ref.watch(centralLocalProvider);
     final ips = ref.watch(_ipsProvider);
     final red = ref.watch(redPropiaProvider);
+    // Android 7 no puede crear la red: la opción se ve desactivada, con el motivo.
+    final puedeCrearRed = ref.watch(capacidadesRedProvider).value?.crearRed ?? true;
+    // Al crearse la red la tablet estrena IP: se lee sin esperar al refresco.
+    ref.listen(redPropiaProvider, (_, _) => ref.invalidate(_ipsProvider));
     final texto = Theme.of(context).textTheme;
 
     return Scaffold(
@@ -108,7 +113,13 @@ class _CentralInfoPageState extends ConsumerState<CentralInfoPage> {
                           style: TextStyle(color: Colores.apagado),
                         ),
                         const SizedBox(height: 16),
-                        if (ips.value case final lista? when lista.isNotEmpty)
+                        // Sin router y con la red caída no se muestra un QR que no serviría.
+                        if (red.pedida && red.red == null)
+                          const Text(
+                            'El QR aparecerá aquí cuando la red Wi-Fi de la central esté lista.',
+                            style: TextStyle(color: Colores.aviso),
+                          )
+                        else if (ips.value case final lista? when lista.isNotEmpty)
                           Center(
                             child: VistaQr(
                               datos: DatosEnlace(
@@ -116,7 +127,7 @@ class _CentralInfoPageState extends ConsumerState<CentralInfoPage> {
                                 puerto: local.servidor.puertoEnUso,
                                 codigo: local.central.codigoEnlace,
                                 nombre: local.central.nombre,
-                                red: red.value,
+                                red: red.red,
                               ).uri.toString(),
                             ),
                           ),
@@ -175,16 +186,60 @@ class _CentralInfoPageState extends ConsumerState<CentralInfoPage> {
                         SwitchListTile(
                           secondary: const Icon(Icons.wifi_tethering, color: Colores.acento),
                           title: const Text('Trabajar sin router'),
-                          subtitle: const Text(
-                            'Esta tablet crea su propia red Wi-Fi: sin router, sin internet y sin datos. '
-                            'Los meseros se unen escaneando el QR.',
-                            style: TextStyle(color: Colores.apagado),
+                          subtitle: Text(
+                            puedeCrearRed
+                                ? 'Esta tablet crea su propia red Wi-Fi: sin router, sin internet y sin datos. '
+                                    'Los meseros se unen escaneando el QR.'
+                                : 'Esta tablet tiene Android 7 y no puede crear su propia red Wi-Fi. Usa un router, '
+                                    'o pon como central una tablet con Android 8 o más nuevo.',
+                            style: const TextStyle(color: Colores.apagado),
                           ),
-                          value: red.value != null,
-                          onChanged: red.isLoading ? null : _redPropia,
+                          // Encendido mientras se quiera red propia, aunque ahora esté caída.
+                          value: red.pedida,
+                          onChanged: puedeCrearRed || red.pedida ? _redPropia : null,
                         ),
-                        if (red.isLoading) const LinearProgressIndicator(),
-                        if (red.value case final r?)
+                        if (red.fase == FaseRedPropia.creando) ...[
+                          const LinearProgressIndicator(),
+                          const Padding(
+                            padding: EdgeInsets.fromLTRB(16, 8, 16, 8),
+                            child: Text('Creando la red Wi-Fi…', style: TextStyle(color: Colores.apagado)),
+                          ),
+                        ],
+                        if (red.fase == FaseRedPropia.caida)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'La red no está encendida: los meseros no pueden conectarse.',
+                                  style: TextStyle(color: Colores.peligro, fontWeight: FontWeight.bold),
+                                ),
+                                if (red.error case final error?)
+                                  Text(error, style: const TextStyle(color: Colores.peligro)),
+                                if (red.reintentando)
+                                  const Text('Se está volviendo a crear…', style: TextStyle(color: Colores.apagado)),
+                                Wrap(
+                                  spacing: 8,
+                                  children: [
+                                    if (ajustesParaRed(red.codigo) case final ajustes?)
+                                      OutlinedButton.icon(
+                                        onPressed: () => unawaited(Plataforma.abrirAjustes(ajustes)),
+                                        icon: const Icon(Icons.settings),
+                                        label: const Text('Abrir ajustes'),
+                                      ),
+                                    if (!red.reintentando)
+                                      OutlinedButton.icon(
+                                        onPressed: () => unawaited(_redPropia(true)),
+                                        icon: const Icon(Icons.refresh),
+                                        label: const Text('Reintentar'),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        if (red.red case final r?)
                           Padding(
                             padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                             child: Column(
@@ -195,8 +250,15 @@ class _CentralInfoPageState extends ConsumerState<CentralInfoPage> {
                                 const SizedBox(height: 6),
                                 const Text(
                                   'Android cambia el nombre y la contraseña cada vez que se crea la red '
-                                  '(por ejemplo, si se reinicia esta tablet o la app). Entonces cada mesero '
-                                  'vuelve a escanear el QR; sus pedidos pendientes no se pierden.',
+                                  '(si se reinicia esta tablet o la app, o si Android la apaga por pasar un rato '
+                                  'sin tablets conectadas). Entonces cada mesero vuelve a escanear el QR; sus '
+                                  'pedidos pendientes no se pierden.',
+                                  style: TextStyle(color: Colores.apagado),
+                                ),
+                                const SizedBox(height: 6),
+                                const Text(
+                                  'Tablets con Android 9 o anterior: conéctalas a esta red desde Ajustes > Wi-Fi '
+                                  'con esta contraseña y después escanea el QR.',
                                   style: TextStyle(color: Colores.apagado),
                                 ),
                               ],

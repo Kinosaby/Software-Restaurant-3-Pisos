@@ -18,9 +18,14 @@
     <uses-permission
         android:name="android.permission.NEARBY_WIFI_DEVICES"
         android:usesPermissionFlags="neverForLocation" />
-    <!-- Android 12 o anterior pide ubicación para crear la red local. -->
+    <!-- Android 12 o anterior pide ubicación para crear la red local. Van las dos:
+         Android 12 ignora la petición de ubicación precisa si no se declara y pide
+         también la aproximada. Android 13+ usa NEARBY_WIFI_DEVICES y no las necesita. -->
     <uses-permission
         android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="32" />
+    <uses-permission
+        android:name="android.permission.ACCESS_COARSE_LOCATION"
         android:maxSdkVersion="32" />
     <!-- usesCleartextTraffic: la central de cocina y el servidor pueden estar en la red local por HTTP -->
     <application
