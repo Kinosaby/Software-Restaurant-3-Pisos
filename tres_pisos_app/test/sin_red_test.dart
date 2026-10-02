@@ -12,6 +12,7 @@ import 'package:tres_pisos_app/core/api_client.dart';
 import 'package:tres_pisos_app/features/auth/almacen_sesion.dart';
 import 'package:tres_pisos_app/features/auth/auth_controller.dart';
 import 'package:tres_pisos_app/features/auth/sesion.dart';
+import 'package:tres_pisos_app/features/avisos/avisos.dart';
 import 'package:tres_pisos_app/features/conexion/central_local.dart';
 import 'package:tres_pisos_app/features/pedidos/modelos.dart';
 import 'package:tres_pisos_app/features/pedidos/pedidos_controller.dart';
@@ -306,6 +307,148 @@ void main() {
       ],
     }, usuario: mesero());
     await esperar(() => eventos.whereType<PedidoCambiado>().isNotEmpty);
+  });
+
+  test('lo que cocina terminó mientras el mesero no tenía Wi-Fi se avisa al reconectar, una sola vez', () async {
+    // Sin sonido: en las pruebas no existe el canal de Android.
+    await prefs.setBool('pref:sonido', false);
+    final app = abrirApp();
+    final avisos = <Aviso>[];
+    app.listen(avisosProvider, (_, siguiente) {
+      if (siguiente.value case final aviso?) avisos.add(aviso);
+    });
+
+    Future<void> esperar(bool Function() condicion) async {
+      final limite = DateTime.now().add(const Duration(seconds: 15));
+      while (!condicion()) {
+        if (DateTime.now().isAfter(limite)) fail('tiempo agotado');
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+    }
+
+    await app.read(pedidosActivosProvider.notifier).crear(
+          mesa: 3,
+          tipo: TipoPedido.aqui,
+          lineas: const [LineaCarrito(producto: tacos)],
+        );
+    final pedido = (await app.read(pedidosActivosProvider.future)).single;
+    final tiempoReal = app.read(tiempoRealProvider);
+    await esperar(() => tiempoReal.estaConectado);
+
+    // Se cae el Wi-Fi del mesero y, mientras tanto, cocina termina el pedido.
+    await apagarCentral();
+    await esperar(() => !tiempoReal.estaConectado);
+    await central.cambiarEstado(pedido.id, 'listo', usuario: mesero());
+    expect(avisos, isEmpty);
+
+    await encenderCentral();
+    await esperar(() => avisos.isNotEmpty);
+    expect(avisos.single.mensaje, 'Mesa 3 está lista para servir');
+    expect(avisos.single.pedidoId, pedido.id);
+
+    // Recargar otra vez (o deslizar para actualizar) no lo repite.
+    await app.read(pedidosActivosProvider.notifier).recargar();
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(avisos, hasLength(1));
+  });
+
+  test('también se avisa si quedó listo con la app cerrada', () async {
+    await prefs.setBool('pref:sonido', false);
+    var app = abrirApp();
+    await app.read(pedidosActivosProvider.notifier).crear(
+          mesa: 6,
+          tipo: TipoPedido.aqui,
+          lineas: const [LineaCarrito(producto: tacos)],
+        );
+    final pedido = (await app.read(pedidosActivosProvider.future)).single;
+    // Da tiempo a que la copia local quede escrita antes de cerrar.
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    app.dispose();
+    contenedores.remove(app);
+
+    await central.cambiarEstado(pedido.id, 'listo', usuario: mesero());
+
+    app = abrirApp();
+    final avisos = <Aviso>[];
+    app.listen(avisosProvider, (_, siguiente) {
+      if (siguiente.value case final aviso?) avisos.add(aviso);
+    });
+    await app.read(pedidosActivosProvider.future);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(avisos.single.mensaje, 'Mesa 6 está lista para servir');
+  });
+
+  group('pedidos que llevan horas en la cola', () {
+    /// Deja un pedido en la cola, cierra la app y la vuelve a abrir como si hubieran pasado [horas].
+    Future<ProviderContainer> abrirDespuesDe(Duration tiempo) async {
+      final app = abrirApp();
+      await app.read(pedidosActivosProvider.future);
+      await apagarCentral();
+      final resultado = await app.read(pedidosActivosProvider.notifier).crear(
+            mesa: 4,
+            tipo: TipoPedido.aqui,
+            lineas: const [LineaCarrito(producto: tacos, cantidad: 2)],
+          );
+      expect(resultado, isA<EnCola>());
+      app.dispose();
+      contenedores.remove(app);
+
+      // La tablet se apagó: lo guardado conserva la hora en que se tomó el pedido.
+      final almacen = AlmacenLocal(prefs, conexion.url);
+      await almacen.guardarLista('cola', [
+        for (final e in almacen.lista('cola')!)
+          {...e, 'creado': DateTime.now().subtract(tiempo).toUtc().toIso8601String()},
+      ]);
+      await encenderCentral();
+      return abrirApp();
+    }
+
+    test('al abrir al día siguiente no se envía solo: el mesero decide', () async {
+      final app = await abrirDespuesDe(const Duration(hours: 14));
+      final cola = app.read(colaEnviosProvider.notifier);
+
+      await cola.procesar();
+      await cola.procesar();
+      expect(central.listarPedidos(), isEmpty, reason: 'cocina no recibe un pedido de ayer');
+      final envio = app.read(colaEnviosProvider).single;
+      expect(envio.caducado(), isTrue);
+      expect(envio.error, isNull);
+
+      // "Enviar a cocina": ahora sí llega, una sola vez.
+      await cola.reintentar(envio);
+      expect(app.read(colaEnviosProvider), isEmpty);
+      expect(central.listarPedidos().single['total'], 84.0);
+    });
+
+    test('descartarlo lo borra sin que llegue a cocina', () async {
+      final app = await abrirDespuesDe(const Duration(hours: 14));
+      app.read(colaEnviosProvider.notifier).descartar(app.read(colaEnviosProvider).single);
+      await app.read(colaEnviosProvider.notifier).procesar();
+      expect(app.read(colaEnviosProvider), isEmpty);
+      expect(central.listarPedidos(), isEmpty);
+    });
+
+    test('un corte de Wi-Fi durante el servicio sí se envía solo al volver', () async {
+      final app = await abrirDespuesDe(const Duration(hours: 2));
+      await app.read(colaEnviosProvider.notifier).procesar();
+      expect(app.read(colaEnviosProvider), isEmpty);
+      expect(central.listarPedidos(), hasLength(1));
+    });
+
+    test('el límite se mide por tiempo transcurrido, no por fecha', () {
+      EnvioPendiente envio(DateTime creado) => EnvioPendiente(
+            operacion: 'op',
+            tipo: 'crear',
+            cuerpo: const {},
+            creado: creado,
+            resumen: 'Mesa 1',
+            total: 0,
+          );
+      final madrugada = DateTime(2026, 10, 3, 0, 20);
+      expect(envio(DateTime(2026, 10, 2, 23, 50)).caducado(madrugada), isFalse, reason: 'cruzó la medianoche');
+      expect(envio(DateTime(2026, 10, 2, 21)).caducado(madrugada), isTrue);
+      expect(envio(madrugada.add(const Duration(minutes: 5))).caducado(madrugada), isFalse, reason: 'reloj atrasado');
+    });
   });
 
   group('si la central cambia de IP y la tablet se vuelve a enlazar', () {

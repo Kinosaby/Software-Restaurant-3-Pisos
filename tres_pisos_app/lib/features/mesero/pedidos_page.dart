@@ -46,10 +46,45 @@ class PedidosPage extends ConsumerWidget {
         body: const Column(
           children: [
             AvisoSinConexion(),
+            _AvisoEnviosViejos(),
             Expanded(
               child: TabBarView(children: [MapaMesas(), _Cuentas(), _CobradasHoy()]),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Franja que avisa de pedidos que quedaron guardados hace horas (p. ej. ayer) y
+/// que por eso no se enviaron solos: el mesero decide en "Cuentas" si los manda o los descarta.
+class _AvisoEnviosViejos extends ConsumerWidget {
+  const _AvisoEnviosViejos();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final viejos = ref.watch(colaEnviosProvider).where((e) => e.error == null && e.caducado()).length;
+    if (viejos == 0) return const SizedBox.shrink();
+    return Material(
+      color: Colores.aviso,
+      child: InkWell(
+        onTap: () => DefaultTabController.of(context).animateTo(1),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              const Icon(Icons.history_toggle_off, color: Colores.fondo),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  '${viejos == 1 ? 'Hay 1 pedido guardado' : 'Hay $viejos pedidos guardados'} desde hace horas '
+                  'que no se ${viejos == 1 ? 'envió' : 'enviaron'} a cocina. Toca aquí para revisar.',
+                  style: const TextStyle(color: Colores.fondo, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -158,6 +193,8 @@ class _TarjetaEnvio extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final cola = ref.read(colaEnviosProvider.notifier);
     final rechazado = envio.error != null;
+    // Guardado hace horas: no sale solo, hay que decidir si todavía se manda.
+    final viejo = !rechazado && envio.caducado();
     return Card(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
@@ -171,8 +208,13 @@ class _TarjetaEnvio extends ConsumerWidget {
             Text(envio.descripcion, style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 4),
             Text(
-              rechazado ? envio.error! : 'Guardado ${hora(envio.creado)} · cocina aún no lo recibe',
-              style: TextStyle(color: rechazado ? Colores.peligro : Colores.apagado),
+              rechazado
+                  ? envio.error!
+                  : viejo
+                      ? 'Guardado ${tiempoTranscurrido(envio.creado)} y cocina nunca lo recibió. Por el tiempo '
+                          'que pasó no se envió solo: envíalo solo si todavía hace falta; si no, descártalo.'
+                      : 'Guardado ${hora(envio.creado.toLocal())} · cocina aún no lo recibe',
+              style: TextStyle(color: rechazado ? Colores.peligro : viejo ? Colores.aviso : Colores.apagado),
             ),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
@@ -190,7 +232,10 @@ class _TarjetaEnvio extends ConsumerWidget {
                   },
                   child: const Text('Descartar'),
                 ),
-                FilledButton.tonal(onPressed: () => cola.reintentar(envio), child: const Text('Reintentar')),
+                FilledButton.tonal(
+                  onPressed: () => cola.reintentar(envio),
+                  child: Text(viejo ? 'Enviar a cocina' : 'Reintentar'),
+                ),
               ],
             ),
           ],

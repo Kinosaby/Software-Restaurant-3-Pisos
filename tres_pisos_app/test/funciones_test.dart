@@ -397,5 +397,88 @@ void main() {
           isTrue);
       expect(reglas.evaluar(PedidoCambiado(pedido(id: 4, usuarioId: 5), nuevo: true)), isNull);
     });
+
+    test('la pantalla de cocina suena con cualquier rol mientras esté a la vista', () {
+      const admin = Usuario(id: 1, username: 'admin', rol: Rol.admin);
+      final reglas = ReglasAviso(admin);
+      final nuevo = PedidoCambiado(pedido(id: 1, mesa: 4, usuarioId: 5), nuevo: true);
+      final extra = ExtraRecibido(ExtraPedido.fromJson({'pedido_id': 1, 'mesa': 4, 'items': []}));
+
+      expect(reglas.evaluar(nuevo), isNull, reason: 'en el salón el admin no recibe avisos de cocina');
+      expect(reglas.evaluar(extra), isNull);
+      expect(reglas.evaluar(nuevo, enCocina: true)?.sonido, 'pedido');
+      expect(reglas.evaluar(nuevo, enCocina: true), isNull, reason: 'una sola vez por pedido');
+      expect(reglas.evaluar(extra, enCocina: true)?.sonido, 'pedido');
+      // Y sigue enterándose de sus propias cuentas listas.
+      final listo = PedidoCambiado(pedido(id: 2, estado: 'listo', usuarioId: 1), nuevo: false);
+      expect(reglas.evaluar(listo, enCocina: true)?.sonido, 'listo');
+    });
+
+    group('lo que quedó listo mientras el mesero estaba sin Wi-Fi', () {
+      test('se avisa al recargar la lista, una sola vez', () {
+        final reglas = ReglasAviso(mesero);
+        final antes = [pedido(id: 1, mesa: 3, estado: 'preparando', usuarioId: 5)];
+        final ahora = [pedido(id: 1, mesa: 3, estado: 'listo', usuarioId: 5)];
+
+        final aviso = reglas.evaluarRecarga(antes, ahora);
+        expect(aviso?.sonido, 'listo');
+        expect(aviso?.aviso.mensaje, 'Mesa 3 está lista para servir');
+        expect(aviso?.aviso.pedidoId, 1);
+        expect(reglas.evaluarRecarga(antes, ahora), isNull, reason: 'otra recarga no lo repite');
+        expect(reglas.evaluar(PedidoCambiado(ahora.single, nuevo: false)), isNull,
+            reason: 'ni el evento, si llega después');
+      });
+
+      test('no avisa de lo que ya estaba listo, de lo ya avisado ni de pedidos ajenos', () {
+        final reglas = ReglasAviso(mesero);
+        final yaListo = pedido(id: 1, estado: 'listo', usuarioId: 5);
+        final avisado = pedido(id: 2, estado: 'listo', usuarioId: 5);
+        final ajeno = pedido(id: 3, estado: 'listo', usuarioId: 6);
+        expect(reglas.evaluar(PedidoCambiado(avisado, nuevo: false))?.sonido, 'listo');
+
+        expect(
+          reglas.evaluarRecarga(
+            [yaListo, pedido(id: 2, estado: 'preparando', usuarioId: 5), pedido(id: 3, usuarioId: 6)],
+            [yaListo, avisado, ajeno],
+          ),
+          isNull,
+        );
+        // Cocina no recibe avisos de "listo".
+        expect(ReglasAviso(cocina).evaluarRecarga(const [], [yaListo]), isNull);
+      });
+
+      test('un extra sin terminar todavía no se puede servir', () {
+        final reglas = ReglasAviso(mesero);
+        final conExtra = pedido(id: 1, estado: 'listo', usuarioId: 5, productos: [
+          {
+            'id': 1,
+            'producto_id': 1,
+            'nombre': 'Tacos',
+            'cantidad': 1,
+            'nota': null,
+            'precio': '40',
+            'extra_desde': '2026-09-22T18:30:00Z',
+          },
+        ]);
+        expect(reglas.evaluarRecarga([pedido(id: 1, usuarioId: 5)], [conExtra]), isNull);
+      });
+
+      test('varios pedidos salen en un solo aviso', () {
+        final reglas = ReglasAviso(mesero);
+        final aviso = reglas.evaluarRecarga(
+          [pedido(id: 1, mesa: 3, usuarioId: 5), pedido(id: 2, mesa: 7, usuarioId: 5)],
+          [pedido(id: 1, mesa: 3, estado: 'listo', usuarioId: 5), pedido(id: 2, mesa: 7, estado: 'listo', usuarioId: 5)],
+        );
+        expect(aviso?.aviso.mensaje, 'Listas para servir: Mesa 3, Mesa 7');
+      });
+
+      test('si cocina regresa el pedido ("Deshacer"), al terminarlo se avisa de nuevo', () {
+        final reglas = ReglasAviso(mesero);
+        final listo = PedidoCambiado(pedido(id: 1, estado: 'listo', usuarioId: 5), nuevo: false);
+        expect(reglas.evaluar(listo)?.sonido, 'listo');
+        expect(reglas.evaluar(PedidoCambiado(pedido(id: 1, estado: 'preparando', usuarioId: 5), nuevo: false)), isNull);
+        expect(reglas.evaluar(listo)?.sonido, 'listo');
+      });
+    });
   });
 }
