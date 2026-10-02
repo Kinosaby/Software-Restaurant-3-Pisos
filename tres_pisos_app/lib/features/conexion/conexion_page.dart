@@ -18,6 +18,7 @@ import '../auth/auth_controller.dart';
 import '../auth/sesion.dart';
 import 'central_local.dart';
 import 'enlace_qr.dart';
+import 'red_propia.dart';
 import 'respaldos_page.dart';
 
 /// Elige cómo trabaja esta tablet: como central de cocina o conectada a la
@@ -177,6 +178,8 @@ class _FormularioCentralState extends ConsumerState<_FormularioCentral> {
     if (!_form.currentState!.validate()) return;
     setState(() => _ocupado = true);
     try {
+      // Si era mesero de una central sin router, deja esa red: la central atiende en la suya.
+      await Plataforma.desconectarRed();
       await ref.read(centralLocalProvider.notifier).crear(
             admin: _usuario.text.trim(),
             password: _password.text,
@@ -221,6 +224,7 @@ class _FormularioCentralState extends ConsumerState<_FormularioCentral> {
 
     setState(() => _ocupado = true);
     try {
+      await Plataforma.desconectarRed();
       await ref.read(centralLocalProvider.notifier).restaurar(archivo, password);
       if (!mounted) return;
       mostrarMensaje(context, 'Respaldo cargado. Inicia sesión con un usuario del respaldo.');
@@ -295,6 +299,10 @@ class _FormularioCentralState extends ConsumerState<_FormularioCentral> {
 /// pero no responde si cada tablet está en una.
 const _sinCentral = 'No se pudo conectar con la central. Las dos tablets deben estar en la misma red Wi-Fi '
     '(con el mismo nombre, no una en la de 2.4 GHz y otra en la de 5 GHz) y la app de cocina debe estar abierta.';
+
+/// La tablet ya entró a la red propia de la central (sin router) pero la central no contesta.
+const _sinCentralEnSuRed = 'La tablet se unió a la red Wi-Fi de la central, pero la central no respondió. '
+    'Revisa que la app de cocina esté abierta y vuelve a escanear el QR de la central.';
 
 class _FormularioEnlace extends ConsumerStatefulWidget {
   const _FormularioEnlace();
@@ -386,12 +394,22 @@ class _FormularioEnlaceState extends ConsumerState<_FormularioEnlace> {
     try {
       // Central sin router: primero hay que unirse a su red Wi-Fi.
       if (datos.red case final red?) {
-        mostrarMensaje(context, 'Conectando a la red "${red.ssid}" de la central…');
-        try {
-          await Plataforma.conectarRed(red);
-        } on PlatformException catch (e) {
-          if (mounted) mostrarMensaje(context, e.message ?? 'No se pudo unir a la red de la central.', error: true);
-          return;
+        final capacidades = await Plataforma.capacidadesRed();
+        if (!mounted) return;
+        if (capacidades.unirseSola) {
+          mostrarMensaje(context, 'Conectando a la red "${red.ssid}" de la central… Acepta el aviso de Android.');
+          try {
+            await Plataforma.conectarRed(red);
+          } on PlatformException catch (e) {
+            // Nada queda atado a una red a la que no se pudo entrar.
+            await _volverARedAnterior();
+            if (mounted) mostrarMensaje(context, e.message ?? 'No se pudo unir a la red de la central.', error: true);
+            return;
+          }
+        } else {
+          // Android 9 o anterior no puede unirse solo: el mesero se conecta desde Ajustes > Wi-Fi.
+          await Plataforma.desconectarRed();
+          if (!mounted || !await _unirseAMano(red)) return;
         }
       } else {
         // Por si antes estaba unida a la red propia de otra central.
@@ -412,11 +430,13 @@ class _FormularioEnlaceState extends ConsumerState<_FormularioEnlace> {
           ultimoError = e;
         }
       }
+      // No se enlazó: la tablet no se queda en la red de una central con la que no trabaja.
+      if (datos.red != null) await _volverARedAnterior();
       if (mounted) {
         mostrarMensaje(
           context,
           ultimoError == null || ultimoError.sinConexion
-              ? _sinCentral
+              ? (datos.red == null ? _sinCentral : _sinCentralEnSuRed)
               : ultimoError.mensaje,
           error: true,
         );
@@ -424,6 +444,69 @@ class _FormularioEnlaceState extends ConsumerState<_FormularioEnlace> {
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }
+  }
+
+  /// Suelta la red a la que se intentó entrar y vuelve a la de la central ya enlazada, si tenía una.
+  Future<void> _volverARedAnterior() async {
+    await Plataforma.desconectarRed();
+    final anterior = ref.read(conexionProvider);
+    if (anterior?.modo == ModoConexion.enlazada) unawaited(unirseARedGuardada(anterior?.red));
+  }
+
+  /// Tablets que no pueden unirse solas (Android 9 o anterior): se muestran el nombre y la
+  /// contraseña de la red para conectarse desde Ajustes. `true` cuando el mesero dice que ya está.
+  Future<bool> _unirseAMano(RedWifi red) async {
+    final listo = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Conecta esta tablet al Wi-Fi de la central'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Esta tablet tiene Android 9 o anterior y no puede unirse sola. Abre el Wi-Fi de la tablet '
+                'y conéctate a esta red:',
+              ),
+              const SizedBox(height: 12),
+              const Text('Red', style: TextStyle(color: Colores.apagado)),
+              SelectableText(red.ssid, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              const Text('Contraseña', style: TextStyle(color: Colores.apagado)),
+              Row(
+                children: [
+                  Expanded(
+                    child: SelectableText(red.clave, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  ),
+                  IconButton(
+                    tooltip: 'Copiar contraseña',
+                    icon: const Icon(Icons.copy),
+                    onPressed: () => Clipboard.setData(ClipboardData(text: red.clave)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Si Android avisa que la red no tiene internet, elige seguir conectado. '
+                'Cuando esté conectada, vuelve aquí y toca "Ya me conecté".',
+                style: TextStyle(color: Colores.apagado),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          OutlinedButton(
+            onPressed: () => unawaited(Plataforma.abrirAjustes('wifi')),
+            child: const Text('Abrir Wi-Fi'),
+          ),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Ya me conecté')),
+        ],
+      ),
+    );
+    return listo ?? false;
   }
 
   Future<void> _buscar() async {

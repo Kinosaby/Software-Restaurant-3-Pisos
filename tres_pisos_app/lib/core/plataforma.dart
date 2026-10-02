@@ -12,6 +12,129 @@ RedWifi? _redDe(Map<Object?, Object?>? datos) {
   return (ssid: ssid, clave: clave, seguridad: datos?['seguridad'] == 'wpa3' ? 'wpa3' : 'wpa2');
 }
 
+/// Lo que esta versión de Android puede hacer con la red propia: crearla (Android 8+)
+/// y unirse a ella sin pasar por Ajustes (Android 10+).
+typedef CapacidadesRed = ({bool crearRed, bool unirseSola});
+
+enum FaseRedPropia {
+  /// No se trabaja con red propia.
+  apagada,
+  creando,
+  activa,
+
+  /// Se quiere red propia pero ahora no existe: Android la apagó o no pudo crearla.
+  caida,
+}
+
+/// Estado real de la red propia de la central, tal como lo lleva Android.
+class EstadoRedPropia {
+  const EstadoRedPropia({
+    this.fase = FaseRedPropia.apagada,
+    this.red,
+    this.error,
+    this.codigo,
+    this.reintentando = false,
+    this.qrNuevo = false,
+  });
+
+  /// Lo que manda `RedLocal.estadoCentral()`. Una red "activa" sin nombre o clave no sirve: cuenta como caída.
+  factory EstadoRedPropia.desde(Map<Object?, Object?>? datos) {
+    if (datos == null) return const EstadoRedPropia();
+    final red = _redDe(datos);
+    var fase = FaseRedPropia.values.asNameMap()[datos['fase']] ?? FaseRedPropia.apagada;
+    if (fase == FaseRedPropia.activa && red == null) fase = FaseRedPropia.caida;
+    final error = datos['error'], codigo = datos['codigo'];
+    return EstadoRedPropia(
+      fase: fase,
+      red: fase == FaseRedPropia.activa ? red : null,
+      error: error is String && error.isNotEmpty ? error : null,
+      codigo: codigo is String ? codigo : null,
+      reintentando: datos['reintentando'] == true,
+    );
+  }
+
+  final FaseRedPropia fase;
+
+  /// Solo con la red activa.
+  final RedWifi? red;
+
+  /// Motivo en español por el que la red no está (fase [FaseRedPropia.caida]).
+  final String? error;
+
+  /// "PERMISO", "UBICACION" (se arreglan en Ajustes) o "RED".
+  final String? codigo;
+
+  /// Android va a volver a intentarlo solo.
+  final bool reintentando;
+
+  /// La red es distinta de la última que los meseros escanearon: deben escanear el QR otra vez.
+  final bool qrNuevo;
+
+  /// El usuario pidió trabajar con red propia (aunque ahora esté caída).
+  bool get pedida => fase != FaseRedPropia.apagada;
+
+  EstadoRedPropia con({required bool qrNuevo}) => EstadoRedPropia(
+        fase: fase,
+        red: red,
+        error: error,
+        codigo: codigo,
+        reintentando: reintentando,
+        qrNuevo: qrNuevo,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is EstadoRedPropia &&
+      other.fase == fase &&
+      other.red == red &&
+      other.error == error &&
+      other.codigo == codigo &&
+      other.reintentando == reintentando &&
+      other.qrNuevo == qrNuevo;
+
+  @override
+  int get hashCode => Object.hash(fase, red, error, codigo, reintentando, qrNuevo);
+}
+
+enum FaseRedMesero {
+  /// La tablet usa su Wi-Fi normal (router) o se conectó a mano.
+  ninguna,
+  uniendo,
+  unida,
+
+  /// Se perdió la red y Android está volviendo a unirse.
+  reintentando,
+
+  /// No se pudo volver: hay que escanear de nuevo el QR de la central.
+  perdida,
+}
+
+/// Mesero: unión de esta tablet a la red propia de la central.
+class EstadoRedMesero {
+  const EstadoRedMesero({this.fase = FaseRedMesero.ninguna, this.ssid, this.error});
+
+  factory EstadoRedMesero.desde(Map<Object?, Object?>? datos) {
+    if (datos == null) return const EstadoRedMesero();
+    final ssid = datos['ssid'], error = datos['error'];
+    return EstadoRedMesero(
+      fase: FaseRedMesero.values.asNameMap()[datos['fase']] ?? FaseRedMesero.ninguna,
+      ssid: ssid is String ? ssid : null,
+      error: error is String && error.isNotEmpty ? error : null,
+    );
+  }
+
+  final FaseRedMesero fase;
+  final String? ssid;
+  final String? error;
+
+  @override
+  bool operator ==(Object other) =>
+      other is EstadoRedMesero && other.fase == fase && other.ssid == ssid && other.error == error;
+
+  @override
+  int get hashCode => Object.hash(fase, ssid, error);
+}
+
 /// Funciones de Android expuestas por `MainActivity` (canal "tres_pisos/plataforma").
 /// Todas fallan en silencio: un aviso que no suena no debe romper el flujo del pedido.
 abstract final class Plataforma {
@@ -71,8 +194,23 @@ abstract final class Plataforma {
   /// Abre el diálogo del sistema para excluir la app del ahorro de batería.
   static Future<void> pedirSinRestriccionBateria() => _llamar('pedirSinRestriccionBateria');
 
-  /// Central: crea su propia red Wi-Fi (sin router, internet ni datos). Android elige
-  /// nombre y contraseña. Lanza [PlatformException] con el motivo en español si no puede.
+  /// Qué puede hacer esta tablet con la red propia. Si no se puede saber, se supone que todo.
+  static Future<CapacidadesRed> capacidadesRed() async {
+    try {
+      final datos = await _canal.invokeMapMethod<Object?, Object?>('redCapacidades');
+      return (crearRed: datos?['crear'] != false, unirseSola: datos?['unir'] != false);
+    } on MissingPluginException {
+      return (crearRed: true, unirseSola: true);
+    } on PlatformException catch (e) {
+      debugPrint('Plataforma.capacidadesRed: ${e.message}');
+      return (crearRed: true, unirseSola: true);
+    }
+  }
+
+  /// Central: crea su propia red Wi-Fi (sin router, internet ni datos), pidiendo antes el
+  /// permiso que haga falta. Android elige nombre y contraseña. Lanza [PlatformException]
+  /// con el motivo en español si no puede; si el fallo es pasajero, Android sigue
+  /// reintentando y el resultado llega por [cambiosRedPropia].
   static Future<RedWifi> crearRedPropia() async {
     final red = _redDe(await _canal.invokeMapMethod<Object?, Object?>('redPropia', {'activa': true}));
     if (red == null) throw PlatformException(code: 'RED', message: 'Android no devolvió los datos de la red.');
@@ -81,21 +219,41 @@ abstract final class Plataforma {
 
   static Future<void> apagarRedPropia() => _llamar('redPropia', {'activa': false});
 
-  /// Red propia que ya está encendida, o `null`.
-  static Future<RedWifi?> redPropiaActual() async {
+  /// Estado real de la red propia de la central.
+  static Future<EstadoRedPropia> estadoRedPropia() async {
     try {
-      return _redDe(await _canal.invokeMapMethod<Object?, Object?>('redPropiaActual'));
+      return EstadoRedPropia.desde(await _canal.invokeMapMethod<Object?, Object?>('redPropiaEstado'));
     } on MissingPluginException {
-      return null;
+      return const EstadoRedPropia();
+    } on PlatformException catch (e) {
+      debugPrint('Plataforma.estadoRedPropia: ${e.message}');
+      return const EstadoRedPropia();
     }
   }
 
   /// Mesero: se une a la red propia de la central y la app la usa para hablar con ella.
-  /// Lanza [PlatformException] con el motivo si no lo logra.
+  /// Lanza [PlatformException] con el motivo si no lo logra (código "NO_COMPATIBLE"
+  /// en Android 9 o anterior, que no puede unirse sin pasar por Ajustes).
   static Future<void> conectarRed(RedWifi red) =>
       _canal.invokeMethod<bool>('conectarRed', {'ssid': red.ssid, 'clave': red.clave, 'seguridad': red.seguridad});
 
+  /// Deja la red propia de la central: la app vuelve a usar el Wi-Fi normal de la tablet.
   static Future<void> desconectarRed() => _llamar('desconectarRed');
+
+  /// Mesero: cómo va la unión a la red propia de la central.
+  static Future<EstadoRedMesero> estadoRedMesero() async {
+    try {
+      return EstadoRedMesero.desde(await _canal.invokeMapMethod<Object?, Object?>('redMeseroEstado'));
+    } on MissingPluginException {
+      return const EstadoRedMesero();
+    } on PlatformException catch (e) {
+      debugPrint('Plataforma.estadoRedMesero: ${e.message}');
+      return const EstadoRedMesero();
+    }
+  }
+
+  /// Abre los Ajustes de Android: "ubicacion", "wifi" o "app" (permisos de la app).
+  static Future<void> abrirAjustes(String cual) => _llamar('abrirAjustes', {'cual': cual});
 
   /// Escanea un QR con el escáner de Google Play Services. `null` si se cancela;
   /// lanza [PlatformException] si el escáner no está disponible en la tablet.
@@ -111,19 +269,43 @@ abstract final class Plataforma {
   }
 
   static final _enlaces = StreamController<String>.broadcast();
+  static final _redPropia = StreamController<EstadoRedPropia>.broadcast();
+  static final _redMesero = StreamController<EstadoRedMesero>.broadcast();
   static bool _escuchando = false;
+
+  /// Avisos que Android manda por su cuenta (sin que Dart los pida).
+  static void _escuchar() {
+    if (_escuchando) return;
+    _escuchando = true;
+    _canal.setMethodCallHandler((llamada) async {
+      final datos = llamada.arguments;
+      switch (llamada.method) {
+        case 'enlaceRecibido' when datos is String:
+          _enlaces.add(datos);
+        case 'redPropiaCambio' when datos is Map:
+          _redPropia.add(EstadoRedPropia.desde(datos));
+        case 'redMeseroCambio' when datos is Map:
+          _redMesero.add(EstadoRedMesero.desde(datos));
+      }
+    });
+  }
 
   /// Enlaces que llegan con la app ya abierta.
   static Stream<String> get enlaces {
-    if (!_escuchando) {
-      _escuchando = true;
-      _canal.setMethodCallHandler((llamada) async {
-        if (llamada.method == 'enlaceRecibido' && llamada.arguments is String) {
-          _enlaces.add(llamada.arguments as String);
-        }
-      });
-    }
+    _escuchar();
     return _enlaces.stream;
+  }
+
+  /// Central: la red propia cambió (Android la apagó, se volvió a crear con otro nombre...).
+  static Stream<EstadoRedPropia> get cambiosRedPropia {
+    _escuchar();
+    return _redPropia.stream;
+  }
+
+  /// Mesero: se perdió o se recuperó la red propia de la central.
+  static Stream<EstadoRedMesero> get cambiosRedMesero {
+    _escuchar();
+    return _redMesero.stream;
   }
 
   /// Carpeta privada y persistente de la app (`filesDir` en Android).

@@ -11,6 +11,7 @@ import 'features/admin/usuarios_admin_page.dart';
 import 'features/auth/auth_controller.dart';
 import 'features/auth/login_page.dart';
 import 'features/auth/sesion.dart';
+import 'features/conexion/aviso_red.dart';
 import 'features/conexion/central_info_page.dart';
 import 'features/conexion/central_local.dart';
 import 'features/conexion/conexion_page.dart';
@@ -117,7 +118,7 @@ class TresPisosApp extends ConsumerWidget {
       builder: (context, child) => ColoredBox(
         color: Colores.fondo,
         child: errorCentral == null
-            ? SafeArea(top: false, child: child!)
+            ? SafeArea(top: false, child: _conAvisoDeRed(ref, child!))
             : Column(
                 children: [
                   AvisoCentralSinArrancar(error: errorCentral),
@@ -126,7 +127,7 @@ class TresPisosApp extends ConsumerWidget {
                     child: MediaQuery.removePadding(
                       context: context,
                       removeTop: true,
-                      child: SafeArea(top: false, child: child!),
+                      child: SafeArea(top: false, child: _conAvisoDeRed(ref, child!)),
                     ),
                   ),
                 ],
@@ -135,6 +136,10 @@ class TresPisosApp extends ConsumerWidget {
     );
   }
 }
+
+/// Trabajando sin router: franja abajo cuando la red propia de la central se cae o cambia.
+Widget _conAvisoDeRed(WidgetRef ref, Widget child) =>
+    AvisoRed(alAbrirConexion: () => ref.read(routerProvider).go('/conexion'), child: child);
 
 /// Franja fija arriba de todas las pantallas cuando la central no pudo arrancar.
 class AvisoCentralSinArrancar extends StatelessWidget {

@@ -144,6 +144,7 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         canal = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "tres_pisos/plataforma")
+        RedLocal.alCambiar = avisoDeRed
         canal!!.setMethodCallHandler { llamada, resultado ->
                 try {
                     when (llamada.method) {
@@ -228,17 +229,17 @@ class MainActivity : FlutterActivity() {
                         // Red Wi-Fi propia de la central (sin router, internet ni datos).
                         "redPropia" -> {
                             if (llamada.argument<Boolean>("activa") == true) {
-                                conPermisoDeRed(resultado) {
-                                    RedLocal.crear(this) { datos, error ->
-                                        if (datos != null) resultado.success(datos) else resultado.error("RED", error, null)
-                                    }
-                                }
+                                crearRedPropia(UnaVez(resultado))
                             } else {
                                 RedLocal.apagar()
                                 resultado.success(null)
                             }
                         }
-                        "redPropiaActual" -> resultado.success(RedLocal.actual())
+                        "redPropiaEstado" -> resultado.success(RedLocal.estadoCentral())
+                        // Qué puede hacer esta versión de Android: crear la red (8+) y unirse sola (10+).
+                        "redCapacidades" -> resultado.success(
+                            mapOf("crear" to RedLocal.puedeCrear(), "unir" to RedLocal.puedeUnirse()),
+                        )
                         // Tablet del mesero: unirse a la red propia de la central.
                         "conectarRed" -> {
                             val ssid = llamada.argument<String>("ssid")
@@ -246,13 +247,20 @@ class MainActivity : FlutterActivity() {
                             if (ssid == null || clave == null) {
                                 resultado.error("RED", "Faltan los datos de la red", null)
                             } else {
-                                RedLocal.conectar(this, ssid, clave, llamada.argument<String>("seguridad") ?: "wpa2") { ok, error ->
-                                    if (ok) resultado.success(true) else resultado.error("RED", error, null)
+                                val respuesta = UnaVez(resultado)
+                                RedLocal.conectar(this, ssid, clave, llamada.argument<String>("seguridad") ?: "wpa2") { ok, codigo, error ->
+                                    if (ok) respuesta.exito(true) else respuesta.error(codigo ?: "RED", error)
                                 }
                             }
                         }
                         "desconectarRed" -> {
                             RedLocal.desconectar(this)
+                            resultado.success(null)
+                        }
+                        "redMeseroEstado" -> resultado.success(RedLocal.estadoMesero())
+                        // Pantalla de Ajustes donde se arregla lo que falta: "ubicacion", "wifi" o "app" (permisos).
+                        "abrirAjustes" -> {
+                            abrirAjustes(llamada.argument<String>("cual") ?: "app")
                             resultado.success(null)
                         }
                         "bateriaSinRestriccion" -> resultado.success(bateriaSinRestriccion())
@@ -356,6 +364,8 @@ class MainActivity : FlutterActivity() {
 
     override fun onResume() {
         super.onResume()
+        // Android solo deja crear la red propia o unirse a ella con la app a la vista.
+        RedLocal.alVolver(this)
         if (centralActiva && !ServicioCentral.activo) {
             try {
                 ServicioCentral.iniciar(this)
@@ -365,32 +375,82 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    override fun onPause() {
+        RedLocal.alSalir()
+        super.onPause()
+    }
+
+    /** Flutter solo admite una respuesta por llamada: una segunda cerraría la app. */
+    private class UnaVez(private val resultado: MethodChannel.Result) {
+        private var hecho = false
+
+        fun exito(valor: Any?) {
+            if (hecho) return
+            hecho = true
+            resultado.success(valor)
+        }
+
+        fun error(codigo: String, mensaje: String?) {
+            if (hecho) return
+            hecho = true
+            resultado.error(codigo, mensaje, null)
+        }
+    }
+
+    /** Cambios de la red propia (central) o de la unión a ella (mesero): llegan en el hilo principal. */
+    private val avisoDeRed: (String, Map<String, Any?>) -> Unit = { metodo, estado ->
+        canal?.invokeMethod(metodo, estado)
+    }
+
     // Acción que espera el permiso de dispositivos cercanos / ubicación para la red propia.
     private var trasPermisoRed: (() -> Unit)? = null
-    private var resultadoPermisoRed: MethodChannel.Result? = null
 
-    private fun conPermisoDeRed(resultado: MethodChannel.Result, accion: () -> Unit) {
-        val faltan = RedLocal.permisos().filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-        if (faltan.isEmpty()) {
-            accion()
+    /**
+     * Pide el permiso si falta y crea la red. Si el permiso se niega, `RedLocal.crear`
+     * lo detecta y responde con el motivo (y la pantalla de la central lo muestra).
+     */
+    private fun crearRedPropia(respuesta: UnaVez) {
+        val crear: () -> Unit = {
+            RedLocal.crear(this) { datos, codigo, error ->
+                if (datos != null) respuesta.exito(datos) else respuesta.error(codigo ?: "RED", error)
+            }
+        }
+        if (!RedLocal.puedeCrear() || RedLocal.tienePermiso(this)) {
+            crear()
             return
         }
-        trasPermisoRed = accion
-        resultadoPermisoRed = resultado
-        requestPermissions(faltan.toTypedArray(), PEDIR_RED)
+        if (trasPermisoRed != null) {
+            respuesta.error("OCUPADO", "Responde primero al permiso que pide Android.")
+            return
+        }
+        trasPermisoRed = crear
+        // Se piden todos juntos: Android 12 ignora la ubicación precisa si no va con la aproximada.
+        requestPermissions(RedLocal.permisos(), PEDIR_RED)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode != PEDIR_RED) return
         val accion = trasPermisoRed
-        val resultado = resultadoPermisoRed
         trasPermisoRed = null
-        resultadoPermisoRed = null
-        if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
-            accion?.invoke()
-        } else {
-            resultado?.error("RED", "Sin el permiso de dispositivos cercanos la central no puede crear su red.", null)
+        accion?.invoke()
+    }
+
+    private fun abrirAjustes(cual: String) {
+        val intento = when (cual) {
+            "ubicacion" -> Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+            "wifi" -> Intent(Settings.ACTION_WIFI_SETTINGS)
+            else -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+        }
+        try {
+            startActivity(intento)
+        } catch (e: Exception) {
+            // Algunas marcas no traen esa pantalla: se abren los ajustes generales.
+            try {
+                startActivity(Intent(Settings.ACTION_SETTINGS))
+            } catch (e2: Exception) {
+                android.util.Log.w("TresPisos", "No se pudieron abrir los ajustes: ${e2.message}")
+            }
         }
     }
 
@@ -435,8 +495,13 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         tonos?.release()
         bloqueoMulticast?.release()
+        if (RedLocal.alCambiar === avisoDeRed) RedLocal.alCambiar = null
         // Si la actividad se cierra de verdad, el motor de Flutter (y el servidor) se va con ella.
-        if (isFinishing) ServicioCentral.detener(this)
+        if (isFinishing) {
+            ServicioCentral.detener(this)
+            // Mesero: al cerrar la app la tablet deja la red de la central y nada queda atado.
+            RedLocal.desconectar(this)
+        }
         super.onDestroy()
     }
 }
