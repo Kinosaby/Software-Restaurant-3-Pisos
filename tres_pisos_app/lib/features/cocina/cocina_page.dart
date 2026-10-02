@@ -7,6 +7,7 @@ import '../../core/formato.dart';
 import '../../core/plataforma.dart';
 import '../../core/tema.dart';
 import '../../core/widgets.dart';
+import '../avisos/avisos.dart';
 import '../conexion/central_local.dart';
 import '../pedidos/modelos.dart';
 import '../pedidos/pedidos_controller.dart';
@@ -56,10 +57,19 @@ class CocinaPage extends ConsumerStatefulWidget {
   ConsumerState<CocinaPage> createState() => _CocinaPageState();
 }
 
+/// Lo último que se marcó listo, mientras todavía se puede regresar a cocina.
+typedef _Deshacer = ({String titulo, List<int> ids, Map<String, Set<int>> marcas});
+
 class _CocinaPageState extends ConsumerState<CocinaPage> {
+  /// Tiempo que se ofrece "Deshacer" después de marcar un pedido como listo.
+  static const _esperaDeshacer = Duration(seconds: 8);
+
   late final Timer _reloj;
   late final bool _esCentral;
+  late final PantallaCocina _pantalla;
   final _enCurso = <String>{};
+  _Deshacer? _deshacer;
+  Timer? _relojDeshacer;
 
   @override
   void initState() {
@@ -68,29 +78,87 @@ class _CocinaPageState extends ConsumerState<CocinaPage> {
     _reloj = Timer.periodic(const Duration(seconds: 30), (_) => setState(() {}));
     // `ref` no se puede usar en dispose, así que se decide aquí.
     _esCentral = ref.read(centralLocalProvider) != null;
+    _pantalla = ref.read(pantallaCocinaProvider);
     unawaited(Plataforma.pantallaEncendida(true));
   }
 
   @override
   void dispose() {
     _reloj.cancel();
+    _relojDeshacer?.cancel();
+    _pantalla.fijar(this, visible: false);
     // En la central la pantalla sigue encendida: las demás tablets dependen de ella.
     if (!_esCentral) unawaited(Plataforma.pantallaEncendida(false));
     super.dispose();
   }
 
-  Future<void> _ejecutar(String clave, Future<void> Function() accion) async {
+  /// Devuelve `true` si la acción terminó sin errores.
+  Future<bool> _ejecutar(String clave, Future<void> Function() accion) async {
     setState(() => _enCurso.add(clave));
     try {
       await accion();
+      return true;
     } on Object catch (e) {
       if (mounted) mostrarMensaje(context, '$e', error: true);
+      return false;
     } finally {
       if (mounted) setState(() => _enCurso.remove(clave));
     }
   }
 
-  Future<void> _avanzarGrupo(GrupoCocina grupo, EstadoPedido estado) => _ejecutar(
+  /// "Listo" saca el pedido de cocina y avisa al mesero: se confirma antes y,
+  /// durante unos segundos, se puede regresar a cocina con "Deshacer".
+  Future<void> _marcarListo(GrupoCocina grupo) async {
+    final marcas = ref.read(marcasCocinaProvider);
+    final sinMarcar = grupo.pedidos.fold(
+      0,
+      (s, p) => s + p.items.where((i) => i.paraCocina && !(marcas['p${p.id}']?.contains(i.detalleId) ?? false)).length,
+    );
+    final falta = switch (sinMarcar) {
+      0 => '',
+      1 => 'Falta 1 producto por marcar. ',
+      _ => 'Faltan $sinMarcar productos por marcar. ',
+    };
+    final varios = grupo.pedidos.length > 1;
+    final ok = await confirmar(
+      context,
+      titulo: '¿${grupo.titulo} ya está ${varios ? 'toda lista' : 'lista'}?',
+      mensaje: '${falta}Se avisará al mesero y saldrá de la pantalla de cocina.',
+      accion: varios ? 'Sí, todo listo' : 'Sí, está listo',
+    );
+    if (!ok || !mounted) return;
+    final hecho = await _avanzarGrupo(grupo, EstadoPedido.listo);
+    if (!hecho || !mounted) return;
+    // Lo cobrado por adelantado se cierra al quedar listo: eso ya no se puede regresar.
+    final ids = [for (final p in grupo.pedidos) if (!p.cobrado) p.id];
+    if (ids.isEmpty) return;
+    _relojDeshacer?.cancel();
+    setState(() => _deshacer = (
+          titulo: grupo.titulo,
+          ids: ids,
+          marcas: {for (final id in ids) 'p$id': ?marcas['p$id']},
+        ));
+    _relojDeshacer = Timer(_esperaDeshacer, () {
+      if (mounted) setState(() => _deshacer = null);
+    });
+  }
+
+  /// Regresa a cocina (en preparación) lo que se acaba de marcar listo, con sus casillas.
+  Future<void> _deshacerListo() async {
+    final deshacer = _deshacer;
+    if (deshacer == null) return;
+    _relojDeshacer?.cancel();
+    setState(() => _deshacer = null);
+    final hecho = await _ejecutar(
+      'deshacer',
+      () => ref.read(pedidosActivosProvider.notifier).cambiarEstadoVarios(deshacer.ids, EstadoPedido.preparando),
+    );
+    if (!hecho || !mounted) return;
+    ref.read(marcasCocinaProvider.notifier).restaurar(deshacer.marcas);
+    mostrarMensaje(context, '${deshacer.titulo} volvió a cocina');
+  }
+
+  Future<bool> _avanzarGrupo(GrupoCocina grupo, EstadoPedido estado) => _ejecutar(
         grupo.clave,
         () => ref.read(pedidosActivosProvider.notifier).cambiarEstadoVarios(
               [
@@ -117,6 +185,10 @@ class _CocinaPageState extends ConsumerState<CocinaPage> {
   @override
   Widget build(BuildContext context) {
     final pedidos = ref.watch(pedidosActivosProvider);
+    final deshacer = _deshacer;
+    // El aviso de pedido nuevo suena mientras esta pantalla esté a la vista, sea
+    // cual sea el rol (la del administrador sigue montada en otra pestaña).
+    _pantalla.fijar(this, visible: Visibility.of(context));
 
     // Las casillas de pedidos que ya salieron de cocina no se necesitan.
     ref.listen(pedidosActivosProvider, (_, siguiente) {
@@ -136,6 +208,30 @@ class _CocinaPageState extends ConsumerState<CocinaPage> {
       body: Column(
         children: [
           const AvisoSinConexion(),
+          if (deshacer != null)
+            Material(
+              color: Colores.exito.withValues(alpha: 0.18),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+                child: Row(
+                  children: [
+                    const Icon(Icons.done_all, color: Colores.exito),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        '${deshacer.titulo} se marcó como lista',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    FilledButton.tonalIcon(
+                      onPressed: _deshacerListo,
+                      icon: const Icon(Icons.undo),
+                      label: const Text('Deshacer'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           Expanded(
             child: pedidos.when(
               loading: () => const Cargando(),
@@ -189,7 +285,7 @@ class _CocinaPageState extends ConsumerState<CocinaPage> {
                                   grupo: grupos[i],
                                   ocupado: _enCurso.contains(grupos[i].clave),
                                   onPreparar: () => _avanzarGrupo(grupos[i], EstadoPedido.preparando),
-                                  onListo: () => _avanzarGrupo(grupos[i], EstadoPedido.listo),
+                                  onListo: () => _marcarListo(grupos[i]),
                                   onCancelar: _cancelar,
                                 ),
                               ),

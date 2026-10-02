@@ -9,16 +9,17 @@ const agua = Producto(id: 2, nombre: 'Agua', precio: 18, categoria: 'Bebidas', a
 void main() {
   late ProviderContainer container;
   late Carrito carrito;
+  final captura = Object();
 
   setUp(() {
     container = ProviderContainer();
     // Mantiene vivo el provider autoDispose durante la prueba.
-    container.listen(carritoProvider, (_, _) {});
-    carrito = container.read(carritoProvider.notifier);
+    container.listen(carritoProvider(captura), (_, _) {});
+    carrito = container.read(carritoProvider(captura).notifier);
   });
   tearDown(() => container.dispose());
 
-  EstadoCarrito estado() => container.read(carritoProvider);
+  EstadoCarrito estado() => container.read(carritoProvider(captura));
 
   test('agregar el mismo producto suma cantidad en una sola línea', () {
     carrito
@@ -116,5 +117,15 @@ void main() {
       expect(estado().comensales[0].lineas.single.nota, 'dorados');
       expect(estado().comensales[1].lineas, isEmpty);
     });
+  });
+
+  test('cada captura tiene su propio carrito', () {
+    final otra = Object();
+    container.listen(carritoProvider(otra), (_, _) {});
+    carrito.agregar(tacos);
+    container.read(carritoProvider(otra).notifier).agregar(agua);
+
+    expect(estado().todasLasLineas.single.producto, tacos);
+    expect(container.read(carritoProvider(otra)).todasLasLineas.single.producto, agua);
   });
 }

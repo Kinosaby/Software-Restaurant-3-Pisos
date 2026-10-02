@@ -65,6 +65,21 @@ class EnCola extends ResultadoEnvio {
   final EnvioPendiente envio;
 }
 
+/// Lista recién descargada de la central junto con la que se tenía antes.
+typedef ListaRecargada = ({List<Pedido> antes, List<Pedido> ahora});
+
+/// Última descarga completa de los pedidos activos. Comparando con lo que había
+/// se sabe qué cambió mientras la tablet no recibía eventos (sin Wi-Fi o con la
+/// app cerrada); con eso se dan los avisos que se perdieron.
+final listaRecargadaProvider = NotifierProvider<UltimaRecarga, ListaRecargada?>(UltimaRecarga.new);
+
+class UltimaRecarga extends Notifier<ListaRecargada?> {
+  @override
+  ListaRecargada? build() => null;
+
+  void publicar(List<Pedido> antes, List<Pedido> ahora) => state = (antes: antes, ahora: ahora);
+}
+
 // autoDispose: al cerrar sesión ninguna pantalla lo escucha y se libera junto con el socket.
 final pedidosActivosProvider =
     AsyncNotifierProvider.autoDispose<PedidosActivos, List<Pedido>>(PedidosActivos.new);
@@ -78,14 +93,18 @@ class PedidosActivos extends AsyncNotifier<List<Pedido>> {
     final repo = ref.watch(pedidosRepositoryProvider);
     final almacen = ref.watch(almacenLocalProvider);
     final sinConexion = ref.read(sinConexionProvider.notifier);
+    final recarga = ref.read(listaRecargadaProvider.notifier);
     final suscripcion = ref.watch(tiempoRealProvider).eventos.listen(_alEvento);
     ref.onDispose(suscripcion.cancel);
     _cargas++;
     try {
       // Lo que se creó mientras se cargaba la lista pudo quedar fuera de la respuesta.
       final pedidos = _conLoQueLlegoMientras(ordenarPedidos(await repo.pedidosActivos()));
+      // Lo que esta tablet vio por última vez (antes de cerrarse o de perder la red).
+      final antes = _copiaGuardada(almacen);
       unawaited(almacen.guardarLista('pedidos', [for (final p in pedidos) p.toJson()]));
       sinConexion.fijar(false);
+      if (antes != null) recarga.publicar(antes, pedidos);
       return pedidos;
     } on ApiException catch (e) {
       _terminarCarga();
@@ -93,6 +112,16 @@ class PedidosActivos extends AsyncNotifier<List<Pedido>> {
       if (!e.sinConexion || copia == null) rethrow;
       sinConexion.fijar(true);
       return ordenarPedidos([for (final p in copia) Pedido.fromJson(p)]);
+    }
+  }
+
+  /// `null` si nunca se guardó una copia o no se puede leer.
+  static List<Pedido>? _copiaGuardada(AlmacenLocal almacen) {
+    try {
+      final copia = almacen.lista('pedidos');
+      return copia == null ? null : [for (final p in copia) Pedido.fromJson(p)];
+    } on Object {
+      return null;
     }
   }
 
@@ -159,8 +188,11 @@ class PedidosActivos extends AsyncNotifier<List<Pedido>> {
     try {
       final pedidos = await ref.read(pedidosRepositoryProvider).pedidosActivos();
       if (!ref.mounted) return;
-      _fijar(_conLoQueLlegoMientras(ordenarPedidos(pedidos)));
+      final antes = state.value;
+      final ahora = _conLoQueLlegoMientras(ordenarPedidos(pedidos));
+      _fijar(ahora);
       ref.read(sinConexionProvider.notifier).fijar(false);
+      if (antes != null) ref.read(listaRecargadaProvider.notifier).publicar(antes, ahora);
     } on Object catch (e, st) {
       _terminarCarga();
       if (!ref.mounted) return;
@@ -419,6 +451,9 @@ class EnvioPendiente {
 
   String get descripcion => '$resumen · ${dinero(total)}';
 
+  /// Lleva tanto tiempo guardado que ya no se manda solo a cocina (ver [esperaMaximaCola]).
+  bool caducado([DateTime? ahora]) => (ahora ?? DateTime.now()).difference(creado) > esperaMaximaCola;
+
   EnvioPendiente conError(String? error) => EnvioPendiente(
         operacion: operacion,
         tipo: tipo,
@@ -442,13 +477,25 @@ class EnvioPendiente {
       };
 }
 
+/// Lo que lleve más de este tiempo en la cola ya no se envía solo. Un corte de
+/// Wi-Fi durante el servicio dura minutos, y aun uno largo cabe en tres horas;
+/// en cambio, entre el cierre y la apertura siempre pasan más. Se mide por
+/// tiempo transcurrido y no por fecha para que un pedido de las 23:50 siga
+/// saliendo pasada la medianoche.
+const esperaMaximaCola = Duration(hours: 3);
+
 final colaEnviosProvider = NotifierProvider.autoDispose<ColaEnvios, List<EnvioPendiente>>(ColaEnvios.new);
 
 /// Envía en orden lo que quedó guardado sin conexión: al recuperar el tiempo
 /// real y cada pocos segundos. Los rechazos del servidor (producto desactivado,
 /// sesión caducada) quedan marcados hasta que alguien los reintente o descarte.
+/// Lo que lleva guardado más de [esperaMaximaCola] (p. ej. la tablet se apagó y
+/// se abre al día siguiente) tampoco sale solo: el mesero decide si lo envía.
 class ColaEnvios extends Notifier<List<EnvioPendiente>> {
   bool _procesando = false;
+
+  /// Envíos viejos que el mesero ya pidió mandar de todos modos.
+  final _confirmados = <String>{};
 
   @override
   List<EnvioPendiente> build() {
@@ -472,10 +519,14 @@ class ColaEnvios extends Notifier<List<EnvioPendiente>> {
   /// Se espera a que quede escrito: si la app se cierra justo después, el envío no se pierde.
   Future<void> encolar(EnvioPendiente envio) => _guardar([...state, envio]);
 
-  void descartar(EnvioPendiente envio) =>
-      unawaited(_guardar([for (final e in state) if (e.operacion != envio.operacion) e]));
+  void descartar(EnvioPendiente envio) {
+    _confirmados.remove(envio.operacion);
+    unawaited(_guardar([for (final e in state) if (e.operacion != envio.operacion) e]));
+  }
 
+  /// Envío pedido a mano: también vale para lo rechazado y para lo que ya no sale solo por viejo.
   Future<void> reintentar(EnvioPendiente envio) async {
+    _confirmados.add(envio.operacion);
     await _guardar([for (final e in state) e.operacion == envio.operacion ? e.conError(null) : e]);
     await procesar();
   }
@@ -487,11 +538,14 @@ class ColaEnvios extends Notifier<List<EnvioPendiente>> {
       final repo = ref.read(pedidosRepositoryProvider);
       for (final envio in [...state]) {
         if (envio.error != null) continue;
+        // Un pedido de hace horas (o de ayer) no llega a cocina sin que alguien lo confirme.
+        if (envio.caducado() && !_confirmados.contains(envio.operacion)) continue;
         try {
           final pedido = envio.tipo == 'crear'
               ? await repo.crear(envio.cuerpo, operacion: envio.operacion)
               : await repo.agregar(envio.pedidoId!, envio.cuerpo, operacion: envio.operacion);
           if (!ref.mounted) return;
+          _confirmados.remove(envio.operacion);
           unawaited(_guardar([for (final e in state) if (e.operacion != envio.operacion) e]));
           ref.read(favoritosProvider.notifier).registrar(envio.cuerpo);
           ref.read(sinConexionProvider.notifier).fijar(false);
@@ -564,6 +618,11 @@ class MarcasCocina extends Notifier<Map<String, Set<int>>> {
     final actual = {...?state[clave]};
     actual.contains(detalleId) ? actual.remove(detalleId) : actual.add(detalleId);
     _guardar({...state, clave: actual});
+  }
+
+  /// Devuelve las casillas de pedidos que regresaron a cocina ("Deshacer").
+  void restaurar(Map<String, Set<int>> marcas) {
+    if (marcas.isNotEmpty) _guardar({...state, ...marcas});
   }
 
   /// Olvida las marcas de pedidos que ya salieron de cocina.
