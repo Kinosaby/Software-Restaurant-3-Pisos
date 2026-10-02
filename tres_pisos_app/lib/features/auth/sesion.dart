@@ -93,18 +93,52 @@ class Conexion {
 }
 
 class Sesion {
-  const Sesion({required this.conexion, required this.token, required this.usuario});
+  const Sesion({required this.conexion, required this.token, required this.usuario, this.desfase = Duration.zero});
 
   final Conexion conexion;
   final String token;
   final Usuario usuario;
 
+  /// Hora de la central menos la hora de esta tablet, medida al recibir el
+  /// token (ver [desfaseConCentral]). Las fechas del token son de la central y
+  /// las tablets no tienen internet: sus relojes pueden ir horas o días
+  /// desfasados. `null` si no se conoce (sesión guardada por una versión
+  /// anterior): se renueva en cuanto se puede para medirlo.
+  final Duration? desfase;
+
   String get servidor => conexion.url;
+
+  /// La hora que tiene la central ahora, calculada con el reloj de esta tablet.
+  DateTime horaCentral({DateTime? ahora}) => (ahora ?? DateTime.now()).toUtc().add(desfase ?? Duration.zero);
+
+  /// Ya pasó la mitad de la vigencia del token según la hora de la central.
+  bool debeRenovar({DateTime? ahora}) => desfase == null
+      ? mitadVigenciaToken(token) != null
+      : debeRenovarToken(token, ahora: horaCentral(ahora: ahora));
+
+  /// Cuánto falta para renovar; `null` si el token no trae fechas.
+  Duration? hastaRenovar({DateTime? ahora}) {
+    final mitad = mitadVigenciaToken(token);
+    if (mitad == null) return null;
+    if (desfase == null) return Duration.zero;
+    final falta = mitad.difference(horaCentral(ahora: ahora));
+    return falta.isNegative ? Duration.zero : falta;
+  }
+
+  /// El token no ha caducado según la hora de la central. Solo sirve para no
+  /// restaurar sesiones vencidas: quien decide si vale es la central.
+  bool vigente({DateTime? ahora}) => tokenVigente(token, ahora: horaCentral(ahora: ahora));
 }
+
+/// Desfase entre el reloj de la central y el de esta tablet: el token recién
+/// recibido trae la hora de la central en que se firmó (`iat`). Llamar justo al
+/// recibirlo. `null` si el token no trae esa fecha.
+Duration? desfaseConCentral(String token, {DateTime? ahora}) =>
+    _fechaToken(token, 'iat')?.difference((ahora ?? DateTime.now()).toUtc());
 
 /// Lee la fecha de expiración (`exp`) de un JWT sin verificar la firma.
 /// Solo sirve para no restaurar sesiones ya vencidas; el servidor sigue siendo
-/// quien valida el token.
+/// quien valida el token. Es una hora de la central, no de esta tablet.
 DateTime? expiracionToken(String token) => _fechaToken(token, 'exp');
 
 DateTime? _fechaToken(String token, String campo) {
@@ -132,11 +166,13 @@ DateTime? mitadVigenciaToken(String token) {
 }
 
 /// Ya pasó la mitad de la vigencia del token: hay que pedir uno nuevo.
+/// [ahora] debe ser la hora de la central ([Sesion.horaCentral]).
 bool debeRenovarToken(String token, {DateTime? ahora}) {
   final mitad = mitadVigenciaToken(token);
   return mitad != null && !(ahora ?? DateTime.now().toUtc()).isBefore(mitad);
 }
 
+/// [ahora] debe ser la hora de la central ([Sesion.horaCentral]).
 bool tokenVigente(String token, {DateTime? ahora}) {
   final exp = expiracionToken(token);
   if (exp == null) return false;

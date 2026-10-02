@@ -27,6 +27,9 @@ class AlmacenSesion {
   static const _kToken = 'token';
   static const _kUsuario = 'usuario';
 
+  /// Hora de la central menos la de esta tablet, en milisegundos ([Sesion.desfase]).
+  static const _kDesfase = 'desfase_central';
+
   /// `null` si nunca se configuró o si era una conexión al antiguo servidor web:
   /// en ambos casos hay que elegir de nuevo (central o conectada a la central).
   Conexion? cargarConexion() {
@@ -44,15 +47,21 @@ class AlmacenSesion {
     final token = prefs.getString(_kToken);
     final usuarioJson = prefs.getString(_kUsuario);
 
-    if (conexion == null || token == null || usuarioJson == null || !tokenVigente(token)) {
+    if (conexion == null || token == null || usuarioJson == null) {
       return DatosArranque(conexion: conexion);
     }
     try {
       final usuario = Usuario.fromJson(jsonDecode(usuarioJson) as Map<String, dynamic>);
-      return DatosArranque(
+      // Una sesión guardada por una versión anterior no trae el desfase: queda
+      // sin conocer (se compara con el reloj de la tablet y se renueva al arrancar).
+      final desfase = prefs.get(_kDesfase);
+      final sesion = Sesion(
         conexion: conexion,
-        sesion: Sesion(conexion: conexion, token: token, usuario: usuario),
+        token: token,
+        usuario: usuario,
+        desfase: desfase is int ? Duration(milliseconds: desfase) : null,
       );
+      return DatosArranque(conexion: conexion, sesion: sesion.vigente() ? sesion : null);
     } on Object {
       return DatosArranque(conexion: conexion);
     }
@@ -66,11 +75,17 @@ class AlmacenSesion {
     await guardarConexion(sesion.conexion);
     await prefs.setString(_kToken, sesion.token);
     await prefs.setString(_kUsuario, jsonEncode(sesion.usuario.toJson()));
+    if (sesion.desfase case final desfase?) {
+      await prefs.setInt(_kDesfase, desfase.inMilliseconds);
+    } else {
+      await prefs.remove(_kDesfase);
+    }
   }
 
   /// Borra el token pero recuerda la conexión para el siguiente inicio de sesión.
   Future<void> borrarSesion() async {
     await prefs.remove(_kToken);
     await prefs.remove(_kUsuario);
+    await prefs.remove(_kDesfase);
   }
 }
