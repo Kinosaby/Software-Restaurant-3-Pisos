@@ -240,8 +240,14 @@ class _HojaCobroState extends ConsumerState<_HojaCobro> {
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.fromLTRB(20, 0, 20, 16 + MediaQuery.viewInsetsOf(context).bottom),
-        child: SingleChildScrollView(
-          child: Column(
+        // El botón de cobrar va fuera de lo que se desplaza: con el teclado abierto
+        // en una pantalla chica quedaba tapado al aparecer el renglón del cambio.
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Flexible(
+              child: SingleChildScrollView(          child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -333,6 +339,10 @@ class _HojaCobroState extends ConsumerState<_HojaCobro> {
                 const SizedBox(height: 8),
                 Text(_error!, style: const TextStyle(color: Colores.peligro)),
               ],
+            ],
+          ),
+              ),
+            ),
               const SizedBox(height: 16),
               FilledButton.icon(
                 onPressed: _cobrando || !calculo.valido ? null : () => _cobrar(calculo),
@@ -344,8 +354,7 @@ class _HojaCobroState extends ConsumerState<_HojaCobro> {
                   FormaPago.mixto => 'Cobrar mixto',
                 }),
               ),
-            ],
-          ),
+          ],
         ),
       ),
     );
